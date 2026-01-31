@@ -1,0 +1,71 @@
+[package]
+name = "voice2type"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# 异步运行时
+tokio = { version = "1.36", features = ["full"] }
+
+# 错误处理
+anyhow = "1.0"
+
+# 序列化
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# HTTP 客户端 (支持 multipart上传)
+reqwest = { version = "0.12", features = ["json", "multipart", "stream", "rustls-tls"] }
+
+# 环境变量管理
+dotenv = "0.15"
+
+# 音频采集 (底层库)
+cpal = "0.15"
+
+# 音频编码 (WAV 格式，用于内存中封装音频流)
+hound = "3.5"
+
+# 全局热键监听
+rdev = "0.5"
+
+# 模拟键盘输入
+enigo = "0.3"
+
+# Windows GUI
+native-windows-gui = "1.0.13"
+native-windows-derive = "1.0.5"
+
+# Windows API
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.54", features = [
+    "Win32_Foundation",
+    "Win32_System_Console",
+    "Win32_UI_WindowsAndMessaging"
+] }
+
+# 路径管理
+directories = "5.0"
+
+# 正则表达式
+regex = "1.10"
+
+# 打开网页
+open = "5.0"
+
+# 线程间通信与并发辅助
+crossbeam = "0.8"
+once_cell = "1.19"
+log = "0.4"
+env_logger = "0.11"
+
+[build-dependencies]
+winres = "0.1"
+
+# 优化发布体积
+[profile.release]
+opt-level = "z"     # 优化代码尺寸
+lto = true          # 启用链接时优化
+codegen-units = 1   # 降低并行度以提高优化质量
+panic = "abort"     # 移除堆栈展开信息
+strip = true        # 自动剥离符号表
