@@ -42,6 +42,31 @@ enum InputMessage {
 static IS_RECORDING: AtomicBool = AtomicBool::new(false);
 
 fn main() -> Result<()> {
+    // 0. 单例检查 (Single Instance Check)
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows::Win32::System::Threading::CreateMutexW;
+        use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
+        use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_OK, MB_ICONEXCLAMATION};
+        use windows::core::PCWSTR;
+
+        // 创建全局互斥体
+        let mutex_name = "Global\\Voice2TypeAppMutex\0".encode_utf16().collect::<Vec<u16>>();
+        // CreateMutexW returns Result<HANDLE, Error> in windows 0.54+
+        let result = CreateMutexW(None, true, PCWSTR(mutex_name.as_ptr()));
+
+        if let Ok(handle) = result {
+             if GetLastError() == ERROR_ALREADY_EXISTS {
+                 let title = "Voice2Type\0".encode_utf16().collect::<Vec<u16>>();
+                 let msg = "程序已在运行中！\nProgram is already running.\0".encode_utf16().collect::<Vec<u16>>();
+                 MessageBoxW(None, PCWSTR(msg.as_ptr()), PCWSTR(title.as_ptr()), MB_OK | MB_ICONEXCLAMATION);
+                 std::process::exit(0);
+             }
+             // 保持互斥体句柄直到进程结束
+             std::mem::forget(handle);
+        }
+    }
+
     // 1. 初始化环境与日志
     dotenv().ok();
     
