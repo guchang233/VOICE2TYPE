@@ -8,9 +8,7 @@ use semver::Version;
 use serde::Deserialize;
 
 #[cfg(target_os = "windows")]
-use windows::Win32::System::Console::{AllocConsole, FreeConsole, GetConsoleWindow};
-#[cfg(target_os = "windows")]
-use windows::Win32::Foundation::HWND;
+use windows::Win32::System::Console::GetConsoleWindow;
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::ShowWindow;
 
@@ -26,7 +24,8 @@ pub struct Voice2TypeApp {
     // Flags: POPUP (无边框/标题), VISIBLE (使其存在), 禁用任务栏 (工具窗口)
     // 注意: 我们故意移除了 VISIBLE 以防止它出现在任务栏中。
     // NWG 仍然会创建窗口句柄，这对于托盘图标来说足够了。
-    #[nwg_control(size: (1, 1), position: (0, 0), flags: "POPUP")]
+    // ex_flags: 0x80 = WS_EX_TOOLWINDOW (防止显示在任务栏)
+    #[nwg_control(size: (1, 1), position: (0, 0), flags: "POPUP", ex_flags: 0x80)]
     #[nwg_events( OnWindowClose: [Voice2TypeApp::quit] )]
     pub window: nwg::Window,
 
@@ -155,6 +154,9 @@ impl Voice2TypeApp {
 
         // 初始隐藏配置窗口
         app.config_window.set_visible(false);
+
+        // 确保主锚点窗口也不可见
+        app.window.set_visible(false);
         
         // 设置输入框文本
         app.api_input.set_text(&config_manager.get_api_key());

@@ -56,10 +56,17 @@ fn main() -> Result<()> {
         use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
         
         let mut hwnd = GetConsoleWindow();
-        // 尝试重试一次，确保获取到句柄
+        
+        // 尝试重试几次，确保获取到句柄
+        // 有时候控制台窗口初始化需要一点时间
         if hwnd.0 == 0 {
-            std::thread::sleep(std::time::Duration::from_millis(50));
-            hwnd = GetConsoleWindow();
+            for _ in 0..10 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                hwnd = GetConsoleWindow();
+                if hwnd.0 != 0 {
+                    break;
+                }
+            }
         }
         
         if hwnd.0 != 0 {
