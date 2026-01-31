@@ -322,10 +322,38 @@ fn post_process(text: &str, config: &ConfigManager) -> String {
 
     // 2. 过滤标点
     if !config.allow_punctuation() {
-        // 用空格替换标点
-        // \p{P} 匹配任何标点符号
-        if let Ok(re) = Regex::new(r"[\p{P}]") {
-            result = re.replace_all(&result, " ").to_string();
+        // 定义需要特殊处理的数字内部标点
+        // 我们只保护 ASCII 数字分隔符：点、冒号、逗号、连字符
+        let is_numeric_separator = |c: char| matches!(c, '.' | ':' | ',' | '-');
+        
+        // 匹配任何标点符号的正则
+        if let Ok(punct_re) = Regex::new(r"[\p{P}]") {
+             let chars: Vec<char> = result.chars().collect();
+             let mut new_result = String::with_capacity(result.len());
+             
+             for (i, &c) in chars.iter().enumerate() {
+                 let s = c.to_string();
+                 if punct_re.is_match(&s) {
+                     // 是标点，检查是否需要保留
+                     let mut preserve = false;
+                     if is_numeric_separator(c) {
+                         let prev_is_digit = i > 0 && chars[i-1].is_ascii_digit();
+                         let next_is_digit = i + 1 < chars.len() && chars[i+1].is_ascii_digit();
+                         if prev_is_digit && next_is_digit {
+                             preserve = true;
+                         }
+                     }
+                     
+                     if preserve {
+                         new_result.push(c);
+                     } else {
+                         new_result.push(' ');
+                     }
+                 } else {
+                     new_result.push(c);
+                 }
+             }
+             result = new_result;
         }
     }
 
