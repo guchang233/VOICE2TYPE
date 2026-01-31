@@ -94,7 +94,7 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
 
     // 打印欢迎信息
     println!("--------------------------------------------------");
-    println!(" 按住 F2 说话，松开 F2 后即可转文字");
+    println!(" 选中目标输入框，按住 F2 说话，松开 F2 后即文字将直接注入对话框");
     println!(" 若想取消，在按住 F2 时按下 ESC 即可");
     println!(" 当前版本: {}", env!("CARGO_PKG_VERSION"));
     println!("--------------------------------------------------");
