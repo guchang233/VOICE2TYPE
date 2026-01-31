@@ -54,6 +54,14 @@ fn main() -> Result<()> {
         let temp_config = ConfigManager::new();
         if temp_config.show_log() {
             show_console_with_redirect();
+        } else {
+            // 确保初始状态下没有残留的控制台窗口
+            use windows::Win32::System::Console::GetConsoleWindow;
+            use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+            let hwnd = GetConsoleWindow();
+            if hwnd.0 != 0 {
+                ShowWindow(hwnd, SW_HIDE);
+            }
         }
     }
     

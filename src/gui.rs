@@ -244,12 +244,14 @@ impl Voice2TypeApp {
                 }
             } else {
                 // 如果关闭日志，隐藏控制台
-                // 注意：这里我们选择 FreeConsole 会彻底关闭，下次需要重新 Alloc
-                // 或者只是 Hide。为了体验一致性，我们选择 FreeConsole。
-                // 但是 FreeConsole 会导致 println! 失效，下次 Alloc 需要重新重定向。
-                // 考虑到我们已经封装了 show_console_with_redirect，使用 FreeConsole 是安全的。
-                use windows::Win32::System::Console::FreeConsole;
-                FreeConsole();
+                // 使用 ShowWindow(SW_HIDE) 而不是 FreeConsole
+                // 这样可以保持 stdout 连接，再次打开时窗口内容还在
+                use windows::Win32::System::Console::GetConsoleWindow;
+                use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+                let hwnd = GetConsoleWindow();
+                if hwnd.0 != 0 {
+                    ShowWindow(hwnd, SW_HIDE);
+                }
             }
         }
     }
