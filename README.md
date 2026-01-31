@@ -1,6 +1,6 @@
-# Voice2Type Assistant
+# Voice2Type
 
-极简高效的 Windows 语音输入助手。常驻后台，按住 `F2` 说话，松开即打字。
+极简高效的 Windows 语音输入助手。常驻后台，**极低占用**，按住 `F2` 说话，松开即打字。
 
 ## ✨ 特性
 
@@ -13,10 +13,10 @@
 
 1.  **下载**：从 [Releases](../../releases) 下载最新 `voice2type.exe`。
 2.  **配置**：
-    *   运行程序，右键托盘图标 -> **配置 (Config)** -> **API Key**。
-    *   填入你的 [SiliconFlow API Key](https://cloud.siliconflow.cn/)。
+    *   运行程序，右键托盘图标 -> **配置** -> **API Key**。
+    *   填入你的 [SiliconFlow API Key](https://cloud.siliconflow.cn/)。那里有免费、功能强大的语音识别api
 3.  **使用**：
-    *   光标置于输入框 -> **按住 F2 说话** -> 松开上屏。
+    *   光标置于输入框 -> **按住 F2** 说话 -> 松开上屏/按下**ESC**取消输入
 
 ## 🛠️ 开发
 

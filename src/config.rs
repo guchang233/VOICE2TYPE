@@ -1,9 +1,15 @@
-use anyhow::Result;
-use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+
+// 配置管理器
+// 处理 API Key 和设置的加载/保存
+#[derive(Clone)]
+pub struct ConfigManager {
+    config: Arc<Mutex<AppConfig>>,
+    config_path: PathBuf,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -11,71 +17,63 @@ pub struct AppConfig {
     pub allow_emoji: bool,
     pub allow_punctuation: bool,
     pub show_log: bool,
+    pub language: String, // "zh" 或 "en"
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
             api_key: String::new(),
-            allow_emoji: false,
-            allow_punctuation: true,
-            show_log: false,
+            allow_emoji: true, // 默认开启
+            allow_punctuation: true, // 默认开启
+            show_log: false, // 默认关闭
+            language: "zh".to_string(), // 默认中文
         }
     }
-}
-
-pub struct ConfigManager {
-    config_path: PathBuf,
-    pub config: Arc<Mutex<AppConfig>>,
 }
 
 impl ConfigManager {
     pub fn new() -> Self {
-        let config_path = Self::get_config_path().unwrap_or_else(|| PathBuf::from("config.json"));
-        let config = Self::load_from_path(&config_path).unwrap_or_default();
-        
-        // Try to load from .env if empty (migration/first run)
-        let mut final_config = config;
-        if final_config.api_key.is_empty() {
+        // 尝试确定合适的配置目录
+        // 1. 本地目录 (便携模式)
+        // 2. Roaming AppData
+        let mut path = PathBuf::from("voice2type_config.json");
+        if !path.exists() {
+            if let Some(proj_dirs) = directories::ProjectDirs::from("com", "guchang233", "voice2type") {
+                let config_dir = proj_dirs.config_dir();
+                if !config_dir.exists() {
+                    let _ = fs::create_dir_all(config_dir);
+                }
+                path = config_dir.join("settings.json");
+            }
+        }
+
+        let mut config = AppConfig::default();
+
+        // 尝试加载现有配置
+        if path.exists() {
+            if let Ok(content) = fs::read_to_string(&path) {
+                if let Ok(loaded) = serde_json::from_str::<AppConfig>(&content) {
+                    config = loaded;
+                }
+            }
+        } else {
+            // 如果为空，尝试从 .env 加载 (迁移/首次运行)
             if let Ok(key) = std::env::var("SILICONFLOW_API_KEY") {
-                final_config.api_key = key;
+                config.api_key = key;
             }
         }
 
         Self {
-            config_path,
-            config: Arc::new(Mutex::new(final_config)),
+            config: Arc::new(Mutex::new(config)),
+            config_path: path,
         }
-    }
-
-    fn get_config_path() -> Option<PathBuf> {
-        ProjectDirs::from("com", "voice2type", "assistant")
-            .map(|proj_dirs| proj_dirs.config_dir().join("settings.json"))
-    }
-
-    fn load_from_path(path: &PathBuf) -> Result<AppConfig> {
-        if !path.exists() {
-            return Ok(AppConfig::default());
-        }
-        let content = fs::read_to_string(path)?;
-        let config = serde_json::from_str(&content)?;
-        Ok(config)
-    }
-
-    pub fn save(&self) -> Result<()> {
-        let config = self.config.lock().unwrap();
-        if let Some(parent) = self.config_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let content = serde_json::to_string_pretty(&*config)?;
-        fs::write(&self.config_path, content)?;
-        Ok(())
     }
 
     pub fn get_api_key(&self) -> String {
         self.config.lock().unwrap().api_key.clone()
     }
-    
+
     pub fn set_api_key(&self, key: String) {
         self.config.lock().unwrap().api_key = key;
     }
@@ -102,5 +100,24 @@ impl ConfigManager {
 
     pub fn set_show_log(&self, show: bool) {
         self.config.lock().unwrap().show_log = show;
+    }
+
+    pub fn language(&self) -> String {
+        self.config.lock().unwrap().language.clone()
+    }
+
+    pub fn set_language(&self, lang: String) {
+        self.config.lock().unwrap().language = lang;
+    }
+
+    pub fn save(&self) -> anyhow::Result<()> {
+        let config = self.config.lock().unwrap();
+        let json = serde_json::to_string_pretty(&*config)?;
+        fs::write(&self.config_path, json)?;
+        Ok(())
+    }
+
+    pub fn config_path(&self) -> PathBuf {
+        self.config_path.clone()
     }
 }

@@ -1,4 +1,4 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // 移除此行，强制使用控制台子系统以便 println! 工作
 
 mod config;
 mod gui;
@@ -27,6 +27,7 @@ enum AppState {
     Idle,
     Recording,
     Processing,
+    Cancelled, // 新增：取消状态
 }
 
 // 定义主线程与监听线程的通信消息
@@ -34,6 +35,7 @@ enum AppState {
 enum InputMessage {
     StartRecording,
     StopRecording,
+    CancelRecording, // 新增：取消录音消息
 }
 
 // 全局录音标志
@@ -43,6 +45,20 @@ fn main() -> Result<()> {
     // 1. 初始化环境与日志
     dotenv().ok();
     env_logger::init();
+
+    // 手动隐藏控制台窗口 (防止启动时闪烁)
+    // 尽管我们使用了 windows_subsystem = "windows"，但在某些环境下(如 cargo run)可能会闪烁。
+    // 在 release 模式下，windows_subsystem 应该已经阻止了控制台创建。
+    // 但为了保险，我们可以再次尝试隐藏。
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows::Win32::System::Console::GetConsoleWindow;
+        use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+        let hwnd = GetConsoleWindow();
+        if hwnd.0 != 0 {
+            ShowWindow(hwnd, SW_HIDE);
+        }
+    }
 
     // 2. 初始化 NWG
     nwg::init().expect("Failed to init Native Windows GUI");
@@ -60,7 +76,7 @@ fn main() -> Result<()> {
             .unwrap();
         
         if let Err(e) = rt.block_on(async_main(cm_clone)) {
-            eprintln!("Runtime Error: {}", e);
+            eprintln!("运行时错误: {}", e);
         }
     });
 
@@ -74,12 +90,19 @@ fn main() -> Result<()> {
 }
 
 async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
-    println!("Voice2Type Logic Started...");
+    println!("Voice2Type已启动...");
+
+    // 打印欢迎信息
+    println!("--------------------------------------------------");
+    println!(" 按住 F2 说话，松开 F2 后即可转文字");
+    println!(" 若想取消，在按住 F2 时按下 ESC 即可");
+    println!(" 当前版本: {}", env!("CARGO_PKG_VERSION"));
+    println!("--------------------------------------------------");
 
     // 音频系统初始化
     let host = cpal::default_host();
-    let device = host.default_input_device().context("No input device available")?;
-    let dev_config = device.default_input_config().context("Failed to get default input config")?;
+    let device = host.default_input_device().context("未找到音频输入设备")?;
+    let dev_config = device.default_input_config().context("无法获取默认输入配置")?;
     let stream_config: cpal::StreamConfig = dev_config.clone().into();
     let sample_rate = stream_config.sample_rate.0;
 
@@ -97,7 +120,7 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
             }
         },
         move |err| {
-            eprintln!("Audio input stream error: {}", err);
+            eprintln!("音频输入流错误: {}", err);
         },
         None,
     )?;
@@ -125,10 +148,16 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
                         let _ = tx_clone.blocking_send(InputMessage::StopRecording);
                     }
                 }
+                EventType::KeyPress(Key::Escape) => {
+                    if is_f2_pressed {
+                        // 如果 F2 正被按住，此时按下了 ESC -> 取消
+                        let _ = tx_clone.blocking_send(InputMessage::CancelRecording);
+                    }
+                }
                 _ => {}
             }
         }) {
-            eprintln!("Global key listener error: {:?}", error);
+            eprintln!("全局按键监听错误: {:?}", error);
         }
     });
 
@@ -138,27 +167,39 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
     while let Some(msg) = rx.recv().await {
         match msg {
             InputMessage::StartRecording => {
-                if current_state == AppState::Idle || current_state == AppState::Processing {
+                if current_state == AppState::Idle || current_state == AppState::Processing || current_state == AppState::Cancelled {
                     current_state = AppState::Recording;
-                    // println!("--> [REC] Started recording..."); // Optional logging
+                    println!("--> [录音] 开始录音... (按 ESC 取消)"); 
                     audio_buffer.lock().unwrap().clear();
                     IS_RECORDING.store(true, Ordering::Relaxed);
                 }
             }
+            InputMessage::CancelRecording => {
+                if current_state == AppState::Recording {
+                    current_state = AppState::Cancelled;
+                    IS_RECORDING.store(false, Ordering::Relaxed);
+                    println!("--> [取消] 录音已取消");
+                    audio_buffer.lock().unwrap().clear();
+                }
+            }
             InputMessage::StopRecording => {
                 if current_state == AppState::Recording {
+                    // 正常结束录音
                     IS_RECORDING.store(false, Ordering::Relaxed);
-                    // println!("--> [PRO] Processing audio...");
+                    println!("--> [处理] 正在转换音频...");
 
                     let buffer_clone = audio_buffer.clone();
                     let config_clone = config.clone();
                     
                     tokio::spawn(async move {
                         if let Err(e) = process_audio_and_type(buffer_clone, sample_rate, config_clone).await {
-                            eprintln!("Transcription failed: {}", e);
+                            eprintln!("转写失败: {}", e);
                         }
                     });
 
+                    current_state = AppState::Idle;
+                } else if current_state == AppState::Cancelled {
+                    // 如果之前被取消了，F2 松开时重置为 Idle
                     current_state = AppState::Idle;
                 }
             }
@@ -178,11 +219,11 @@ async fn process_audio_and_type(buffer: Arc<Mutex<Vec<f32>>>, sample_rate: u32, 
         return Ok(());
     }
 
-    // Check API Key
+    // 检查 API Key
     let api_key = config.get_api_key();
     if api_key.is_empty() {
-        // We could notify GUI to show error, but simpler to just log or ignore
-        eprintln!("API Key is missing! Please configure it in the tray menu.");
+        // 我们可以通知 GUI 显示错误，但简单记录或忽略也行
+        eprintln!("[错误] API Key 未配置！请在托盘菜单中设置。");
         return Ok(());
     }
 
@@ -203,7 +244,7 @@ async fn process_audio_and_type(buffer: Arc<Mutex<Vec<f32>>>, sample_rate: u32, 
 
     if !resp.status().is_success() {
         let error_text = resp.text().await?;
-        eprintln!("API Error: {}", error_text);
+        eprintln!("API 错误: {}", error_text);
         return Ok(());
     }
 
@@ -219,15 +260,15 @@ async fn process_audio_and_type(buffer: Arc<Mutex<Vec<f32>>>, sample_rate: u32, 
         return Ok(());
     }
 
-    // Post-processing
+    // 后处理
     let final_text = post_process(raw_text, &config);
     if final_text.is_empty() {
         return Ok(());
     }
 
-    println!("[Output] {}", final_text);
+    println!("[输出] {}", final_text);
 
-    // Type text
+    // 打字
     tokio::task::block_in_place(|| {
         let mut enigo = Enigo::new(&Settings::default()).unwrap();
         let _ = enigo.text(&final_text);
@@ -239,24 +280,24 @@ async fn process_audio_and_type(buffer: Arc<Mutex<Vec<f32>>>, sample_rate: u32, 
 fn post_process(text: &str, config: &ConfigManager) -> String {
     let mut result = text.to_string();
 
-    // 1. Filter Emoji
+    // 1. 过滤 Emoji
     if !config.allow_emoji() {
-        // Regex for emojis and pictographs
+        // 匹配 Emoji 和象形文字的正则
         if let Ok(re) = Regex::new(r"[\p{Emoji_Presentation}\p{Extended_Pictographic}]") {
             result = re.replace_all(&result, "").to_string();
         }
     }
 
-    // 2. Filter Punctuation
+    // 2. 过滤标点
     if !config.allow_punctuation() {
-        // Replace punctuation with space
-        // \p{P} matches any punctuation character
+        // 用空格替换标点
+        // \p{P} 匹配任何标点符号
         if let Ok(re) = Regex::new(r"[\p{P}]") {
             result = re.replace_all(&result, " ").to_string();
         }
     }
 
-    // 3. Merge spaces (if punctuation was replaced or existing spaces)
+    // 3. 合并空格 (如果标点被替换或已有多个空格)
     if let Ok(re) = Regex::new(r"\s+") {
         result = re.replace_all(&result, " ").to_string();
     }
