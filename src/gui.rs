@@ -8,9 +8,9 @@ use semver::Version;
 use serde::Deserialize;
 
 #[cfg(target_os = "windows")]
-use windows::Win32::System::Console::GetConsoleWindow;
+// use windows::Win32::System::Console::GetConsoleWindow;
 #[cfg(target_os = "windows")]
-use windows::Win32::UI::WindowsAndMessaging::ShowWindow;
+// use windows::Win32::UI::WindowsAndMessaging::ShowWindow;
 
 use self::voice2_type_app_ui::Voice2TypeAppUi;
 
@@ -228,18 +228,60 @@ impl Voice2TypeApp {
             mgr.set_show_log(new_state);
             let _ = mgr.save();
         }
-        Self::set_console_visibility(new_state);
+        
+        #[cfg(target_os = "windows")]
+        unsafe {
+            if new_state {
+                // 如果开启日志，分配控制台并重定向
+                use windows::Win32::System::Console::GetConsoleWindow;
+                if GetConsoleWindow().0 == 0 {
+                    show_console_with_redirect();
+                } else {
+                    windows::Win32::UI::WindowsAndMessaging::ShowWindow(
+                        GetConsoleWindow(), 
+                        windows::Win32::UI::WindowsAndMessaging::SW_SHOW
+                    );
+                }
+            } else {
+                // 如果关闭日志，隐藏控制台
+                // 注意：这里我们选择 FreeConsole 会彻底关闭，下次需要重新 Alloc
+                // 或者只是 Hide。为了体验一致性，我们选择 FreeConsole。
+                // 但是 FreeConsole 会导致 println! 失效，下次 Alloc 需要重新重定向。
+                // 考虑到我们已经封装了 show_console_with_redirect，使用 FreeConsole 是安全的。
+                use windows::Win32::System::Console::FreeConsole;
+                FreeConsole();
+            }
+        }
     }
 
     fn set_console_visibility(visible: bool) {
+        // 这个方法现在只在 init 中调用，用于同步状态
+        // 但我们在 init 中已经处理了 show_log 的逻辑（通过 main.rs 的预检查或 init 中的设置）
+        // 实际上 init 中调用这个方法可能会导致重复分配。
+        // 我们修改 init 逻辑，移除 set_console_visibility 的调用，
+        // 或者在这里实现正确的逻辑。
+        
+        // 既然 main.rs 已经根据配置决定是否分配控制台，
+        // 这里如果是 false，且控制台存在，应该 FreeConsole。
+        // 如果是 true，且控制台不存在，应该 Alloc。
+        
         #[cfg(target_os = "windows")]
         unsafe {
+            use windows::Win32::System::Console::GetConsoleWindow;
             let hwnd = GetConsoleWindow();
-            if hwnd.0 != 0 {
-                if visible {
-                    ShowWindow(hwnd, windows::Win32::UI::WindowsAndMessaging::SW_SHOW);
+            if visible {
+                if hwnd.0 == 0 {
+                    show_console_with_redirect();
                 } else {
-                    ShowWindow(hwnd, windows::Win32::UI::WindowsAndMessaging::SW_HIDE);
+                    windows::Win32::UI::WindowsAndMessaging::ShowWindow(
+                        hwnd, 
+                        windows::Win32::UI::WindowsAndMessaging::SW_SHOW
+                    );
+                }
+            } else {
+                if hwnd.0 != 0 {
+                     use windows::Win32::System::Console::FreeConsole;
+                     FreeConsole();
                 }
             }
         }
@@ -332,4 +374,45 @@ impl Voice2TypeApp {
         nwg::stop_thread_dispatch();
         std::process::exit(0);
     }
+}
+
+#[cfg(target_os = "windows")]
+pub unsafe fn show_console_with_redirect() {
+    use windows::Win32::System::Console::{AllocConsole, GetConsoleWindow};
+    use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOW};
+    use std::ffi::CString;
+
+    // 1. Check if console already exists
+    let hwnd = GetConsoleWindow();
+    if hwnd.0 != 0 {
+        ShowWindow(hwnd, SW_SHOW);
+        return;
+    }
+
+    // 2. Allocate new console
+    let _ = AllocConsole();
+
+    // 3. Redirect stdout/stderr (CRITICAL for println!)
+    // "CONOUT$" is the special filename for the console output buffer
+    let conout = CString::new("CONOUT$").unwrap();
+    let mode = CString::new("w").unwrap();
+
+    #[cfg(target_os = "windows")]
+    unsafe {
+        // Only valid on MSVC toolchain, GNU might use different symbols
+        extern "C" {
+            #[link_name = "__acrt_iob_func"]
+            fn __acrt_iob_func(idx: u32) -> *mut libc::FILE;
+        }
+
+        // stdout = 1, stderr = 2
+        let stdout_ptr = __acrt_iob_func(1);
+        let stderr_ptr = __acrt_iob_func(2);
+
+        libc::freopen(conout.as_ptr(), mode.as_ptr(), stdout_ptr);
+        libc::freopen(conout.as_ptr(), mode.as_ptr(), stderr_ptr);
+    }
+    
+    // Optional: Update Rust's own buffering if needed, but usually freopen is enough
+    println!("Console allocated and stdout redirected successfully!");
 }

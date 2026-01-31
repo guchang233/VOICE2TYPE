@@ -1,4 +1,4 @@
-// #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // 移除此行，强制使用控制台子系统以便 println! 工作
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod config;
 mod gui;
@@ -44,35 +44,20 @@ static IS_RECORDING: AtomicBool = AtomicBool::new(false);
 fn main() -> Result<()> {
     // 1. 初始化环境与日志
     dotenv().ok();
-    env_logger::init();
-
-    // 手动隐藏控制台窗口 (防止启动时闪烁)
-    // 尽管我们使用了 windows_subsystem = "windows"，但在某些环境下(如 cargo run)可能会闪烁。
-    // 在 release 模式下，windows_subsystem 应该已经阻止了控制台创建。
-    // 但为了保险，我们可以再次尝试隐藏。
+    
+    // 如果是 Windows GUI 模式，标准输出可能不可用。
+    // 如果配置中开启了日志，我们需要手动分配控制台并重定向输出。
     #[cfg(target_os = "windows")]
     unsafe {
-        use windows::Win32::System::Console::GetConsoleWindow;
-        use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
-        
-        let mut hwnd = GetConsoleWindow();
-        
-        // 尝试重试几次，确保获取到句柄
-        // 有时候控制台窗口初始化需要一点时间
-        if hwnd.0 == 0 {
-            for _ in 0..10 {
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                hwnd = GetConsoleWindow();
-                if hwnd.0 != 0 {
-                    break;
-                }
-            }
-        }
-        
-        if hwnd.0 != 0 {
-            ShowWindow(hwnd, SW_HIDE);
+        use crate::gui::show_console_with_redirect;
+        // 临时加载配置以检查是否需要显示日志
+        let temp_config = ConfigManager::new();
+        if temp_config.show_log() {
+            show_console_with_redirect();
         }
     }
+    
+    env_logger::init();
 
     // 2. 初始化 NWG
     nwg::init().expect("Failed to init Native Windows GUI");
