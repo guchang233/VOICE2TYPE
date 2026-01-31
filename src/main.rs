@@ -54,7 +54,14 @@ fn main() -> Result<()> {
     unsafe {
         use windows::Win32::System::Console::GetConsoleWindow;
         use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
-        let hwnd = GetConsoleWindow();
+        
+        let mut hwnd = GetConsoleWindow();
+        // 尝试重试一次，确保获取到句柄
+        if hwnd.0 == 0 {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            hwnd = GetConsoleWindow();
+        }
+        
         if hwnd.0 != 0 {
             ShowWindow(hwnd, SW_HIDE);
         }
