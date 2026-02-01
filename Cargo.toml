@@ -1,6 +1,6 @@
 [package]
 name = "voice2type"
-version = "0.0.23"
+version = "0.0.24"
 edition = "2021"
 authors = ["guchang233"]
 
@@ -33,9 +33,6 @@ rdev = "0.5"
 # 模拟键盘输入
 enigo = "0.3"
 
-# 剪贴板操作 (跨平台)
-arboard = "3.4"
-
 # Windows GUI
 native-windows-gui = "1.0.13"
 native-windows-derive = "1.0.5"
@@ -47,7 +44,8 @@ windows = { version = "0.54", features = [
     "Win32_Foundation",
     "Win32_System_Console",
     "Win32_UI_WindowsAndMessaging",
-    "Win32_System_Threading"
+    "Win32_System_Threading",
+    "Win32_UI_Input_KeyboardAndMouse"
 ] }
 
 # 路径管理

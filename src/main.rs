@@ -11,7 +11,7 @@ use std::thread;
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use dotenv::dotenv;
-use enigo::{Enigo, Keyboard, Settings};
+use enigo::{Enigo, Keyboard, Settings, Direction, Key as EnigoKey};
 use rdev::{listen, EventType, Key};
 use tokio::sync::mpsc;
 use regex::Regex;
