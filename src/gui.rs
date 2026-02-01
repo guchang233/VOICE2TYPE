@@ -283,7 +283,7 @@ impl Voice2TypeApp {
             } else {
                 if hwnd.0 != 0 {
                      use windows::Win32::System::Console::FreeConsole;
-                     FreeConsole();
+                     let _ = FreeConsole();
                 }
             }
         }

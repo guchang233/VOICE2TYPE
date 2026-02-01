@@ -63,7 +63,7 @@ fn main() -> Result<()> {
                  std::process::exit(0);
              }
              // 保持互斥体句柄直到进程结束
-             std::mem::forget(handle);
+             let _ = handle;
         }
     }
 
@@ -128,7 +128,9 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
     println!("--------------------------------------------------");
     println!(" 选中目标输入框，按住 F2 说话，松开 F2 后即文字将直接注入对话框");
     println!(" 若想取消，在按住 F2 时按下 ESC 即可");
+    println!(" 若游戏内无法正常输出，尝试以管理员模式启动这个程序");
     println!(" 当前版本: {}", env!("CARGO_PKG_VERSION"));
+    println!(" 若有任何问题，请联系QQ 57262494");
     println!("--------------------------------------------------");
 
     // 音频系统初始化

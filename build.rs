@@ -4,9 +4,9 @@ fn main() {
     if cfg!(target_os = "windows") {
         let mut res = winres::WindowsResource::new();
         res.set_icon("icon.ico");
-        // 设置 manifest 以启用 Common Controls v6 (Visual Styles)
-        // 这通常能解决 Native Windows GUI 的很多兼容性问题和 Entry Point 错误
-        res.set_manifest(r#"
+        let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
+        let level = if profile == "release" { "requireAdministrator" } else { "asInvoker" };
+        let manifest = format!(r#"
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
 <dependency>
     <dependentAssembly>
@@ -20,8 +20,16 @@ fn main() {
         />
     </dependentAssembly>
 </dependency>
+<trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+        <requestedPrivileges>
+            <requestedExecutionLevel level="{level}" uiAccess="false" />
+        </requestedPrivileges>
+    </security>
+</trustInfo>
 </assembly>
 "#);
+        res.set_manifest(&manifest);
         if let Err(e) = res.compile() {
             eprintln!("Error compiling windows resources: {}", e);
         }
