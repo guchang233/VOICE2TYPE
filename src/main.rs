@@ -300,10 +300,35 @@ async fn process_audio_and_type(buffer: Arc<Mutex<Vec<f32>>>, sample_rate: u32, 
 
     println!("[输出] {}", final_text);
 
-    // 打字
+    // 打字 (改为剪贴板粘贴)
     tokio::task::block_in_place(|| {
         let mut enigo = Enigo::new(&Settings::default()).unwrap();
-        let _ = enigo.text(&final_text);
+        
+        // 尝试使用 arboard 操作剪贴板
+        let mut pasted = false;
+        if let Ok(mut clipboard) = arboard::Clipboard::new() {
+            // 尝试备份旧剪贴板内容 (可选，为了用户体验)
+            // let old_text = clipboard.get_text().ok(); 
+            
+            if let Ok(_) = clipboard.set_text(&final_text) {
+                // 模拟 Ctrl + V
+                // 某些应用可能需要短暂延迟才能识别剪贴板变化
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                
+                let _ = enigo.key(EnigoKey::Control, Direction::Press);
+                let _ = enigo.key(EnigoKey::V, Direction::Click);
+                let _ = enigo.key(EnigoKey::Control, Direction::Release);
+                pasted = true;
+                
+                // 注意：不能立即恢复剪贴板，否则粘贴操作可能读取到旧内容
+                // 鉴于这是一个辅助输入工具，覆盖剪贴板是常见行为
+            }
+        }
+        
+        if !pasted {
+            // 如果剪贴板失败，回退到逐字输入
+            let _ = enigo.text(&final_text);
+        }
     });
 
     Ok(())

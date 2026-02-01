@@ -1,6 +1,6 @@
 [package]
 name = "voice2type"
-version = "0.0.22"
+version = "0.0.23"
 edition = "2021"
 authors = ["guchang233"]
 
@@ -32,6 +32,9 @@ rdev = "0.5"
 
 # 模拟键盘输入
 enigo = "0.3"
+
+# 剪贴板操作 (跨平台)
+arboard = "3.4"
 
 # Windows GUI
 native-windows-gui = "1.0.13"
