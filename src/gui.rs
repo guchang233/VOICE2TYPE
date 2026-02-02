@@ -34,7 +34,7 @@ pub struct Voice2TypeApp {
     #[nwg_events(MousePressLeftUp: [Voice2TypeApp::show_menu], OnContextMenu: [Voice2TypeApp::show_menu])]
     pub tray: nwg::TrayNotification,
 
-    #[nwg_resource(source_file: Some("icon.ico"))]
+    #[nwg_resource(source_bin: Some(include_bytes!("../icon.ico")))]
     pub icon: nwg::Icon,
 
     // 托盘菜单
@@ -67,11 +67,11 @@ pub struct Voice2TypeApp {
     #[nwg_control(parent: tray_menu, text: "配置")]
     pub config_menu: nwg::Menu,
 
-    #[nwg_control(parent: config_menu, text: "API Key...")]
+    #[nwg_control(parent: config_menu, text: "模型配置")]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_config_window])]
     pub config_api_item: nwg::MenuItem,
 
-    #[nwg_control(parent: config_menu, text: "编辑配置")]
+    #[nwg_control(parent: config_menu, text: "打开配置目录")]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::open_config_dir])]
     pub config_file_item: nwg::MenuItem,
 
@@ -99,7 +99,7 @@ pub struct Voice2TypeApp {
     pub quit_item: nwg::MenuItem,
 
     // --- 配置窗口 ---
-    #[nwg_control(size: (400, 150), position: (300, 300), title: "Voice2Type API 配置", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_control(size: (480, 240), position: (300, 300), title: "模型配置", flags: "WINDOW", icon: Some(&data.icon))]
     #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_config_window])]
     pub config_window: nwg::Window, // 初始时我们希望它隐藏，在 init 中处理
 
@@ -114,9 +114,31 @@ pub struct Voice2TypeApp {
     #[nwg_layout_item(layout: config_layout, row: 0, col: 1, col_span: 2)]
     pub api_input: nwg::TextInput,
 
-    #[nwg_control(parent: config_window, text: "保存", position: (290, 70), size: (90, 30))]
+    #[nwg_control(parent: config_window, text: "API URL:")]
+    #[nwg_layout_item(layout: config_layout, row: 1, col: 0)]
+    pub url_label: nwg::Label,
+
+    #[nwg_control(parent: config_window, text: "")] // 在 init 中设置
+    #[nwg_layout_item(layout: config_layout, row: 1, col: 1, col_span: 2)]
+    pub url_input: nwg::TextInput,
+
+    #[nwg_control(parent: config_window, text: "模型:")]
+    #[nwg_layout_item(layout: config_layout, row: 2, col: 0)]
+    pub model_label: nwg::Label,
+
+    #[nwg_control(parent: config_window, text: "")] // 在 init 中设置
+    #[nwg_layout_item(layout: config_layout, row: 2, col: 1, col_span: 2)]
+    pub model_input: nwg::TextInput,
+
+    #[nwg_control(parent: config_window, text: "保存")]
+    #[nwg_layout_item(layout: config_layout, row: 3, col: 2)]
     #[nwg_events(OnButtonClick: [Voice2TypeApp::save_config])]
     pub save_btn: nwg::Button,
+    
+    #[nwg_control(parent: config_window, text: "重置")]
+    #[nwg_layout_item(layout: config_layout, row: 3, col: 1)]
+    #[nwg_events(OnButtonClick: [Voice2TypeApp::reset_ai_config])]
+    pub reset_btn: nwg::Button,
     
     // 状态
     pub config_manager: RefCell<Option<Arc<ConfigManager>>>,
@@ -160,12 +182,22 @@ impl Voice2TypeApp {
         
         // 设置输入框文本
         app.api_input.set_text(&config_manager.get_api_key());
+        app.url_input.set_text(&config_manager.get_api_url());
+        app.model_input.set_text(&config_manager.get_model_name());
 
         // 检查 API Key 是否为空 (首次运行)
         if config_manager.get_api_key().is_empty() {
-            let msg = "哎呀，还没检测到 API Key 呢！\n\n为了能听懂您说话，咱得去整一个 SiliconFlow 的 API Key。\n\n点击“确定”后，我会帮您打开配置窗口，顺便再帮您打开注册页面。\n去注册个账号，白嫖一个免费的 Key 填进来呗？";
-            nwg::simple_message("温馨提示", msg);
-            let _ = open::that("https://cloud.siliconflow.cn/account/ak");
+            #[cfg(target_os = "windows")]
+            unsafe {
+                use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_YESNO, MB_ICONINFORMATION, IDYES};
+                use windows::core::PCWSTR;
+                let title = "温馨提示\0".encode_utf16().collect::<Vec<u16>>();
+                let msg = "没检测到 API Key。\n是否前往注册页面获取？\0".encode_utf16().collect::<Vec<u16>>();
+                let ret = MessageBoxW(None, PCWSTR(msg.as_ptr()), PCWSTR(title.as_ptr()), MB_YESNO | MB_ICONINFORMATION);
+                if ret == IDYES {
+                    let _ = open::that("https://cloud.siliconflow.cn/account/ak");
+                }
+            }
             app.config_window.set_visible(true);
         }
         
@@ -315,12 +347,38 @@ impl Voice2TypeApp {
 
     fn save_config(&self) {
         let key = self.api_input.text();
+        let url = self.url_input.text();
+        let model = self.model_input.text();
         if let Some(mgr) = &*self.config_manager.borrow() {
             mgr.set_api_key(key);
+            mgr.set_api_url(url);
+            mgr.set_model_name(model);
             let _ = mgr.save();
         }
-        nwg::simple_message("已保存", "API Key 已成功保存！");
+        nwg::simple_message("已保存", "配置已成功保存！");
         self.config_window.set_visible(false);
+    }
+
+    fn reset_ai_config(&self) {
+        #[cfg(target_os = "windows")]
+        unsafe {
+            use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_YESNO, MB_ICONWARNING, IDYES};
+            use windows::core::PCWSTR;
+            let title = "确认重置\0".encode_utf16().collect::<Vec<u16>>();
+            let msg = "将重置 URL 与 模型名称 为默认值\nApiKey将被清空\n确定继续？\0".encode_utf16().collect::<Vec<u16>>();
+            let ret = MessageBoxW(None, PCWSTR(msg.as_ptr()), PCWSTR(title.as_ptr()), MB_YESNO | MB_ICONWARNING);
+            if ret != IDYES {
+                return;
+            }
+        }
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            mgr.reset_ai_config();
+            self.api_input.set_text(&mgr.get_api_key());
+            self.url_input.set_text(&mgr.get_api_url());
+            self.model_input.set_text(&mgr.get_model_name());
+            let _ = mgr.save();
+        }
+        nwg::simple_message("已重置", "已重置 API Key、API URL 与模型为默认值");
     }
 
     fn check_update(&self) {

@@ -12,8 +12,11 @@ pub struct ConfigManager {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AppConfig {
     pub api_key: String,
+    pub api_url: String,
+    pub model_name: String,
     pub allow_emoji: bool,
     pub allow_punctuation: bool,
     pub show_log: bool,
@@ -24,6 +27,8 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             api_key: String::new(),
+            api_url: "https://api.siliconflow.cn/v1/audio/transcriptions".to_string(),
+            model_name: "FunAudioLLM/SenseVoiceSmall".to_string(),
             allow_emoji: true, // 默认开启
             allow_punctuation: true, // 默认开启
             show_log: false, // 默认关闭
@@ -78,6 +83,22 @@ impl ConfigManager {
         self.config.lock().unwrap().api_key = key;
     }
 
+    pub fn get_api_url(&self) -> String {
+        self.config.lock().unwrap().api_url.clone()
+    }
+
+    pub fn set_api_url(&self, url: String) {
+        self.config.lock().unwrap().api_url = url;
+    }
+
+    pub fn get_model_name(&self) -> String {
+        self.config.lock().unwrap().model_name.clone()
+    }
+
+    pub fn set_model_name(&self, model: String) {
+        self.config.lock().unwrap().model_name = model;
+    }
+
     pub fn allow_emoji(&self) -> bool {
         self.config.lock().unwrap().allow_emoji
     }
@@ -108,6 +129,13 @@ impl ConfigManager {
 
     pub fn set_language(&self, lang: String) {
         self.config.lock().unwrap().language = lang;
+    }
+
+    pub fn reset_ai_config(&self) {
+        let mut cfg = self.config.lock().unwrap();
+        cfg.api_key = AppConfig::default().api_key;
+        cfg.api_url = AppConfig::default().api_url;
+        cfg.model_name = AppConfig::default().model_name;
     }
 
     pub fn save(&self) -> anyhow::Result<()> {

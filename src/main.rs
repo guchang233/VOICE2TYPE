@@ -265,12 +265,12 @@ async fn process_audio_and_type(buffer: Arc<Mutex<Vec<f32>>>, sample_rate: u32, 
 
     let client = reqwest::Client::new();
     let form = reqwest::multipart::Form::new()
-        .text("model", "FunAudioLLM/SenseVoiceSmall")
+        .text("model", config.get_model_name())
         .part("file", reqwest::multipart::Part::bytes(wav_data)
             .file_name("recording.wav")
             .mime_str("audio/wav")?);
 
-    let resp = client.post("https://api.siliconflow.cn/v1/audio/transcriptions")
+    let resp = client.post(&config.get_api_url())
         .header("Authorization", format!("Bearer {}", api_key))
         .multipart(form)
         .send()
