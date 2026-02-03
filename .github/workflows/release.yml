@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - "v*" # 触发条件：推送 v 开头的 tag，例如 v0.0.1
+  workflow_dispatch:
+  release:
+    types: [published]
 
 env:
   CARGO_TERM_COLOR: always
