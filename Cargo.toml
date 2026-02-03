@@ -1,6 +1,6 @@
 [package]
 name = "voice2type"
-version = "0.0.25"
+version = "0.0.26"
 edition = "2021"
 authors = ["guchang233"]
 
@@ -46,6 +46,11 @@ libc = "0.2.180"
 windows = { version = "0.54", features = [
     "Win32_Foundation",
     "Win32_System_Console",
+    "Win32_System_Pipes",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
     "Win32_UI_WindowsAndMessaging",
     "Win32_System_Threading",
     "Win32_UI_Input_KeyboardAndMouse"

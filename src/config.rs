@@ -21,6 +21,7 @@ pub struct AppConfig {
     pub allow_punctuation: bool,
     pub show_log: bool,
     pub language: String, // "zh" 或 "en"
+    pub output_mode: String,
 }
 
 impl Default for AppConfig {
@@ -33,6 +34,7 @@ impl Default for AppConfig {
             allow_punctuation: true, // 默认开启
             show_log: false, // 默认关闭
             language: "zh".to_string(), // 默认中文
+            output_mode: "clipboard".to_string(),
         }
     }
 }
@@ -129,6 +131,14 @@ impl ConfigManager {
 
     pub fn set_language(&self, lang: String) {
         self.config.lock().unwrap().language = lang;
+    }
+
+    pub fn output_mode(&self) -> String {
+        self.config.lock().unwrap().output_mode.clone()
+    }
+
+    pub fn set_output_mode(&self, mode: String) {
+        self.config.lock().unwrap().output_mode = mode;
     }
 
     pub fn reset_ai_config(&self) {

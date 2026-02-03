@@ -11,7 +11,8 @@ use std::thread;
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use dotenv::dotenv;
-use enigo::{Enigo, Keyboard, Settings};
+#[cfg(not(target_os = "windows"))]
+use enigo::{Enigo, Settings};
 use rdev::{listen, EventType, Key};
 use tokio::sync::mpsc;
 use regex::Regex;
@@ -20,6 +21,12 @@ use config::ConfigManager;
 use gui::Voice2TypeApp;
 use native_windows_gui as nwg;
 // use native_windows_gui::NativeUi; 
+
+#[cfg(target_os = "windows")]
+use once_cell::sync::{OnceCell, Lazy};
+
+#[cfg(target_os = "windows")]
+use std::sync::Mutex as StdMutex;
 
 // 定义应用状态
 #[derive(Debug, Clone, PartialEq)]
@@ -41,7 +48,35 @@ enum InputMessage {
 // 全局录音标志
 static IS_RECORDING: AtomicBool = AtomicBool::new(false);
 
+#[cfg(target_os = "windows")]
+static CONFIG_GLOBAL: OnceCell<Arc<ConfigManager>> = OnceCell::new();
+
+#[cfg(target_os = "windows")]
+static LOG_MENU_NEEDS_UNCHECK: AtomicBool = AtomicBool::new(false);
+
+#[cfg(target_os = "windows")]
+pub fn request_uncheck_log_menu() {
+    LOG_MENU_NEEDS_UNCHECK.store(true, Ordering::SeqCst);
+}
+
+#[cfg(target_os = "windows")]
+pub fn should_uncheck_log_menu_and_reset() -> bool {
+    if LOG_MENU_NEEDS_UNCHECK.load(Ordering::SeqCst) {
+        LOG_MENU_NEEDS_UNCHECK.store(false, Ordering::SeqCst);
+        return true;
+    }
+    false
+}
+
 fn main() -> Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        let args: Vec<String> = std::env::args().collect();
+        if args.iter().any(|a| a == "--log-viewer") {
+            viewer_main();
+            return Ok(());
+        }
+    }
     // 0. 单例检查 (Single Instance Check)
     #[cfg(target_os = "windows")]
     unsafe {
@@ -70,19 +105,15 @@ fn main() -> Result<()> {
     // 1. 初始化环境与日志
     dotenv().ok();
     
-    // 如果是 Windows GUI 模式，标准输出可能不可用。
-    // 如果配置中开启了日志，我们需要手动分配控制台并重定向输出。
     #[cfg(target_os = "windows")]
     unsafe {
-        use crate::gui::show_console_with_redirect;
-        // 临时加载配置以检查是否需要显示日志
+        use windows::Win32::System::Console::GetConsoleWindow;
+        use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
         let temp_config = ConfigManager::new();
         if temp_config.show_log() {
-            show_console_with_redirect();
+            init_log_pipe();
+            start_log_viewer();
         } else {
-            // 确保初始状态下没有残留的控制台窗口
-            use windows::Win32::System::Console::GetConsoleWindow;
-            use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
             let hwnd = GetConsoleWindow();
             if hwnd.0 != 0 {
                 ShowWindow(hwnd, SW_HIDE);
@@ -98,6 +129,8 @@ fn main() -> Result<()> {
 
     // 3. 初始化配置
     let config_manager = Arc::new(ConfigManager::new());
+    #[cfg(target_os = "windows")]
+    let _ = CONFIG_GLOBAL.set(config_manager.clone());
 
     // 4. 启动逻辑线程 (Tokio Runtime)
     let cm_clone = config_manager.clone();
@@ -122,16 +155,16 @@ fn main() -> Result<()> {
 }
 
 async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
-    println!("Voice2Type已启动...");
+    write_log_line("Voice2Type已启动...");
 
     // 打印欢迎信息
-    println!("--------------------------------------------------");
-    println!(" 选中目标输入框，按住 F2 说话，松开 F2 后即文字将直接注入对话框");
-    println!(" 若想取消，在按住 F2 时按下 ESC 即可");
-    println!(" 若游戏内无法正常输出，尝试以管理员模式启动这个程序");
-    println!(" 当前版本: {}", env!("CARGO_PKG_VERSION"));
-    println!(" 若有任何问题，请联系QQ 57262494");
-    println!("--------------------------------------------------");
+    write_log_line("--------------------------------------------------");
+    write_log_line(" 选中目标输入框，按住 F2 说话，松开 F2 后即文字将直接注入对话框");
+    write_log_line(" 若想取消，在按住 F2 时按下 ESC 即可");
+    write_log_line(" 若游戏内无法正常输出，尝试以管理员模式启动这个程序");
+    write_log_line(&format!(" 当前版本: {}", env!("CARGO_PKG_VERSION")));
+    write_log_line(" 若有任何问题，请联系QQ 57262494");
+    write_log_line("--------------------------------------------------");
 
     // 音频系统初始化
     let host = cpal::default_host();
@@ -154,7 +187,7 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
             }
         },
         move |err| {
-            eprintln!("音频输入流错误: {}", err);
+            write_log_line(&format!("音频输入流错误: {}", err));
         },
         None,
     )?;
@@ -191,7 +224,7 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
                 _ => {}
             }
         }) {
-            eprintln!("全局按键监听错误: {:?}", error);
+            write_log_line(&format!("全局按键监听错误: {:?}", error));
         }
     });
 
@@ -257,7 +290,7 @@ async fn process_audio_and_type(buffer: Arc<Mutex<Vec<f32>>>, sample_rate: u32, 
     let api_key = config.get_api_key();
     if api_key.is_empty() {
         // 我们可以通知 GUI 显示错误，但简单记录或忽略也行
-        eprintln!("[错误] API Key 未配置！请在托盘菜单中设置。");
+        write_log_line("[错误] API Key 未配置！请在托盘菜单中设置。");
         return Ok(());
     }
 
@@ -278,7 +311,7 @@ async fn process_audio_and_type(buffer: Arc<Mutex<Vec<f32>>>, sample_rate: u32, 
 
     if !resp.status().is_success() {
         let error_text = resp.text().await?;
-        eprintln!("API 错误: {}", error_text);
+        write_log_line(&format!("API 错误: {}", error_text));
         return Ok(());
     }
 
@@ -300,24 +333,178 @@ async fn process_audio_and_type(buffer: Arc<Mutex<Vec<f32>>>, sample_rate: u32, 
         return Ok(());
     }
 
-    println!("[输出] {}", final_text);
+    write_log_line(&format!("[输出] {}", final_text));
 
-    // 打字 (使用 Win32 API 发送 Unicode 字符，解决中文丢失问题)
-    #[cfg(target_os = "windows")]
-    unsafe {
-        send_unicode_text(&final_text);
-    }
-    
-    #[cfg(not(target_os = "windows"))]
-    {
-        // 非 Windows 平台回退到 Enigo
-        let mut enigo = Enigo::new(&Settings::default()).unwrap();
-        let _ = enigo.text(&final_text);
+    let mode = config.output_mode();
+    if mode == "clipboard" {
+        #[cfg(target_os = "windows")]
+        unsafe {
+            set_clipboard_text(&final_text);
+            paste_clipboard();
+        }
+    } else {
+        #[cfg(target_os = "windows")]
+        unsafe {
+            send_unicode_text(&final_text);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let mut enigo = Enigo::new(&Settings::default()).unwrap();
+            let _ = enigo.text(&final_text);
+        }
     }
 
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
+static LOG_PIPE_HANDLE: Lazy<StdMutex<Option<windows::Win32::Foundation::HANDLE>>> = Lazy::new(|| StdMutex::new(None));
+
+#[cfg(target_os = "windows")]
+static LOG_VIEWER_CHILD: Lazy<StdMutex<Option<std::process::Child>>> = Lazy::new(|| StdMutex::new(None));
+
+#[cfg(target_os = "windows")]
+fn init_log_pipe() {
+    use std::thread;
+    use windows::Win32::System::Pipes::{CreateNamedPipeW, ConnectNamedPipe};
+    use windows::core::PCWSTR;
+    let name: Vec<u16> = "\\\\.\\pipe\\voice2type_log\0".encode_utf16().collect();
+    thread::spawn(move || {
+        unsafe {
+            let handle = CreateNamedPipeW(
+                PCWSTR(name.as_ptr()),
+                windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES(0x00000002),
+                windows::Win32::System::Pipes::NAMED_PIPE_MODE(0),
+                1,
+                4096,
+                4096,
+                0,
+                None,
+            );
+            *LOG_PIPE_HANDLE.lock().unwrap() = Some(handle);
+            let _ = ConnectNamedPipe(handle, None);
+        }
+    });
+}
+
+#[cfg(target_os = "windows")]
+fn start_log_viewer() {
+    use std::process::Command;
+    if LOG_VIEWER_CHILD.lock().unwrap().is_none() {
+        if let Ok(exe) = std::env::current_exe() {
+            if let Ok(child) = Command::new(exe).arg("--log-viewer").spawn() {
+                *LOG_VIEWER_CHILD.lock().unwrap() = Some(child);
+                std::thread::spawn(|| {
+                    use std::time::Duration;
+                    loop {
+                        let exited = {
+                            let mut guard = LOG_VIEWER_CHILD.lock().unwrap();
+                            if let Some(ch) = guard.as_mut() {
+                                ch.try_wait().map(|o| o.is_some()).unwrap_or(false)
+                            } else {
+                                // 已被外部关闭
+                                true
+                            }
+                        };
+                        if exited {
+                            // 子进程已退出：关闭日志并同步 UI 勾选
+                            #[cfg(target_os = "windows")]
+                            {
+                                use windows::Win32::Foundation::CloseHandle;
+                                if let Some(handle) = LOG_PIPE_HANDLE.lock().unwrap().take() {
+                                    unsafe { let _ = CloseHandle(handle); }
+                                }
+                                if let Some(cfg) = CONFIG_GLOBAL.get() {
+                                    cfg.set_show_log(false);
+                                    let _ = cfg.save();
+                                }
+                                *LOG_VIEWER_CHILD.lock().unwrap() = None;
+                                request_uncheck_log_menu();
+                            }
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_millis(500));
+                    }
+                });
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn write_log_line(s: &str) {
+    use windows::Win32::Storage::FileSystem::WriteFile;
+    unsafe {
+        if let Some(handle) = *LOG_PIPE_HANDLE.lock().unwrap() {
+            let mut buf = Vec::with_capacity(s.len() + 2);
+            buf.extend_from_slice(s.as_bytes());
+            buf.extend_from_slice(b"\r\n");
+            let mut written = 0u32;
+            let _ = WriteFile(handle, Some(&buf), Some(&mut written), None);
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub fn log_set_enabled(enabled: bool) {
+    use windows::Win32::Foundation::CloseHandle;
+    if enabled {
+        LOG_MENU_NEEDS_UNCHECK.store(false, Ordering::SeqCst);
+        if LOG_PIPE_HANDLE.lock().unwrap().is_none() {
+            init_log_pipe();
+            start_log_viewer();
+        }
+    } else {
+        // 停止子进程
+        if let Some(mut child) = LOG_VIEWER_CHILD.lock().unwrap().take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        // 关闭管道
+        if let Some(handle) = LOG_PIPE_HANDLE.lock().unwrap().take() {
+            unsafe { let _ = CloseHandle(handle); }
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn write_log_line(_s: &str) {}
+
+#[cfg(target_os = "windows")]
+fn viewer_main() {
+    unsafe {
+        crate::gui::show_console_with_redirect();
+    }
+    use windows::Win32::Storage::FileSystem::{CreateFileW, ReadFile, FILE_GENERIC_READ, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING};
+    use windows::core::PCWSTR;
+    let name: Vec<u16> = "\\\\.\\pipe\\voice2type_log\0".encode_utf16().collect();
+    unsafe {
+        let h = CreateFileW(
+            PCWSTR(name.as_ptr()),
+            FILE_GENERIC_READ.0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            None,
+            OPEN_EXISTING,
+            Default::default(),
+            None,
+        );
+        let h = match h {
+            Ok(h) => h,
+            Err(_) => return,
+        };
+        let mut buf = vec![0u8; 4096];
+        loop {
+            let mut read = 0u32;
+            let ok = ReadFile(h, Some(&mut buf), Some(&mut read), None).is_ok();
+            if !ok || read == 0 {
+                break;
+            }
+            if let Ok(text) = String::from_utf8(buf[..read as usize].to_vec()) {
+                print!("{}", text);
+            }
+        }
+    }
+}
 #[cfg(target_os = "windows")]
 unsafe fn send_unicode_text(text: &str) {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -363,6 +550,42 @@ unsafe fn send_unicode_text(text: &str) {
     }
 }
 
+#[cfg(target_os = "windows")]
+unsafe fn set_clipboard_text(text: &str) {
+    use windows::Win32::System::DataExchange::{OpenClipboard, EmptyClipboard, SetClipboardData, CloseClipboard};
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+    const CF_UNICODETEXT: u32 = 13;
+    let _ = OpenClipboard(None);
+    let _ = EmptyClipboard();
+    let utf16: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+    let size_bytes = utf16.len() * std::mem::size_of::<u16>();
+    if let Ok(hglobal) = GlobalAlloc(GMEM_MOVEABLE, size_bytes) {
+        let ptr = GlobalLock(hglobal);
+        let ptr_u16 = ptr as *mut u16;
+        if !ptr_u16.is_null() {
+            std::ptr::copy_nonoverlapping(utf16.as_ptr(), ptr_u16, utf16.len());
+        }
+        let _ = GlobalUnlock(hglobal);
+        let _ = SetClipboardData(CF_UNICODETEXT, HANDLE(hglobal.0 as isize));
+        // 注意：成功后由系统接管 hglobal，不再释放
+    }
+    let _ = CloseClipboard();
+}
+#[cfg(target_os = "windows")]
+unsafe fn paste_clipboard() {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VIRTUAL_KEY, KEYBD_EVENT_FLAGS
+    };
+    let vk_ctrl = VIRTUAL_KEY(0x11);
+    let vk_v = VIRTUAL_KEY(0x56);
+    let down_ctrl = INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: vk_ctrl, wScan: 0, dwFlags: KEYBD_EVENT_FLAGS(0), time: 0, dwExtraInfo: 0 } } };
+    let down_v = INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: vk_v, wScan: 0, dwFlags: KEYBD_EVENT_FLAGS(0), time: 0, dwExtraInfo: 0 } } };
+    let up_v = INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: vk_v, wScan: 0, dwFlags: KEYEVENTF_KEYUP, time: 0, dwExtraInfo: 0 } } };
+    let up_ctrl = INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: vk_ctrl, wScan: 0, dwFlags: KEYEVENTF_KEYUP, time: 0, dwExtraInfo: 0 } } };
+    let inputs = [down_ctrl, down_v, up_v, up_ctrl];
+    SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+}
 fn post_process(text: &str, config: &ConfigManager) -> String {
     let mut result = text.to_string();
 

@@ -7,6 +7,8 @@ use crate::config::ConfigManager;
 use semver::Version;
 use serde::Deserialize;
 
+// 使用 UI 线程的 Timer 轮询同步托盘菜单勾选状态，避免跨线程持有句柄
+
 #[cfg(target_os = "windows")]
 // use windows::Win32::System::Console::GetConsoleWindow;
 #[cfg(target_os = "windows")]
@@ -44,11 +46,11 @@ pub struct Voice2TypeApp {
     #[nwg_control(parent: tray_menu, text: "设置")]
     pub settings_menu: nwg::Menu,
 
-    #[nwg_control(parent: settings_menu, text: "允许输出 Emoji", check: true)]
+    #[nwg_control(parent: settings_menu, text: "表情", check: true)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_emoji])]
     pub allow_emoji_item: nwg::MenuItem,
 
-    #[nwg_control(parent: settings_menu, text: "允许输出标点", check: true)]
+    #[nwg_control(parent: settings_menu, text: "标点", check: true)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_punctuation])]
     pub allow_punct_item: nwg::MenuItem,
 
@@ -64,25 +66,35 @@ pub struct Voice2TypeApp {
     pub lang_en_item: nwg::MenuItem,
 
     // 配置子菜单
-    #[nwg_control(parent: tray_menu, text: "配置")]
+    #[nwg_control(parent: settings_menu, text: "配置")]
     pub config_menu: nwg::Menu,
 
-    #[nwg_control(parent: config_menu, text: "模型配置")]
+    #[nwg_control(parent: config_menu, text: "模型")]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_config_window])]
     pub config_api_item: nwg::MenuItem,
 
-    #[nwg_control(parent: config_menu, text: "打开配置目录")]
+    #[nwg_control(parent: config_menu, text: "目录")]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::open_config_dir])]
     pub config_file_item: nwg::MenuItem,
 
-    #[nwg_control(parent: config_menu, text: "显示日志", check: true)]
+    #[nwg_control(parent: settings_menu, text: "输出")]
+    pub output_menu: nwg::Menu,
+
+    #[nwg_control(parent: output_menu, text: "注入", check: true)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_output_inject])]
+    pub output_inject_item: nwg::MenuItem,
+
+    #[nwg_control(parent: output_menu, text: "剪贴板", check: false)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_output_clipboard])]
+    pub output_clipboard_item: nwg::MenuItem,
+    #[nwg_control(parent: config_menu, text: "日志", check: true)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_log])]
     pub log_item: nwg::MenuItem,
 
     #[nwg_control(parent: tray_menu)]
     pub sep_update: nwg::MenuSeparator,
 
-    #[nwg_control(parent: tray_menu, text: "检查更新")]
+    #[nwg_control(parent: tray_menu, text: "更新")]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::check_update])]
     pub update_item: nwg::MenuItem,
 
@@ -142,6 +154,11 @@ pub struct Voice2TypeApp {
     
     // 状态
     pub config_manager: RefCell<Option<Arc<ConfigManager>>>,
+
+    // UI 线程轮询同步日志菜单状态
+    #[nwg_control(interval: 500)]
+    #[nwg_events(OnTimerTick: [Voice2TypeApp::on_tick])]
+    pub timer: nwg::Timer,
 }
 
 impl Voice2TypeApp {
@@ -161,7 +178,6 @@ impl Voice2TypeApp {
         
         let show_log = config_manager.show_log();
         app.log_item.set_checked(show_log);
-        Self::set_console_visibility(show_log);
 
         let lang = config_manager.language();
         // app.update_ui_text(&lang); // Removed dynamic update
@@ -174,6 +190,15 @@ impl Voice2TypeApp {
             app.lang_en_item.set_checked(false);
         }
 
+        let mode = config_manager.output_mode();
+        if mode == "inject" {
+            app.output_inject_item.set_checked(true);
+            app.output_clipboard_item.set_checked(false);
+        } else {
+            app.output_inject_item.set_checked(false);
+            app.output_clipboard_item.set_checked(true);
+        }
+
         // 初始隐藏配置窗口
         app.config_window.set_visible(false);
 
@@ -184,6 +209,7 @@ impl Voice2TypeApp {
         app.api_input.set_text(&config_manager.get_api_key());
         app.url_input.set_text(&config_manager.get_api_url());
         app.model_input.set_text(&config_manager.get_model_name());
+        app.timer.start();
 
         // 检查 API Key 是否为空 (首次运行)
         if config_manager.get_api_key().is_empty() {
@@ -253,6 +279,24 @@ impl Voice2TypeApp {
         }
     }
 
+    fn set_output_inject(&self) {
+        self.output_inject_item.set_checked(true);
+        self.output_clipboard_item.set_checked(false);
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            mgr.set_output_mode("inject".to_string());
+            let _ = mgr.save();
+        }
+    }
+
+    fn set_output_clipboard(&self) {
+        self.output_inject_item.set_checked(false);
+        self.output_clipboard_item.set_checked(true);
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            mgr.set_output_mode("clipboard".to_string());
+            let _ = mgr.save();
+        }
+    }
+
     fn toggle_log(&self) {
         let new_state = !self.log_item.checked();
         self.log_item.set_checked(new_state);
@@ -262,62 +306,11 @@ impl Voice2TypeApp {
         }
         
         #[cfg(target_os = "windows")]
-        unsafe {
+        {
             if new_state {
-                // 如果开启日志，分配控制台并重定向
-                use windows::Win32::System::Console::GetConsoleWindow;
-                if GetConsoleWindow().0 == 0 {
-                    show_console_with_redirect();
-                } else {
-                    windows::Win32::UI::WindowsAndMessaging::ShowWindow(
-                        GetConsoleWindow(), 
-                        windows::Win32::UI::WindowsAndMessaging::SW_SHOW
-                    );
-                }
-            } else {
-                // 如果关闭日志，隐藏控制台
-                // 使用 ShowWindow(SW_HIDE) 而不是 FreeConsole
-                // 这样可以保持 stdout 连接，再次打开时窗口内容还在
-                use windows::Win32::System::Console::GetConsoleWindow;
-                use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
-                let hwnd = GetConsoleWindow();
-                if hwnd.0 != 0 {
-                    ShowWindow(hwnd, SW_HIDE);
-                }
+                crate::log_set_enabled(false);
             }
-        }
-    }
-
-    fn set_console_visibility(visible: bool) {
-        // 这个方法现在只在 init 中调用，用于同步状态
-        // 但我们在 init 中已经处理了 show_log 的逻辑（通过 main.rs 的预检查或 init 中的设置）
-        // 实际上 init 中调用这个方法可能会导致重复分配。
-        // 我们修改 init 逻辑，移除 set_console_visibility 的调用，
-        // 或者在这里实现正确的逻辑。
-        
-        // 既然 main.rs 已经根据配置决定是否分配控制台，
-        // 这里如果是 false，且控制台存在，应该 FreeConsole。
-        // 如果是 true，且控制台不存在，应该 Alloc。
-        
-        #[cfg(target_os = "windows")]
-        unsafe {
-            use windows::Win32::System::Console::GetConsoleWindow;
-            let hwnd = GetConsoleWindow();
-            if visible {
-                if hwnd.0 == 0 {
-                    show_console_with_redirect();
-                } else {
-                    windows::Win32::UI::WindowsAndMessaging::ShowWindow(
-                        hwnd, 
-                        windows::Win32::UI::WindowsAndMessaging::SW_SHOW
-                    );
-                }
-            } else {
-                if hwnd.0 != 0 {
-                     use windows::Win32::System::Console::FreeConsole;
-                     let _ = FreeConsole();
-                }
-            }
+            crate::log_set_enabled(new_state);
         }
     }
 
@@ -433,6 +426,21 @@ impl Voice2TypeApp {
     fn quit(&self) {
         nwg::stop_thread_dispatch();
         std::process::exit(0);
+    }
+}
+
+impl Voice2TypeApp {
+    fn on_tick(&self) {
+        #[cfg(target_os = "windows")]
+        {
+            if crate::should_uncheck_log_menu_and_reset() {
+                self.log_item.set_checked(false);
+                if let Some(mgr) = &*self.config_manager.borrow() {
+                    mgr.set_show_log(false);
+                    let _ = mgr.save();
+                }
+            }
+        }
     }
 }
 
