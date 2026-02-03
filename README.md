@@ -40,6 +40,8 @@ cargo run
 # 发布编译
 cargo build --release
 ```
+## 👀预览
+![GIF](https://github.com/user-attachments/assets/177360a3-9115-4836-b2b4-e314a6e29e54)
 
 ## 📄 License
 
