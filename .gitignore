@@ -20,3 +20,5 @@ target/
 .trae/
 
 .release/
+
+*   .ico
