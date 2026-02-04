@@ -2,6 +2,7 @@
 
 mod config;
 mod gui;
+mod win_utils;
 
 use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -13,14 +14,12 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use dotenv::dotenv;
 #[cfg(not(target_os = "windows"))]
 use enigo::{Enigo, Settings};
-use rdev::{listen, EventType, Key};
 use tokio::sync::mpsc;
 use regex::Regex;
 
 use config::ConfigManager;
 use gui::Voice2TypeApp;
 use native_windows_gui as nwg;
-// use native_windows_gui::NativeUi; 
 
 #[cfg(target_os = "windows")]
 use once_cell::sync::{OnceCell, Lazy};
@@ -109,11 +108,9 @@ fn main() -> Result<()> {
     unsafe {
         use windows::Win32::System::Console::GetConsoleWindow;
         use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+        // 仅在主线程处理窗口隐藏，日志启动移至异步线程以加快启动速度
         let temp_config = ConfigManager::new();
-        if temp_config.show_log() {
-            init_log_pipe();
-            start_log_viewer();
-        } else {
+        if !temp_config.show_log() {
             let hwnd = GetConsoleWindow();
             if hwnd.0 != 0 {
                 ShowWindow(hwnd, SW_HIDE);
@@ -130,18 +127,27 @@ fn main() -> Result<()> {
     // 3. 初始化配置
     let config_manager = Arc::new(ConfigManager::new());
     #[cfg(target_os = "windows")]
-    let _ = CONFIG_GLOBAL.set(config_manager.clone());
+    {
+        let _ = CONFIG_GLOBAL.set(config_manager.clone());
+        // 初始化日志目录并清空旧日志
+        let log_dir = config_manager.log_dir();
+        if !log_dir.exists() {
+            let _ = std::fs::create_dir_all(&log_dir);
+        }
+        let log_file = config_manager.log_file_path();
+        let _ = std::fs::File::create(log_file); // 创建或清空文件
+    }
 
     // 4. 启动逻辑线程 (Tokio Runtime)
     let cm_clone = config_manager.clone();
     thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_multi_thread()
+        let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .unwrap();
         
         if let Err(e) = rt.block_on(async_main(cm_clone)) {
-            eprintln!("运行时错误: {}", e);
+            write_log_line(&format!("运行时错误: {}", e));
         }
     });
 
@@ -151,19 +157,47 @@ fn main() -> Result<()> {
     // 6. 运行 GUI 事件循环 (主线程阻塞在此)
     nwg::dispatch_thread_events();
 
+    // 7. 退出清理
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(cfg) = CONFIG_GLOBAL.get() {
+            let log_dir = cfg.log_dir();
+            if log_dir.exists() {
+                let _ = std::fs::remove_dir_all(log_dir);
+            }
+        }
+    }
+
     Ok(())
 }
 
 async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        if config.show_log() {
+            init_log_pipe();
+            start_log_viewer();
+            // 给一点时间让管道连接，避免第一条日志丢失
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    }
+
     write_log_line("Voice2Type已启动...");
+    
+    #[cfg(target_os = "windows")]
+    if win_utils::is_admin() {
+        write_log_line("[系统] 程序当前以管理员权限运行 (兼容性最强)");
+    } else {
+        write_log_line("[警告]⚠️⚠️⚠️ 未检测到管理员权限！这将导致无法在管理员权限的游戏或程序中使用⚠️⚠️⚠️");
+        write_log_line("[提示] 程序已配置为请求管理员权限，请确保在弹出的 UAC 窗口中选择“是”。");
+    }
 
     // 打印欢迎信息
     write_log_line("--------------------------------------------------");
-    write_log_line(" 选中目标输入框，按住 F2 说话，松开 F2 后即文字将直接注入对话框");
-    write_log_line(" 若想取消，在按住 F2 时按下 ESC 即可");
-    write_log_line(" 若游戏内无法正常输出，尝试以管理员模式启动这个程序");
+    write_log_line(" 选中目标输入框，按住热键说话，松开后文字将自动输入");
+    write_log_line(" 若想取消录音，在按住热键时按下 ESC 即可");
     write_log_line(&format!(" 当前版本: {}", env!("CARGO_PKG_VERSION")));
-    write_log_line(" 若有任何问题，请联系QQ 57262494");
+    write_log_line(" 若有任何问题，请联系作者");
     write_log_line("--------------------------------------------------");
 
     // 音频系统初始化
@@ -199,6 +233,51 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
 
     // 启动热键监听线程
     let tx_clone = tx.clone();
+    let config_for_hotkey = config.clone();
+    #[cfg(target_os = "windows")]
+    thread::spawn(move || {
+        use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VIRTUAL_KEY};
+        use std::time::Duration;
+        
+        let vk_esc = VIRTUAL_KEY(0x1B); // ESC
+        let mut is_pressed = false;
+
+        loop {
+            let current_vk = config_for_hotkey.hotkey();
+            let vk_main = VIRTUAL_KEY(current_vk as u16);
+            
+            // GetAsyncKeyState 的最高位表示按键当前是否按下
+            let main_down = unsafe { (GetAsyncKeyState(vk_main.0 as i32) as u16 & 0x8000) != 0 };
+            let esc_down = unsafe { (GetAsyncKeyState(vk_esc.0 as i32) as u16 & 0x8000) != 0 };
+
+            if main_down {
+                if !is_pressed {
+                    is_pressed = true;
+                    write_log_line(&format!("检测到主热键(VK:0x{:X}) 按下", current_vk));
+                    let _ = tx_clone.blocking_send(InputMessage::StartRecording);
+                }
+                
+                if esc_down {
+                    write_log_line("检测到 ESC 按下 (取消录音)");
+                    let _ = tx_clone.blocking_send(InputMessage::CancelRecording);
+                    // 等待 ESC 松开，防止连续触发
+                    while unsafe { (GetAsyncKeyState(vk_esc.0 as i32) as u16 & 0x8000) != 0 } {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                }
+            } else {
+                if is_pressed {
+                    is_pressed = false;
+                    write_log_line(&format!("检测到主热键(VK:0x{:X}) 松开", current_vk));
+                    let _ = tx_clone.blocking_send(InputMessage::StopRecording);
+                }
+            }
+
+            thread::sleep(Duration::from_millis(15));
+        }
+    });
+
+    #[cfg(not(target_os = "windows"))]
     thread::spawn(move || {
         let mut is_f2_pressed = false;
         if let Err(error) = listen(move |event| {
@@ -206,18 +285,21 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
                 EventType::KeyPress(Key::F2) => {
                     if !is_f2_pressed {
                         is_f2_pressed = true;
+                        write_log_line("检测到 F2 按下");
                         let _ = tx_clone.blocking_send(InputMessage::StartRecording);
                     }
                 }
                 EventType::KeyRelease(Key::F2) => {
                     if is_f2_pressed {
                         is_f2_pressed = false;
+                        write_log_line("检测到 F2 松开");
                         let _ = tx_clone.blocking_send(InputMessage::StopRecording);
                     }
                 }
                 EventType::KeyPress(Key::Escape) => {
                     if is_f2_pressed {
                         // 如果 F2 正被按住，此时按下了 ESC -> 取消
+                        write_log_line("检测到 ESC 按下 (取消录音)");
                         let _ = tx_clone.blocking_send(InputMessage::CancelRecording);
                     }
                 }
@@ -236,7 +318,7 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
             InputMessage::StartRecording => {
                 if current_state == AppState::Idle || current_state == AppState::Processing || current_state == AppState::Cancelled {
                     current_state = AppState::Recording;
-                    println!("--> [录音] 开始录音... (按 ESC 取消)"); 
+                    write_log_line("--> [录音] 开始录音... (按 ESC 取消)"); 
                     audio_buffer.lock().unwrap().clear();
                     IS_RECORDING.store(true, Ordering::Relaxed);
                 }
@@ -245,7 +327,7 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
                 if current_state == AppState::Recording {
                     current_state = AppState::Cancelled;
                     IS_RECORDING.store(false, Ordering::Relaxed);
-                    println!("--> [取消] 录音已取消");
+                    write_log_line("--> [取消] 录音已取消");
                     audio_buffer.lock().unwrap().clear();
                 }
             }
@@ -253,14 +335,17 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
                 if current_state == AppState::Recording {
                     // 正常结束录音
                     IS_RECORDING.store(false, Ordering::Relaxed);
-                    println!("--> [处理] 正在转换音频...");
+                    write_log_line("--> [处理] 正在转换音频...");
 
-                    let buffer_clone = audio_buffer.clone();
+                    let audio_data = {
+                        let mut lock = audio_buffer.lock().unwrap();
+                        std::mem::take(&mut *lock)
+                    };
                     let config_clone = config.clone();
                     
                     tokio::spawn(async move {
-                        if let Err(e) = process_audio_and_type(buffer_clone, sample_rate, config_clone).await {
-                            eprintln!("转写失败: {}", e);
+                        if let Err(e) = process_audio_and_type(audio_data, sample_rate, config_clone).await {
+                            write_log_line(&format!("转写失败: {}", e));
                         }
                     });
 
@@ -276,12 +361,7 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
     Ok(())
 }
 
-async fn process_audio_and_type(buffer: Arc<Mutex<Vec<f32>>>, sample_rate: u32, config: Arc<ConfigManager>) -> Result<()> {
-    let audio_data = {
-        let lock = buffer.lock().unwrap();
-        lock.clone()
-    };
-
+async fn process_audio_and_type(audio_data: Vec<f32>, sample_rate: u32, config: Arc<ConfigManager>) -> Result<()> {
     if audio_data.is_empty() {
         return Ok(());
     }
@@ -289,21 +369,19 @@ async fn process_audio_and_type(buffer: Arc<Mutex<Vec<f32>>>, sample_rate: u32, 
     // 检查 API Key
     let api_key = config.get_api_key();
     if api_key.is_empty() {
-        // 我们可以通知 GUI 显示错误，但简单记录或忽略也行
         write_log_line("[错误] API Key 未配置！请在托盘菜单中设置。");
         return Ok(());
     }
 
     let wav_data = encode_wav_memory(&audio_data, sample_rate)?;
 
-    let client = reqwest::Client::new();
     let form = reqwest::multipart::Form::new()
         .text("model", config.get_model_name())
         .part("file", reqwest::multipart::Part::bytes(wav_data)
             .file_name("recording.wav")
             .mime_str("audio/wav")?);
 
-    let resp = client.post(&config.get_api_url())
+    let resp = HTTP_CLIENT.post(&config.get_api_url())
         .header("Authorization", format!("Bearer {}", api_key))
         .multipart(form)
         .send()
@@ -339,13 +417,36 @@ async fn process_audio_and_type(buffer: Arc<Mutex<Vec<f32>>>, sample_rate: u32, 
     if mode == "clipboard" {
         #[cfg(target_os = "windows")]
         unsafe {
-            set_clipboard_text(&final_text);
-            paste_clipboard();
+            // 1. 备份当前剪贴板 (仅限文本)
+            let backup = win_utils::get_clipboard_text();
+            
+            // 2. 写入新内容并粘贴 (排除在历史记录之外，不污染 Win+V)
+            win_utils::set_clipboard_text(&final_text, true);
+            win_utils::paste_clipboard();
+            
+            // 3. 延迟还原剪贴板 (同样排除在历史记录之外，避免重复记录)
+            if let Some(old_text) = backup {
+                tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    win_utils::set_clipboard_text(&old_text, true);
+                    write_log_line("[系统] 剪贴板内容已还原 (已从历史记录中排除)");
+                });
+            } else {
+                // 如果原本就是空的，延迟清空
+                tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    use windows::Win32::System::DataExchange::{OpenClipboard, EmptyClipboard, CloseClipboard};
+                    let _ = OpenClipboard(None);
+                    let _ = EmptyClipboard();
+                    let _ = CloseClipboard();
+                    write_log_line("[系统] 剪贴板已清空");
+                });
+            }
         }
     } else {
         #[cfg(target_os = "windows")]
         unsafe {
-            send_unicode_text(&final_text);
+            win_utils::send_unicode_text(&final_text);
         }
         #[cfg(not(target_os = "windows"))]
         {
@@ -356,6 +457,9 @@ async fn process_audio_and_type(buffer: Arc<Mutex<Vec<f32>>>, sample_rate: u32, 
 
     Ok(())
 }
+
+#[cfg(target_os = "windows")]
+static HTTP_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| reqwest::Client::new());
 
 #[cfg(target_os = "windows")]
 static LOG_PIPE_HANDLE: Lazy<StdMutex<Option<windows::Win32::Foundation::HANDLE>>> = Lazy::new(|| StdMutex::new(None));
@@ -423,7 +527,7 @@ fn start_log_viewer() {
                             }
                             break;
                         }
-                        std::thread::sleep(Duration::from_millis(500));
+                        std::thread::sleep(Duration::from_millis(100));
                     }
                 });
             }
@@ -434,6 +538,18 @@ fn start_log_viewer() {
 #[cfg(target_os = "windows")]
 fn write_log_line(s: &str) {
     use windows::Win32::Storage::FileSystem::WriteFile;
+    use std::fs::OpenOptions;
+    use std::io::Write;
+
+    // 1. 写入本地文件
+    if let Some(cfg) = CONFIG_GLOBAL.get() {
+        let log_file = cfg.log_file_path();
+        if let Ok(mut file) = OpenOptions::new().append(true).open(log_file) {
+            let _ = writeln!(file, "{}", s);
+        }
+    }
+
+    // 2. 写入命名管道 (供实时查看器使用)
     unsafe {
         if let Some(handle) = *LOG_PIPE_HANDLE.lock().unwrap() {
             let mut buf = Vec::with_capacity(s.len() + 2);
@@ -473,8 +589,18 @@ fn write_log_line(_s: &str) {}
 #[cfg(target_os = "windows")]
 fn viewer_main() {
     unsafe {
-        crate::gui::show_console_with_redirect();
+        win_utils::show_console_with_redirect();
     }
+
+    let config = ConfigManager::new();
+    let log_file = config.log_file_path();
+
+    // 1. 先读取历史日志文件
+    if let Ok(history) = std::fs::read_to_string(&log_file) {
+        print!("{}", history);
+    }
+
+    // 2. 连接管道读取实时日志
     use windows::Win32::Storage::FileSystem::{CreateFileW, ReadFile, FILE_GENERIC_READ, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING};
     use windows::core::PCWSTR;
     let name: Vec<u16> = "\\\\.\\pipe\\voice2type_log\0".encode_utf16().collect();
@@ -505,87 +631,7 @@ fn viewer_main() {
         }
     }
 }
-#[cfg(target_os = "windows")]
-unsafe fn send_unicode_text(text: &str) {
-    use windows::Win32::UI::Input::KeyboardAndMouse::{
-        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, VIRTUAL_KEY
-    };
 
-    let mut inputs = Vec::with_capacity(text.len() * 2);
-
-    for c in text.encode_utf16() {
-        // Key Down
-        let input_down = INPUT {
-            r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 {
-                ki: KEYBDINPUT {
-                    wVk: VIRTUAL_KEY(0),
-                    wScan: c,
-                    dwFlags: KEYEVENTF_UNICODE,
-                    time: 0,
-                    dwExtraInfo: 0,
-                },
-            },
-        };
-        inputs.push(input_down);
-
-        // Key Up
-        let input_up = INPUT {
-            r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 {
-                ki: KEYBDINPUT {
-                    wVk: VIRTUAL_KEY(0),
-                    wScan: c,
-                    dwFlags: KEYEVENTF_UNICODE | KEYEVENTF_KEYUP,
-                    time: 0,
-                    dwExtraInfo: 0,
-                },
-            },
-        };
-        inputs.push(input_up);
-    }
-
-    if !inputs.is_empty() {
-        SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
-    }
-}
-
-#[cfg(target_os = "windows")]
-unsafe fn set_clipboard_text(text: &str) {
-    use windows::Win32::System::DataExchange::{OpenClipboard, EmptyClipboard, SetClipboardData, CloseClipboard};
-    use windows::Win32::Foundation::HANDLE;
-    use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
-    const CF_UNICODETEXT: u32 = 13;
-    let _ = OpenClipboard(None);
-    let _ = EmptyClipboard();
-    let utf16: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
-    let size_bytes = utf16.len() * std::mem::size_of::<u16>();
-    if let Ok(hglobal) = GlobalAlloc(GMEM_MOVEABLE, size_bytes) {
-        let ptr = GlobalLock(hglobal);
-        let ptr_u16 = ptr as *mut u16;
-        if !ptr_u16.is_null() {
-            std::ptr::copy_nonoverlapping(utf16.as_ptr(), ptr_u16, utf16.len());
-        }
-        let _ = GlobalUnlock(hglobal);
-        let _ = SetClipboardData(CF_UNICODETEXT, HANDLE(hglobal.0 as isize));
-        // 注意：成功后由系统接管 hglobal，不再释放
-    }
-    let _ = CloseClipboard();
-}
-#[cfg(target_os = "windows")]
-unsafe fn paste_clipboard() {
-    use windows::Win32::UI::Input::KeyboardAndMouse::{
-        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VIRTUAL_KEY, KEYBD_EVENT_FLAGS
-    };
-    let vk_ctrl = VIRTUAL_KEY(0x11);
-    let vk_v = VIRTUAL_KEY(0x56);
-    let down_ctrl = INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: vk_ctrl, wScan: 0, dwFlags: KEYBD_EVENT_FLAGS(0), time: 0, dwExtraInfo: 0 } } };
-    let down_v = INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: vk_v, wScan: 0, dwFlags: KEYBD_EVENT_FLAGS(0), time: 0, dwExtraInfo: 0 } } };
-    let up_v = INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: vk_v, wScan: 0, dwFlags: KEYEVENTF_KEYUP, time: 0, dwExtraInfo: 0 } } };
-    let up_ctrl = INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: vk_ctrl, wScan: 0, dwFlags: KEYEVENTF_KEYUP, time: 0, dwExtraInfo: 0 } } };
-    let inputs = [down_ctrl, down_v, up_v, up_ctrl];
-    SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
-}
 fn post_process(text: &str, config: &ConfigManager) -> String {
     let mut result = text.to_string();
 
@@ -650,7 +696,10 @@ fn encode_wav_memory(samples: &[f32], sample_rate: u32) -> Result<Vec<u8>> {
         sample_format: hound::SampleFormat::Float,
     };
 
-    let mut cursor = Cursor::new(Vec::new());
+    // 预分配内存：Header (约44 bytes) + Data (samples * 4 bytes)
+    // 这样可以避免 Vec 扩容带来的内存拷贝
+    let expected_size = 44 + samples.len() * 4;
+    let mut cursor = Cursor::new(Vec::with_capacity(expected_size));
     {
         let mut writer = hound::WavWriter::new(&mut cursor, spec)?;
         for &sample in samples {

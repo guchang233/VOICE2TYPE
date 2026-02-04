@@ -22,6 +22,8 @@ pub struct AppConfig {
     pub show_log: bool,
     pub language: String, // "zh" 或 "en"
     pub output_mode: String,
+    pub autostart: bool,
+    pub hotkey: u32, // Windows 虚拟键码
 }
 
 impl Default for AppConfig {
@@ -35,6 +37,8 @@ impl Default for AppConfig {
             show_log: false, // 默认关闭
             language: "zh".to_string(), // 默认中文
             output_mode: "clipboard".to_string(),
+            autostart: false,
+            hotkey: 0x71, // 默认 F2
         }
     }
 }
@@ -141,6 +145,22 @@ impl ConfigManager {
         self.config.lock().unwrap().output_mode = mode;
     }
 
+    pub fn autostart_enabled(&self) -> bool {
+        self.config.lock().unwrap().autostart
+    }
+
+    pub fn set_autostart_enabled(&self, enabled: bool) {
+        self.config.lock().unwrap().autostart = enabled;
+    }
+
+    pub fn hotkey(&self) -> u32 {
+        self.config.lock().unwrap().hotkey
+    }
+
+    pub fn set_hotkey(&self, vk: u32) {
+        self.config.lock().unwrap().hotkey = vk;
+    }
+
     pub fn reset_ai_config(&self) {
         let mut cfg = self.config.lock().unwrap();
         cfg.api_key = AppConfig::default().api_key;
@@ -157,5 +177,15 @@ impl ConfigManager {
 
     pub fn config_path(&self) -> PathBuf {
         self.config_path.clone()
+    }
+
+    pub fn log_dir(&self) -> PathBuf {
+        let mut p = self.config_path.clone();
+        p.pop(); // 移除文件名
+        p.join("logs")
+    }
+
+    pub fn log_file_path(&self) -> PathBuf {
+        self.log_dir().join("app.log")
     }
 }

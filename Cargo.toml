@@ -1,6 +1,6 @@
 [package]
 name = "voice2type"
-version = "0.0.26"
+version = "0.0.3"
 edition = "2021"
 authors = ["guchang233"]
 
@@ -9,7 +9,7 @@ admin = []
 
 [dependencies]
 # 异步运行时
-tokio = { version = "1.36", features = ["full"] }
+tokio = { version = "1.36", features = ["rt-multi-thread", "sync", "time", "macros"] }
 
 # 错误处理
 anyhow = "1.0"
@@ -18,8 +18,8 @@ anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
-# HTTP 客户端 (支持 multipart上传)
-reqwest = { version = "0.12", features = ["json", "multipart", "stream", "rustls-tls", "blocking"] }
+# HTTP 客户端
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls-native-roots", "blocking"] }
 
 # 环境变量管理
 dotenv = "0.15"
@@ -53,7 +53,9 @@ windows = { version = "0.54", features = [
     "Win32_System_Memory",
     "Win32_UI_WindowsAndMessaging",
     "Win32_System_Threading",
-    "Win32_UI_Input_KeyboardAndMouse"
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_System_Registry",
+    "Win32_Security"
 ] }
 
 # 路径管理

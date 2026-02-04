@@ -10,9 +10,6 @@ use serde::Deserialize;
 // 使用 UI 线程的 Timer 轮询同步托盘菜单勾选状态，避免跨线程持有句柄
 
 #[cfg(target_os = "windows")]
-// use windows::Win32::System::Console::GetConsoleWindow;
-#[cfg(target_os = "windows")]
-// use windows::Win32::UI::WindowsAndMessaging::ShowWindow;
 
 use self::voice2_type_app_ui::Voice2TypeAppUi;
 
@@ -91,6 +88,10 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_log])]
     pub log_item: nwg::MenuItem,
 
+    #[nwg_control(parent: settings_menu, text: "自启动", check: false)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_autostart])]
+    pub autostart_item: nwg::MenuItem,
+
     #[nwg_control(parent: tray_menu)]
     pub sep_update: nwg::MenuSeparator,
 
@@ -143,22 +144,30 @@ pub struct Voice2TypeApp {
     pub model_input: nwg::TextInput,
 
     #[nwg_control(parent: config_window, text: "保存")]
-    #[nwg_layout_item(layout: config_layout, row: 3, col: 2)]
+    #[nwg_layout_item(layout: config_layout, row: 4, col: 2)]
     #[nwg_events(OnButtonClick: [Voice2TypeApp::save_config])]
     pub save_btn: nwg::Button,
     
     #[nwg_control(parent: config_window, text: "重置")]
-    #[nwg_layout_item(layout: config_layout, row: 3, col: 1)]
+    #[nwg_layout_item(layout: config_layout, row: 4, col: 1)]
     #[nwg_events(OnButtonClick: [Voice2TypeApp::reset_ai_config])]
     pub reset_btn: nwg::Button,
+
+    #[nwg_control(parent: config_window, text: "热键:")]
+    #[nwg_layout_item(layout: config_layout, row: 3, col: 0)]
+    pub hotkey_label: nwg::Label,
+
+    #[nwg_control(parent: config_window)]
+    #[nwg_layout_item(layout: config_layout, row: 3, col: 1, col_span: 2)]
+    pub hotkey_combo: nwg::ComboBox<String>,
     
     // 状态
     pub config_manager: RefCell<Option<Arc<ConfigManager>>>,
 
     // UI 线程轮询同步日志菜单状态
-    #[nwg_control(interval: 500)]
-    #[nwg_events(OnTimerTick: [Voice2TypeApp::on_tick])]
-    pub timer: nwg::Timer,
+    #[nwg_control(interval: std::time::Duration::from_millis(100), active: false)]
+    #[nwg_events( OnTimerTick: [Voice2TypeApp::on_tick] )]
+    pub timer: nwg::AnimationTimer,
 }
 
 impl Voice2TypeApp {
@@ -199,6 +208,16 @@ impl Voice2TypeApp {
             app.output_clipboard_item.set_checked(true);
         }
 
+        #[cfg(target_os = "windows")]
+        {
+            let enabled = crate::win_utils::is_autostart_enabled();
+            app.autostart_item.set_checked(enabled || config_manager.autostart_enabled());
+            if let Some(mgr) = &*app.config_manager.borrow() {
+                mgr.set_autostart_enabled(app.autostart_item.checked());
+                let _ = mgr.save();
+            }
+        }
+
         // 初始隐藏配置窗口
         app.config_window.set_visible(false);
 
@@ -209,6 +228,27 @@ impl Voice2TypeApp {
         app.api_input.set_text(&config_manager.get_api_key());
         app.url_input.set_text(&config_manager.get_api_url());
         app.model_input.set_text(&config_manager.get_model_name());
+
+        // 初始化热键下拉框
+        let hotkeys = vec![
+            ("F1", 0x70), ("F2", 0x71), ("F3", 0x72), ("F4", 0x73), 
+            ("F5", 0x74), ("F6", 0x75), ("F7", 0x76), ("F8", 0x77), 
+            ("F9", 0x78), ("F10", 0x79), ("F11", 0x7A), ("F12", 0x7B),
+            ("CAPS LOCK", 0x14), ("LEFT CTRL", 0xA2), ("RIGHT CTRL", 0xA3),
+            ("LEFT ALT", 0xA4), ("RIGHT ALT", 0xA5), ("V", 0x56)
+        ];
+        
+        let mut selected_index = 1; // 默认 F2
+        let current_vk = config_manager.hotkey();
+        
+        for (i, (name, vk)) in hotkeys.iter().enumerate() {
+            app.hotkey_combo.push(name.to_string());
+            if *vk == current_vk {
+                selected_index = i;
+            }
+        }
+        app.hotkey_combo.set_selection(Some(selected_index));
+
         app.timer.start();
 
         // 检查 API Key 是否为空 (首次运行)
@@ -314,6 +354,43 @@ impl Voice2TypeApp {
         }
     }
 
+    fn toggle_autostart(&self) {
+        let new_state = !self.autostart_item.checked();
+        self.autostart_item.set_checked(new_state);
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            mgr.set_autostart_enabled(new_state);
+            let _ = mgr.save();
+        }
+        #[cfg(target_os = "windows")]
+        unsafe {
+            if new_state {
+                let ok = crate::win_utils::set_autostart(true);
+                if ok.is_err() {
+                    self.autostart_item.set_checked(false);
+                    if let Some(mgr) = &*self.config_manager.borrow() {
+                        mgr.set_autostart_enabled(false);
+                        let _ = mgr.save();
+                    }
+                    nwg::simple_message("失败", "设置自启动失败，请以管理员或检查权限");
+                } else {
+                    nwg::simple_message("已启用", "已设置为开机自启动");
+                }
+            } else {
+                let ok = crate::win_utils::set_autostart(false);
+                if ok.is_err() {
+                    self.autostart_item.set_checked(true);
+                    if let Some(mgr) = &*self.config_manager.borrow() {
+                        mgr.set_autostart_enabled(true);
+                        let _ = mgr.save();
+                    }
+                    nwg::simple_message("失败", "取消自启动失败，请检查权限");
+                } else {
+                    nwg::simple_message("已关闭", "已取消开机自启动");
+                }
+            }
+        }
+    }
+
     fn show_config_window(&self) {
         if let Some(mgr) = &*self.config_manager.borrow() {
             self.api_input.set_text(&mgr.get_api_key());
@@ -346,6 +423,18 @@ impl Voice2TypeApp {
             mgr.set_api_key(key);
             mgr.set_api_url(url);
             mgr.set_model_name(model);
+
+            // 保存热键设置
+            let hotkeys_vks = vec![
+                0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 
+                0x78, 0x79, 0x7A, 0x7B, 0x14, 0xA2, 0xA3, 0xA4, 0xA5, 0x56
+            ];
+            if let Some(idx) = self.hotkey_combo.selection() {
+                if idx < hotkeys_vks.len() {
+                    mgr.set_hotkey(hotkeys_vks[idx]);
+                }
+            }
+
             let _ = mgr.save();
         }
         nwg::simple_message("已保存", "配置已成功保存！");
@@ -425,7 +514,6 @@ impl Voice2TypeApp {
 
     fn quit(&self) {
         nwg::stop_thread_dispatch();
-        std::process::exit(0);
     }
 }
 
@@ -442,45 +530,4 @@ impl Voice2TypeApp {
             }
         }
     }
-}
-
-#[cfg(target_os = "windows")]
-pub unsafe fn show_console_with_redirect() {
-    use windows::Win32::System::Console::{AllocConsole, GetConsoleWindow};
-    use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOW};
-    use std::ffi::CString;
-
-    // 1. Check if console already exists
-    let hwnd = GetConsoleWindow();
-    if hwnd.0 != 0 {
-        ShowWindow(hwnd, SW_SHOW);
-        return;
-    }
-
-    // 2. Allocate new console
-    let _ = AllocConsole();
-
-    // 3. Redirect stdout/stderr (CRITICAL for println!)
-    // "CONOUT$" is the special filename for the console output buffer
-    let conout = CString::new("CONOUT$").unwrap();
-    let mode = CString::new("w").unwrap();
-
-    #[cfg(target_os = "windows")]
-    unsafe {
-        // Only valid on MSVC toolchain, GNU might use different symbols
-        extern "C" {
-            #[link_name = "__acrt_iob_func"]
-            fn __acrt_iob_func(idx: u32) -> *mut libc::FILE;
-        }
-
-        // stdout = 1, stderr = 2
-        let stdout_ptr = __acrt_iob_func(1);
-        let stderr_ptr = __acrt_iob_func(2);
-
-        libc::freopen(conout.as_ptr(), mode.as_ptr(), stdout_ptr);
-        libc::freopen(conout.as_ptr(), mode.as_ptr(), stderr_ptr);
-    }
-    
-    // Optional: Update Rust's own buffering if needed, but usually freopen is enough
-    println!("Console allocated and stdout redirected successfully!");
 }

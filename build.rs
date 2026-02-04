@@ -4,8 +4,7 @@ fn main() {
     if cfg!(target_os = "windows") {
         let mut res = winres::WindowsResource::new();
         res.set_icon("icon.ico");
-        let is_admin = std::env::var("CARGO_FEATURE_ADMIN").is_ok();
-        let level = if is_admin { "requireAdministrator" } else { "asInvoker" };
+        let level = "requireAdministrator";
         let manifest = format!(r#"
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
 <dependency>
