@@ -474,8 +474,17 @@ impl Voice2TypeApp {
                     let latest = Version::parse(clean_latest).unwrap_or_else(|_| Version::new(0, 0, 0));
 
                     if latest > current {
-                         nwg::simple_message("发现新版本", &format!("新版本 {} 已发布！\n当前版本: {}\n\n请前往 GitHub 下载。", latest_version_str, current_version));
-                         let _ = open::that(format!("https://github.com/{}/{}/releases/latest", REPO_OWNER, REPO_NAME));
+                        #[cfg(target_os = "windows")]
+                        unsafe {
+                            use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_YESNO, MB_ICONINFORMATION, IDYES};
+                            use windows::core::PCWSTR;
+                            let title = "发现新版本\0".encode_utf16().collect::<Vec<u16>>();
+                            let msg = format!("新版本 {} 已发布！\n当前版本: {}\n\n是否前往 GitHub 下载？\0", latest_version_str, current_version).encode_utf16().collect::<Vec<u16>>();
+                            let ret = MessageBoxW(None, PCWSTR(msg.as_ptr()), PCWSTR(title.as_ptr()), MB_YESNO | MB_ICONINFORMATION);
+                            if ret == IDYES {
+                                let _ = open::that(format!("https://github.com/{}/{}/releases/latest", REPO_OWNER, REPO_NAME));
+                            }
+                        }
                     } else {
                          nwg::simple_message("无更新", &format!("当前已是最新版本 ({})。", current_version));
                     }
