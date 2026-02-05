@@ -3,6 +3,7 @@
 mod config;
 mod gui;
 mod win_utils;
+mod indicator;
 
 use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,13 +17,18 @@ use dotenv::dotenv;
 use enigo::{Enigo, Settings};
 use tokio::sync::mpsc;
 use regex::Regex;
+use chrono::Local;
 
 use config::ConfigManager;
 use gui::Voice2TypeApp;
+use indicator::{StatusIndicator, IndicatorState};
 use native_windows_gui as nwg;
 
 #[cfg(target_os = "windows")]
 use once_cell::sync::{OnceCell, Lazy};
+
+#[cfg(target_os = "windows")]
+static INDICATOR: OnceCell<StatusIndicator> = OnceCell::new();
 
 #[cfg(target_os = "windows")]
 use std::sync::Mutex as StdMutex;
@@ -147,12 +153,18 @@ fn main() -> Result<()> {
             .unwrap();
         
         if let Err(e) = rt.block_on(async_main(cm_clone)) {
-            write_log_line(&format!("运行时错误: {}", e));
+            write_log(LogLevel::ERROR, &format!("运行时错误: {}", e));
         }
     });
 
     // 5. 初始化 GUI
     let _ui = Voice2TypeApp::init(config_manager.clone());
+
+    // 初始化状态指示器
+    #[cfg(target_os = "windows")]
+    if config_manager.enable_indicator() {
+        let _ = INDICATOR.set(StatusIndicator::new());
+    }
 
     // 6. 运行 GUI 事件循环 (主线程阻塞在此)
     nwg::dispatch_thread_events();
@@ -160,6 +172,9 @@ fn main() -> Result<()> {
     // 7. 退出清理
     #[cfg(target_os = "windows")]
     {
+        // 强制关闭日志子进程
+        log_set_enabled(false);
+
         if let Some(cfg) = CONFIG_GLOBAL.get() {
             let log_dir = cfg.log_dir();
             if log_dir.exists() {
@@ -221,7 +236,7 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
             }
         },
         move |err| {
-            write_log_line(&format!("音频输入流错误: {}", err));
+            write_log(LogLevel::ERROR, &format!("音频输入流错误: {}", err));
         },
         None,
     )?;
@@ -319,9 +334,15 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
                 if current_state == AppState::Idle || current_state == AppState::Processing || current_state == AppState::Cancelled {
                     current_state = AppState::Recording;
                     write_log_line("--> [录音] 开始录音... (按 ESC 取消)"); 
-                    gui::update_status("🎤 正在听...");
                     audio_buffer.lock().unwrap().clear();
                     IS_RECORDING.store(true, Ordering::Relaxed);
+                    
+                    #[cfg(target_os = "windows")]
+                    if config.enable_indicator() {
+                        if let Some(ind) = INDICATOR.get() {
+                            ind.set_state(IndicatorState::Recording);
+                        }
+                    }
                 }
             }
             InputMessage::CancelRecording => {
@@ -329,12 +350,14 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
                     current_state = AppState::Cancelled;
                     IS_RECORDING.store(false, Ordering::Relaxed);
                     write_log_line("--> [取消] 录音已取消");
-                    gui::update_status("🚫 已取消");
-                    tokio::spawn(async {
-                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                        gui::update_status("");
-                    });
                     audio_buffer.lock().unwrap().clear();
+                    
+                    #[cfg(target_os = "windows")]
+                    if config.enable_indicator() {
+                        if let Some(ind) = INDICATOR.get() {
+                            ind.set_state(IndicatorState::Hidden);
+                        }
+                    }
                 }
             }
             InputMessage::StopRecording => {
@@ -342,7 +365,13 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
                     // 正常结束录音
                     IS_RECORDING.store(false, Ordering::Relaxed);
                     write_log_line("--> [处理] 正在转换音频...");
-                    gui::update_status("🔄 正在转换...");
+
+                    #[cfg(target_os = "windows")]
+                    if config.enable_indicator() {
+                        if let Some(ind) = INDICATOR.get() {
+                            ind.set_state(IndicatorState::Processing);
+                        }
+                    }
 
                     let audio_data = {
                         let mut lock = audio_buffer.lock().unwrap();
@@ -352,23 +381,14 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
                     
                     tokio::spawn(async move {
                         if let Err(e) = process_audio_and_type(audio_data, sample_rate, config_clone).await {
-                            write_log_line(&format!("转写失败: {}", e));
-                            gui::update_status("❌ 识别失败");
-                            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                            gui::update_status("");
-                        } else {
-                            // 成功后，process_audio_and_type 内部会负责更新为 "正在输入"，这里只需要确保最后清除状态
-                            // 但由于 process_audio_and_type 是同步等待输入完成的 (模拟按键)，
-                            // 所以可以在这里清除，或者在函数内部清除。
-                            // 最好在函数返回后清除。
-                            gui::update_status("");
+                            write_log(LogLevel::ERROR, &format!("转写失败: {}", e));
                         }
                     });
-                    
-                    // 重置状态为 Processing，实际上 process_audio_and_type 在后台运行
-                    current_state = AppState::Processing; 
-                    // 逻辑上 Processing 结束后应该变回 Idle，但这里是在 spawn 中处理。
-                    // 下次 StartRecording 会重置状态。
+
+                    current_state = AppState::Idle;
+                } else if current_state == AppState::Cancelled {
+                    // 如果之前被取消了，F2 松开时重置为 Idle
+                    current_state = AppState::Idle;
                 }
             }
         }
@@ -379,13 +399,27 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
 
 async fn process_audio_and_type(audio_data: Vec<f32>, sample_rate: u32, config: Arc<ConfigManager>) -> Result<()> {
     if audio_data.is_empty() {
+        write_log(LogLevel::WARN, "音频数据为空");
         return Ok(());
     }
 
     // 检查 API Key
     let api_key = config.get_api_key();
     if api_key.is_empty() {
-        write_log_line("[错误] API Key 未配置！请在托盘菜单中设置。");
+        write_log(LogLevel::ERROR, "[错误] API Key 未配置！请在托盘菜单中设置。");
+        #[cfg(target_os = "windows")]
+        if config.enable_indicator() {
+            if let Some(ind) = INDICATOR.get() {
+                ind.set_state(IndicatorState::Error);
+                let ind = ind.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+                    if !IS_RECORDING.load(Ordering::Relaxed) {
+                         ind.set_state(IndicatorState::Hidden);
+                    }
+                });
+            }
+        }
         return Ok(());
     }
 
@@ -405,9 +439,22 @@ async fn process_audio_and_type(audio_data: Vec<f32>, sample_rate: u32, config: 
 
     if !resp.status().is_success() {
         let error_text = resp.text().await?;
-        write_log_line(&format!("API 错误: {}", error_text));
-        gui::update_status("❌ API 请求失败");
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        write_log(LogLevel::ERROR, &format!("API 错误: {}", error_text));
+        
+        #[cfg(target_os = "windows")]
+        if config.enable_indicator() {
+            if let Some(ind) = INDICATOR.get() {
+                ind.set_state(IndicatorState::Error);
+                let ind = ind.clone();
+                // 延迟隐藏
+                tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+                    if !IS_RECORDING.load(Ordering::Relaxed) {
+                         ind.set_state(IndicatorState::Hidden);
+                    }
+                });
+            }
+        }
         return Ok(());
     }
 
@@ -416,29 +463,71 @@ async fn process_audio_and_type(audio_data: Vec<f32>, sample_rate: u32, config: 
         text: String,
     }
 
-    let result: SiliconFlowResponse = resp.json().await?;
+    // Handle JSON parse error
+    let result_json: Result<SiliconFlowResponse, _> = resp.json().await;
+    let result = match result_json {
+        Ok(r) => r,
+        Err(e) => {
+            write_log(LogLevel::ERROR, &format!("解析响应失败: {}", e));
+             #[cfg(target_os = "windows")]
+            if config.enable_indicator() {
+                if let Some(ind) = INDICATOR.get() {
+                    ind.set_state(IndicatorState::Error);
+                    let ind = ind.clone();
+                     tokio::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+                        if !IS_RECORDING.load(Ordering::Relaxed) {
+                             ind.set_state(IndicatorState::Hidden);
+                        }
+                    });
+                }
+            }
+            return Ok(());
+        }
+    };
+
     let raw_text = result.text.trim();
 
     if raw_text.is_empty() {
-        write_log_line("[警告] 转换结果为空");
-        gui::update_status("⚠️ 结果为空");
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        gui::update_status("");
+        write_log(LogLevel::WARN, "识别结果为空 (未检测到有效语音)");
+        #[cfg(target_os = "windows")]
+        if config.enable_indicator() {
+            if let Some(ind) = INDICATOR.get() {
+                ind.set_state(IndicatorState::Error); // 用 Error 状态表示空结果
+                let ind = ind.clone();
+                 tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+                    if !IS_RECORDING.load(Ordering::Relaxed) {
+                         ind.set_state(IndicatorState::Hidden);
+                    }
+                });
+            }
+        }
         return Ok(());
     }
 
     // 后处理
     let final_text = post_process(raw_text, &config);
     if final_text.is_empty() {
-        write_log_line("[警告] 后处理结果为空");
-        gui::update_status("⚠️ 结果为空");
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        gui::update_status("");
-        return Ok(());
+         write_log(LogLevel::WARN, "后处理后结果为空");
+         return Ok(());
     }
 
-    write_log_line(&format!("[输出] {}", final_text));
-    gui::update_status("⌨️ 正在输入...");
+    write_log(LogLevel::INFO, &format!("[输出] {}", final_text));
+    
+    #[cfg(target_os = "windows")]
+    if config.enable_indicator() {
+        if let Some(ind) = INDICATOR.get() {
+            ind.set_state(IndicatorState::Success);
+            let ind = ind.clone();
+             tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                if !IS_RECORDING.load(Ordering::Relaxed) {
+                     ind.set_state(IndicatorState::Hidden);
+                }
+            });
+        }
+    }
 
     let mode = config.output_mode();
     if mode == "clipboard" {
@@ -562,30 +651,53 @@ fn start_log_viewer() {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum LogLevel {
+    DEBUG,
+    INFO,
+    WARN,
+    ERROR,
+}
+
 #[cfg(target_os = "windows")]
-fn write_log_line(s: &str) {
+fn write_log(level: LogLevel, s: &str) {
     use windows::Win32::Storage::FileSystem::WriteFile;
     use std::fs::OpenOptions;
     use std::io::Write;
+
+    let level_str = match level {
+        LogLevel::DEBUG => "DEBUG",
+        LogLevel::INFO => "INFO ",
+        LogLevel::WARN => "WARN ",
+        LogLevel::ERROR => "ERROR",
+    };
+    
+    let time_str = Local::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string();
+    let log_entry = format!("[{}][{}] {}", time_str, level_str, s);
 
     // 1. 写入本地文件
     if let Some(cfg) = CONFIG_GLOBAL.get() {
         let log_file = cfg.log_file_path();
         if let Ok(mut file) = OpenOptions::new().append(true).open(log_file) {
-            let _ = writeln!(file, "{}", s);
+            let _ = writeln!(file, "{}", log_entry);
         }
     }
 
     // 2. 写入命名管道 (供实时查看器使用)
     unsafe {
         if let Some(handle) = *LOG_PIPE_HANDLE.lock().unwrap() {
-            let mut buf = Vec::with_capacity(s.len() + 2);
-            buf.extend_from_slice(s.as_bytes());
+            let mut buf = Vec::with_capacity(log_entry.len() + 2);
+            buf.extend_from_slice(log_entry.as_bytes());
             buf.extend_from_slice(b"\r\n");
             let mut written = 0u32;
             let _ = WriteFile(handle, Some(&buf), Some(&mut written), None);
         }
     }
+}
+
+#[cfg(target_os = "windows")]
+fn write_log_line(s: &str) {
+    write_log(LogLevel::INFO, s);
 }
 
 #[cfg(target_os = "windows")]

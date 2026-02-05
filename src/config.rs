@@ -24,6 +24,7 @@ pub struct AppConfig {
     pub output_mode: String,
     pub autostart: bool,
     pub hotkey: u32, // Windows 虚拟键码
+    pub enable_indicator: bool,
 }
 
 impl Default for AppConfig {
@@ -39,6 +40,7 @@ impl Default for AppConfig {
             output_mode: "clipboard".to_string(),
             autostart: false,
             hotkey: 0x71, // 默认 F2
+            enable_indicator: true,
         }
     }
 }
@@ -159,6 +161,14 @@ impl ConfigManager {
 
     pub fn set_hotkey(&self, vk: u32) {
         self.config.lock().unwrap().hotkey = vk;
+    }
+
+    pub fn enable_indicator(&self) -> bool {
+        self.config.lock().unwrap().enable_indicator
+    }
+
+    pub fn set_enable_indicator(&self, enable: bool) {
+        self.config.lock().unwrap().enable_indicator = enable;
     }
 
     pub fn reset_ai_config(&self) {
