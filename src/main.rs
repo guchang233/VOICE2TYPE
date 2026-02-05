@@ -319,6 +319,7 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
                 if current_state == AppState::Idle || current_state == AppState::Processing || current_state == AppState::Cancelled {
                     current_state = AppState::Recording;
                     write_log_line("--> [录音] 开始录音... (按 ESC 取消)"); 
+                    gui::update_status("🎤 正在听...");
                     audio_buffer.lock().unwrap().clear();
                     IS_RECORDING.store(true, Ordering::Relaxed);
                 }
@@ -328,6 +329,11 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
                     current_state = AppState::Cancelled;
                     IS_RECORDING.store(false, Ordering::Relaxed);
                     write_log_line("--> [取消] 录音已取消");
+                    gui::update_status("🚫 已取消");
+                    tokio::spawn(async {
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        gui::update_status("");
+                    });
                     audio_buffer.lock().unwrap().clear();
                 }
             }
@@ -336,6 +342,7 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
                     // 正常结束录音
                     IS_RECORDING.store(false, Ordering::Relaxed);
                     write_log_line("--> [处理] 正在转换音频...");
+                    gui::update_status("🔄 正在转换...");
 
                     let audio_data = {
                         let mut lock = audio_buffer.lock().unwrap();
@@ -346,13 +353,22 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
                     tokio::spawn(async move {
                         if let Err(e) = process_audio_and_type(audio_data, sample_rate, config_clone).await {
                             write_log_line(&format!("转写失败: {}", e));
+                            gui::update_status("❌ 识别失败");
+                            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                            gui::update_status("");
+                        } else {
+                            // 成功后，process_audio_and_type 内部会负责更新为 "正在输入"，这里只需要确保最后清除状态
+                            // 但由于 process_audio_and_type 是同步等待输入完成的 (模拟按键)，
+                            // 所以可以在这里清除，或者在函数内部清除。
+                            // 最好在函数返回后清除。
+                            gui::update_status("");
                         }
                     });
-
-                    current_state = AppState::Idle;
-                } else if current_state == AppState::Cancelled {
-                    // 如果之前被取消了，F2 松开时重置为 Idle
-                    current_state = AppState::Idle;
+                    
+                    // 重置状态为 Processing，实际上 process_audio_and_type 在后台运行
+                    current_state = AppState::Processing; 
+                    // 逻辑上 Processing 结束后应该变回 Idle，但这里是在 spawn 中处理。
+                    // 下次 StartRecording 会重置状态。
                 }
             }
         }
@@ -390,6 +406,8 @@ async fn process_audio_and_type(audio_data: Vec<f32>, sample_rate: u32, config: 
     if !resp.status().is_success() {
         let error_text = resp.text().await?;
         write_log_line(&format!("API 错误: {}", error_text));
+        gui::update_status("❌ API 请求失败");
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         return Ok(());
     }
 
@@ -402,16 +420,25 @@ async fn process_audio_and_type(audio_data: Vec<f32>, sample_rate: u32, config: 
     let raw_text = result.text.trim();
 
     if raw_text.is_empty() {
+        write_log_line("[警告] 转换结果为空");
+        gui::update_status("⚠️ 结果为空");
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        gui::update_status("");
         return Ok(());
     }
 
     // 后处理
     let final_text = post_process(raw_text, &config);
     if final_text.is_empty() {
+        write_log_line("[警告] 后处理结果为空");
+        gui::update_status("⚠️ 结果为空");
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        gui::update_status("");
         return Ok(());
     }
 
     write_log_line(&format!("[输出] {}", final_text));
+    gui::update_status("⌨️ 正在输入...");
 
     let mode = config.output_mode();
     if mode == "clipboard" {

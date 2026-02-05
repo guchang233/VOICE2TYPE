@@ -6,6 +6,21 @@ use std::sync::Arc;
 use crate::config::ConfigManager;
 use semver::Version;
 use serde::Deserialize;
+use std::sync::Mutex;
+use once_cell::sync::{Lazy, OnceCell};
+
+// 全局状态通信
+pub static STATUS_UPDATE_SENDER: OnceCell<nwg::NoticeSender> = OnceCell::new();
+pub static CURRENT_STATUS: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new(String::new()));
+
+pub fn update_status(status: &str) {
+    if let Ok(mut s) = CURRENT_STATUS.lock() {
+        *s = status.to_string();
+    }
+    if let Some(sender) = STATUS_UPDATE_SENDER.get() {
+        sender.notice();
+    }
+}
 
 // 使用 UI 线程的 Timer 轮询同步托盘菜单勾选状态，避免跨线程持有句柄
 
@@ -168,6 +183,20 @@ pub struct Voice2TypeApp {
     #[nwg_control(interval: std::time::Duration::from_millis(100), active: false)]
     #[nwg_events( OnTimerTick: [Voice2TypeApp::on_tick] )]
     pub timer: nwg::AnimationTimer,
+
+    // --- 灵动岛悬浮窗 (Status Overlay) ---
+    // flags: POPUP (无边框), VISIBLE
+    // ex_flags: WS_EX_TOPMOST (0x8) | WS_EX_TOOLWINDOW (0x80) | WS_EX_LAYERED (0x80000)? (Not using layered for now)
+    // 0x8 | 0x80 = 0x88
+    #[nwg_control(flags: "POPUP", ex_flags: 0x88, size: (220, 36), position: (0, 0), title: "StatusOverlay")]
+    pub overlay_window: nwg::Window,
+
+    #[nwg_control]
+    #[nwg_events( OnNotice: [Voice2TypeApp::on_status_notice] )]
+    pub status_notice: nwg::Notice,
+
+    #[nwg_control(parent: overlay_window, text: "Ready", size: (220, 36), position: (0, 0), h_align: nwg::HTextAlign::Center)]
+    pub overlay_label: nwg::Label,
 }
 
 impl Voice2TypeApp {
@@ -178,6 +207,33 @@ impl Voice2TypeApp {
         let app_ui = Voice2TypeApp::build_ui(Default::default()).expect("无法构建 UI");
         let app = &app_ui;
         
+        // 初始化全局 NoticeSender
+        let sender = app.status_notice.sender();
+        let _ = STATUS_UPDATE_SENDER.set(sender);
+
+        // 初始化悬浮窗位置 (屏幕顶部居中)
+        #[cfg(target_os = "windows")]
+        unsafe {
+            use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN};
+            let screen_w = GetSystemMetrics(SM_CXSCREEN);
+            let win_w = 220;
+            let x = (screen_w - win_w) / 2;
+            let y = 10; // 距离顶部 10px
+            app.overlay_window.set_position(x, y);
+        }
+        
+        // 设置悬浮窗样式
+        let mut font = nwg::Font::default();
+        let _ = nwg::Font::builder()
+            .family("Segoe UI")
+            .size(16)
+            .weight(700)
+            .build(&mut font);
+        app.overlay_label.set_font(Some(&font));
+        
+        // 初始隐藏悬浮窗
+        app.overlay_window.set_visible(false);
+
         // 初始化状态
         *app.config_manager.borrow_mut() = Some(config_manager.clone());
         
@@ -535,6 +591,26 @@ impl Voice2TypeApp {
                 if let Some(mgr) = &*self.config_manager.borrow() {
                     mgr.set_show_log(false);
                     let _ = mgr.save();
+                }
+            }
+        }
+    }
+
+    fn on_status_notice(&self) {
+        if let Ok(status) = CURRENT_STATUS.lock() {
+            if status.is_empty() || status.as_str() == "Idle" {
+                self.overlay_window.set_visible(false);
+            } else {
+                self.overlay_label.set_text(&status);
+                self.overlay_window.set_visible(true);
+                // 确保悬浮窗在最上层
+                #[cfg(target_os = "windows")]
+                unsafe {
+                    use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, SWP_NOACTIVATE};
+                    if let Some(h) = self.overlay_window.handle.hwnd() {
+                        let hwnd = windows::Win32::Foundation::HWND(h as _);
+                        let _ = SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                    }
                 }
             }
         }
