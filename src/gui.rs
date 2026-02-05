@@ -264,6 +264,42 @@ pub struct Voice2TypeApp {
     #[nwg_layout_item(layout: update_layout, row: 7, col: 0, col_span: 3)]
     pub update_progress: nwg::ProgressBar,
 
+    // --- 关于窗口 ---
+    #[nwg_control(size: (300, 320), position: (400, 400), title: "关于 Voice2Type", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_about_window])]
+    pub about_window: nwg::Window,
+
+    #[nwg_layout(parent: about_window, spacing: 10, margin: [20, 20, 20, 20])]
+    pub about_layout: nwg::GridLayout,
+
+    #[nwg_control(parent: about_window, text: "Voice2Type", font: Some(&data.font_bold))]
+    #[nwg_layout_item(layout: about_layout, row: 0, col: 0, col_span: 2)]
+    pub app_name_label: nwg::Label,
+
+    #[nwg_control(parent: about_window, text: concat!("当前版本: ", env!("CARGO_PKG_VERSION")))]
+    #[nwg_layout_item(layout: about_layout, row: 1, col: 0, col_span: 2)]
+    pub version_label: nwg::Label,
+
+    #[nwg_control(parent: about_window, text: "最新版本: 未检测")]
+    #[nwg_layout_item(layout: about_layout, row: 2, col: 0, col_span: 2)]
+    pub about_latest_ver_label: nwg::Label,
+
+    #[nwg_control(parent: about_window, text: "开源项目地址:")]
+    #[nwg_layout_item(layout: about_layout, row: 3, col: 0, col_span: 2)]
+    pub repo_label: nwg::Label,
+
+    #[nwg_control(parent: about_window, text: "访问 GitHub 仓库")]
+    #[nwg_layout_item(layout: about_layout, row: 4, col: 0, col_span: 2)]
+    #[nwg_events(OnButtonClick: [Voice2TypeApp::open_github])]
+    pub github_btn: nwg::Button,
+    
+    #[nwg_control(parent: about_window, text: "作者：guchang233")]
+    #[nwg_layout_item(layout: about_layout, row: 5, col: 0, col_span: 2)]
+    pub author_label: nwg::Label,
+
+    #[nwg_resource(family: "Segoe UI", size: 24, weight: 700)]
+    pub font_bold: nwg::Font,
+
     pub update_info: RefCell<Option<update::UpdateInfo>>,
 
     #[nwg_control]
@@ -361,6 +397,7 @@ impl Voice2TypeApp {
         // 初始隐藏窗口
         app.config_window.set_visible(false);
         app.hotkey_window.set_visible(false);
+        app.about_window.set_visible(false);
         app.update_window.set_visible(false);
         app.current_ver_val.set_text(CURRENT_VERSION);
 
@@ -872,6 +909,21 @@ impl Voice2TypeApp {
     }
 
     fn show_about(&self) {
+        // 更新最新版本信息
+        if let Some(info) = self.update_info.borrow().as_ref() {
+            self.about_latest_ver_label.set_text(&format!("最新版本: {}", info.version));
+        } else {
+            self.about_latest_ver_label.set_text("最新版本: 未检测");
+        }
+        self.about_window.set_visible(true);
+        self.about_window.set_focus();
+    }
+
+    fn hide_about_window(&self) {
+        self.about_window.set_visible(false);
+    }
+
+    fn open_github(&self) {
         let _ = open::that("https://github.com/guchang233/VOICE2TYPE");
     }
 

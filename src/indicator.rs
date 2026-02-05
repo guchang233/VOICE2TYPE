@@ -18,6 +18,7 @@ pub enum IndicatorState {
     Processing,
     Success,
     Error,
+    Cancelled,
 }
 
 #[derive(Clone)]
@@ -80,7 +81,7 @@ unsafe fn create_and_run_window(rx: Receiver<IndicatorState>) {
 
     let screen_width = GetSystemMetrics(SM_CXSCREEN);
     let initial_width = 200;
-    let initial_height = 56;
+    let initial_height = 40;
     let x = (screen_width - initial_width) / 2;
     let y = 60; // Slightly lower than top to look like a floating island
 
@@ -177,6 +178,11 @@ fn update_targets(state: &mut WindowState, new_state: &IndicatorState) {
             state.target_alpha = 1.0;
             state.target_color = 0xFF0000; // Red
             state.text = "错误".to_string();
+        }
+        IndicatorState::Cancelled => {
+            state.target_alpha = 1.0;
+            state.target_color = 0xFFD700; // Gold/Yellow
+            state.text = "已取消".to_string();
         }
     }
     

@@ -428,7 +428,14 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
                     #[cfg(target_os = "windows")]
                     if config.enable_indicator() {
                         if let Some(ind) = INDICATOR.get() {
-                            ind.set_state(IndicatorState::Hidden);
+                            ind.set_state(IndicatorState::Cancelled);
+                            let ind = ind.clone();
+                            tokio::spawn(async move {
+                                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                                if !IS_RECORDING.load(Ordering::Relaxed) {
+                                     ind.set_state(IndicatorState::Hidden);
+                                }
+                            });
                         }
                     }
                 }

@@ -11,6 +11,30 @@ pub struct UpdateInfo {
     pub body: String,
     pub download_url: String,
     pub filename: String,
+    pub date: String,
+}
+
+pub fn get_latest_release_info() -> Result<UpdateInfo> {
+    let status = Update::configure()
+        .repo_owner("guchang233")
+        .repo_name("VOICE2TYPE")
+        .bin_name("voice2type")
+        .current_version(cargo_crate_version!())
+        .build()?;
+
+    let latest = status.get_latest_release()?;
+    
+    let asset = latest.assets.iter()
+            .find(|a| a.name.to_lowercase().ends_with(".exe"))
+            .cloned();
+
+    Ok(UpdateInfo {
+        version: latest.version,
+        body: latest.body.unwrap_or_default(),
+        download_url: asset.as_ref().map(|a| a.download_url.clone()).unwrap_or_default(),
+        filename: asset.as_ref().map(|a| a.name.clone()).unwrap_or_default(),
+        date: latest.date,
+    })
 }
 
 pub fn check_update() -> Result<Option<UpdateInfo>> {
@@ -46,6 +70,7 @@ pub fn check_update() -> Result<Option<UpdateInfo>> {
                 body: latest.body.unwrap_or_default(),
                 download_url: asset.download_url,
                 filename: asset.name,
+                date: latest.date,
             }))
         } else {
             // No exe asset found, probably a source-only release
