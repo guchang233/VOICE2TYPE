@@ -25,6 +25,8 @@ pub struct AppConfig {
     pub autostart: bool,
     pub hotkey: u32, // Windows 虚拟键码
     pub enable_indicator: bool,
+    pub last_check_time: u64,
+    pub ignored_version: String,
 }
 
 impl Default for AppConfig {
@@ -41,6 +43,8 @@ impl Default for AppConfig {
             autostart: false,
             hotkey: 0x71, // 默认 F2
             enable_indicator: true,
+            last_check_time: 0,
+            ignored_version: String::new(),
         }
     }
 }
@@ -169,6 +173,22 @@ impl ConfigManager {
 
     pub fn set_enable_indicator(&self, enable: bool) {
         self.config.lock().unwrap().enable_indicator = enable;
+    }
+
+    pub fn last_check_time(&self) -> u64 {
+        self.config.lock().unwrap().last_check_time
+    }
+
+    pub fn set_last_check_time(&self, time: u64) {
+        self.config.lock().unwrap().last_check_time = time;
+    }
+
+    pub fn ignored_version(&self) -> String {
+        self.config.lock().unwrap().ignored_version.clone()
+    }
+
+    pub fn set_ignored_version(&self, version: String) {
+        self.config.lock().unwrap().ignored_version = version;
     }
 
     pub fn reset_ai_config(&self) {

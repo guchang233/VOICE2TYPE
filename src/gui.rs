@@ -2,10 +2,9 @@ use native_windows_gui as nwg;
 use native_windows_gui::NativeUi;
 use native_windows_derive::NwgUi;
 use std::cell::RefCell;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use crate::config::ConfigManager;
-use semver::Version;
-use serde::Deserialize;
+use crate::update;
 
 // 使用 UI 线程的 Timer 轮询同步托盘菜单勾选状态，避免跨线程持有句柄
 
@@ -14,8 +13,6 @@ use serde::Deserialize;
 use self::voice2_type_app_ui::Voice2TypeAppUi;
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
-const REPO_OWNER: &str = "guchang233"; // 如果不同，请替换为您的实际用户名
-const REPO_NAME: &str = "VOICE2TYPE";
 
 #[derive(Default, NwgUi)]
 pub struct Voice2TypeApp {
@@ -99,8 +96,8 @@ pub struct Voice2TypeApp {
     #[nwg_control(parent: tray_menu)]
     pub sep_update: nwg::MenuSeparator,
 
-    #[nwg_control(parent: tray_menu, text: "更新")]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::check_update])]
+    #[nwg_control(parent: tray_menu, text: "版本检测")]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_update_window])]
     pub update_item: nwg::MenuItem,
 
     // 其他项
@@ -165,6 +162,71 @@ pub struct Voice2TypeApp {
     #[nwg_layout_item(layout: config_layout, row: 3, col: 1, col_span: 2)]
     pub hotkey_combo: nwg::ComboBox<String>,
     
+    // --- 版本检测窗口 ---
+    #[nwg_control(size: (450, 400), position: (300, 300), title: "版本检测", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_update_window])]
+    pub update_window: nwg::Window,
+
+    #[nwg_layout(parent: update_window, spacing: 10, margin: [20, 20, 20, 20])]
+    pub update_layout: nwg::GridLayout,
+
+    #[nwg_control(parent: update_window, text: "当前版本:")]
+    #[nwg_layout_item(layout: update_layout, row: 0, col: 0)]
+    pub current_ver_label: nwg::Label,
+
+    #[nwg_control(parent: update_window, text: "")]
+    #[nwg_layout_item(layout: update_layout, row: 0, col: 1, col_span: 2)]
+    pub current_ver_val: nwg::Label,
+
+    #[nwg_control(parent: update_window, text: "最新版本:")]
+    #[nwg_layout_item(layout: update_layout, row: 1, col: 0)]
+    pub latest_ver_label: nwg::Label,
+
+    #[nwg_control(parent: update_window, text: "未检测")]
+    #[nwg_layout_item(layout: update_layout, row: 1, col: 1, col_span: 2)]
+    pub latest_ver_val: nwg::Label,
+
+    #[nwg_control(parent: update_window, text: "更新日志:")]
+    #[nwg_layout_item(layout: update_layout, row: 2, col: 0, col_span: 3)]
+    pub changelog_label: nwg::Label,
+
+    #[nwg_control(parent: update_window, text: "", flags: "VISIBLE", readonly: true)]
+    #[nwg_layout_item(layout: update_layout, row: 3, col: 0, col_span: 3, row_span: 3)]
+    pub changelog_text: nwg::TextBox,
+
+    #[nwg_control(parent: update_window, text: "检测新版本")]
+    #[nwg_layout_item(layout: update_layout, row: 6, col: 0)]
+    #[nwg_events(OnButtonClick: [Voice2TypeApp::do_check_update])]
+    pub check_update_btn: nwg::Button,
+
+    #[nwg_control(parent: update_window, text: "忽略此版本", enabled: false)]
+    #[nwg_layout_item(layout: update_layout, row: 6, col: 1)]
+    #[nwg_events(OnButtonClick: [Voice2TypeApp::ignore_update])]
+    pub ignore_btn: nwg::Button,
+
+    #[nwg_control(parent: update_window, text: "立即更新", enabled: false)]
+    #[nwg_layout_item(layout: update_layout, row: 6, col: 2)]
+    #[nwg_events(OnButtonClick: [Voice2TypeApp::start_update])]
+    pub start_update_btn: nwg::Button,
+
+    #[nwg_control(parent: update_window, range: 0..100, pos: 0)]
+    #[nwg_layout_item(layout: update_layout, row: 7, col: 0, col_span: 3)]
+    pub update_progress: nwg::ProgressBar,
+
+    pub update_info: RefCell<Option<update::UpdateInfo>>,
+
+    #[nwg_control]
+    #[nwg_events( OnNotice: [Voice2TypeApp::on_check_notice] )]
+    pub check_notice: nwg::Notice,
+
+    #[nwg_control]
+    #[nwg_events( OnNotice: [Voice2TypeApp::on_progress_notice] )]
+    pub progress_notice: nwg::Notice,
+
+    // Thread communication state
+    pub check_result: RefCell<Option<Arc<Mutex<Option<anyhow::Result<Option<update::UpdateInfo>>>>>>>,
+    pub progress_data: RefCell<Option<Arc<Mutex<(u64, u64)>>>>,
+
     // 状态
     pub config_manager: RefCell<Option<Arc<ConfigManager>>>,
 
@@ -184,6 +246,8 @@ impl Voice2TypeApp {
         
         // 初始化状态
         *app.config_manager.borrow_mut() = Some(config_manager.clone());
+        *app.check_result.borrow_mut() = Some(Arc::new(Mutex::new(None)));
+        *app.progress_data.borrow_mut() = Some(Arc::new(Mutex::new((0, 0))));
         
         // Set initial values
         app.allow_emoji_item.set_checked(config_manager.allow_emoji());
@@ -226,6 +290,8 @@ impl Voice2TypeApp {
 
         // 初始隐藏配置窗口
         app.config_window.set_visible(false);
+        app.update_window.set_visible(false);
+        app.current_ver_val.set_text(CURRENT_VERSION);
 
         // 确保主锚点窗口也不可见
         app.window.set_visible(false);
@@ -272,6 +338,9 @@ impl Voice2TypeApp {
             }
             app.config_window.set_visible(true);
         }
+
+        // 启动自动检测
+        app.do_check_update();
         
         app_ui
     }
@@ -491,62 +560,188 @@ impl Voice2TypeApp {
         nwg::simple_message("已重置", "已重置 API Key、API URL 与模型为默认值");
     }
 
-    fn check_update(&self) {
-        let current_version = CURRENT_VERSION.to_string();
-        std::thread::spawn(move || {
-            match Self::fetch_latest_version() {
-                Ok(latest_version_str) => {
-                    let current = Version::parse(&current_version).unwrap_or_else(|_| Version::new(0, 0, 0));
-                    // 移除 'v' 前缀
-                    let clean_latest = latest_version_str.trim_start_matches('v');
-                    let latest = Version::parse(clean_latest).unwrap_or_else(|_| Version::new(0, 0, 0));
+    fn show_update_window(&self) {
+        self.update_window.set_visible(true);
+        self.update_window.set_focus();
+        self.do_check_update();
+    }
 
-                    if latest > current {
-                        #[cfg(target_os = "windows")]
-                        unsafe {
-                            use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_YESNO, MB_ICONINFORMATION, IDYES};
-                            use windows::core::PCWSTR;
-                            
-                            // 构造宽字符串 (需以 \0 结尾)
-                            let title = "发现新版本\0".encode_utf16().collect::<Vec<u16>>();
-                            let msg = format!("新版本 {} 已发布！\n当前版本: {}\n\n是否前往 GitHub 下载？\0", latest_version_str, current_version).encode_utf16().collect::<Vec<u16>>();
-                            
-                            let ret = MessageBoxW(None, PCWSTR(msg.as_ptr()), PCWSTR(title.as_ptr()), MB_YESNO | MB_ICONINFORMATION);
-                            
-                            if ret == IDYES {
-                                let _ = open::that(format!("https://github.com/{}/{}/releases/latest", REPO_OWNER, REPO_NAME));
-                            }
-                        }
-                    } else {
-                         nwg::simple_message("无更新", &format!("当前已是最新版本 ({})。", current_version));
-                    }
-                },
-                Err(e) => {
-                     nwg::simple_message("检查更新失败", &format!("无法检查更新。\n错误: {}", e));
-                }
-            }
+    fn hide_update_window(&self) {
+        self.update_window.set_visible(false);
+    }
+
+    fn do_check_update(&self) {
+        self.latest_ver_val.set_text("正在检测...");
+        self.start_update_btn.set_enabled(false);
+        self.changelog_text.set_text("");
+        self.update_progress.set_visible(false);
+
+        let sender = self.check_notice.sender();
+        let result_store = self.check_result.borrow().as_ref().unwrap().clone();
+        
+        std::thread::spawn(move || {
+            let res = update::check_update();
+            *result_store.lock().unwrap() = Some(res);
+            sender.notice();
         });
     }
 
-    fn fetch_latest_version() -> anyhow::Result<String> {
-        #[derive(Deserialize)]
-        struct Release {
-            tag_name: String,
-        }
-
-        let client = reqwest::blocking::Client::builder()
-            .user_agent("Voice2Type-App")
-            .build()?;
+    fn on_check_notice(&self) {
+        let result_guard = self.check_result.borrow();
+        let arc = result_guard.as_ref().unwrap();
+        let mut guard = arc.lock().unwrap();
         
-        let url = format!("https://api.github.com/repos/{}/{}/releases/latest", REPO_OWNER, REPO_NAME);
-        let resp = client.get(&url).send()?;
-        
-        if !resp.status().is_success() {
-             anyhow::bail!("GitHub API request failed: {}", resp.status());
-        }
+        if let Some(res) = guard.take() {
+             match res {
+                 Ok(Some(info)) => {
+                     // 保存 info 到 RefCell
+                     *self.update_info.borrow_mut() = Some(info.clone());
+                     
+                     self.latest_ver_val.set_text(&info.version);
+                     self.changelog_text.set_text(&info.body);
+                     self.start_update_btn.set_enabled(true);
+                     self.ignore_btn.set_enabled(true);
+                     
+                     // 如果窗口不可见（后台检测），且未忽略，则提示
+                     if !self.update_window.visible() {
+                         let (ignored, last_check) = if let Some(mgr) = &*self.config_manager.borrow() {
+                             (mgr.ignored_version(), mgr.last_check_time())
+                         } else {
+                             (String::new(), 0)
+                         };
+                         
+                         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
 
-        let release: Release = resp.json()?;
-        Ok(release.tag_name)
+                         if info.version != ignored && (now > last_check + 86400) {
+                             #[cfg(target_os = "windows")]
+                             unsafe {
+                                use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_YESNO, MB_ICONINFORMATION, IDYES};
+                                use windows::core::PCWSTR;
+                                let title = "发现新版本\0".encode_utf16().collect::<Vec<u16>>();
+                                let msg = format!("新版本 {} 已发布！\n是否查看详情？\0", info.version).encode_utf16().collect::<Vec<u16>>();
+                                let ret = MessageBoxW(None, PCWSTR(msg.as_ptr()), PCWSTR(title.as_ptr()), MB_YESNO | MB_ICONINFORMATION);
+                                
+                                // 记录提示时间
+                                if let Some(mgr) = &*self.config_manager.borrow() {
+                                    mgr.set_last_check_time(now);
+                                    let _ = mgr.save();
+                                }
+
+                                if ret == IDYES {
+                                    self.show_update_window();
+                                }
+                             }
+                         }
+                     }
+                 },
+                 Ok(None) => {
+                     self.latest_ver_val.set_text("当前已是最新");
+                     self.ignore_btn.set_enabled(false);
+                 },
+                 Err(e) => {
+                     self.latest_ver_val.set_text("检测失败");
+                     self.ignore_btn.set_enabled(false);
+                     if self.update_window.visible() {
+                         nwg::simple_message("检测失败", &format!("错误: {}", e));
+                     }
+                 }
+             }
+        }
+    }
+
+    fn ignore_update(&self) {
+        if let Some(info) = self.update_info.borrow().as_ref() {
+             if let Some(mgr) = &*self.config_manager.borrow() {
+                 mgr.set_ignored_version(info.version.clone());
+                 let _ = mgr.save();
+             }
+             self.hide_update_window();
+             nwg::simple_message("已忽略", "将不再提示此版本的更新。");
+        }
+    }
+
+    fn start_update(&self) {
+        let info_opt = self.update_info.borrow().clone();
+        if let Some(info) = info_opt {
+            self.start_update_btn.set_enabled(false);
+            self.check_update_btn.set_enabled(false);
+            self.update_progress.set_visible(true);
+            self.update_progress.set_pos(0);
+            
+            let sender = self.progress_notice.sender();
+            let progress_data = self.progress_data.borrow().as_ref().unwrap().clone();
+            let download_url = info.download_url.clone();
+            let version = info.version.clone();
+            
+            std::thread::spawn(move || {
+                // 修改：下载到当前程序所在目录，避免跨盘符移动导致的 os error 17
+                let current_exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("."));
+                let parent_dir = current_exe.parent().unwrap_or_else(|| std::path::Path::new("."));
+                let target_path = parent_dir.join(format!("voice2type_update_{}.exe", version));
+                
+                let pd = progress_data.clone();
+                let sender_clone = sender.clone();
+                
+                let res = update::download_file(&download_url, &target_path, move |curr, total| {
+                    *pd.lock().unwrap() = (curr, total);
+                    sender_clone.notice();
+                });
+                
+                if let Err(e) = res {
+                    #[cfg(target_os = "windows")]
+                    unsafe {
+                        use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_OK, MB_ICONERROR};
+                        use windows::core::PCWSTR;
+                        let title = "更新失败\0".encode_utf16().collect::<Vec<u16>>();
+                        let msg = format!("下载失败: {}\0", e).encode_utf16().collect::<Vec<u16>>();
+                        MessageBoxW(None, PCWSTR(msg.as_ptr()), PCWSTR(title.as_ptr()), MB_OK | MB_ICONERROR);
+                    }
+                    return;
+                }
+                
+                if let Err(e) = update::install_update(&target_path) {
+                    #[cfg(target_os = "windows")]
+                    unsafe {
+                        use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_OK, MB_ICONERROR};
+                        use windows::core::PCWSTR;
+                        let title = "更新失败\0".encode_utf16().collect::<Vec<u16>>();
+                        let msg = format!("安装失败: {}\0", e).encode_utf16().collect::<Vec<u16>>();
+                        MessageBoxW(None, PCWSTR(msg.as_ptr()), PCWSTR(title.as_ptr()), MB_OK | MB_ICONERROR);
+                    }
+                    return;
+                }
+                
+                #[cfg(target_os = "windows")]
+                unsafe {
+                    use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_OK, MB_ICONINFORMATION};
+                    use windows::core::PCWSTR;
+                    let title = "更新成功\0".encode_utf16().collect::<Vec<u16>>();
+                    let msg = "更新已完成，程序将立即重启。\0".encode_utf16().collect::<Vec<u16>>();
+                    MessageBoxW(None, PCWSTR(msg.as_ptr()), PCWSTR(title.as_ptr()), MB_OK | MB_ICONINFORMATION);
+                    
+                    // 显式释放资源和互斥锁
+                    crate::log_set_enabled(false);
+                    crate::release_app_mutex();
+                }
+                
+                use std::process::Command;
+                if let Ok(exe) = std::env::current_exe() {
+                    let _ = Command::new(exe).arg("--restart").spawn();
+                }
+                std::process::exit(0);
+            });
+        }
+    }
+
+    fn on_progress_notice(&self) {
+         let guard = self.progress_data.borrow();
+         let arc = guard.as_ref().unwrap();
+         let (curr, total) = *arc.lock().unwrap();
+         
+         if total > 0 {
+             let percent = (curr as f64 / total as f64 * 100.0) as u32;
+             self.update_progress.set_pos(percent);
+         }
     }
 
     fn show_about(&self) {

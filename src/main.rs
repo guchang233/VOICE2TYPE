@@ -4,6 +4,7 @@ mod config;
 mod gui;
 mod win_utils;
 mod indicator;
+mod update;
 
 use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -73,6 +74,19 @@ pub fn should_uncheck_log_menu_and_reset() -> bool {
     false
 }
 
+#[cfg(target_os = "windows")]
+static APP_MUTEX: Lazy<StdMutex<Option<windows::Win32::Foundation::HANDLE>>> = Lazy::new(|| StdMutex::new(None));
+
+#[cfg(target_os = "windows")]
+pub fn release_app_mutex() {
+    use windows::Win32::Foundation::CloseHandle;
+    if let Ok(mut guard) = APP_MUTEX.lock() {
+        if let Some(handle) = guard.take() {
+            unsafe { let _ = CloseHandle(handle); }
+        }
+    }
+}
+
 fn main() -> Result<()> {
     #[cfg(target_os = "windows")]
     {
@@ -81,29 +95,77 @@ fn main() -> Result<()> {
             viewer_main();
             return Ok(());
         }
+
+        // 如果是更新重启，先等待旧进程退出
+        if args.iter().any(|a| a == "--restart") {
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+        }
+
+        // 清理旧版本备份文件 (*.old)
+        if let Ok(exe_path) = std::env::current_exe() {
+             if let Some(dir) = exe_path.parent() {
+                 if let Ok(entries) = std::fs::read_dir(dir) {
+                     for entry in entries.flatten() {
+                         let path = entry.path();
+                         if let Some(ext) = path.extension() {
+                             if ext == "old" {
+                                 let _ = std::fs::remove_file(path);
+                             }
+                         }
+                     }
+                 }
+             }
+        }
     }
     // 0. 单例检查 (Single Instance Check)
     #[cfg(target_os = "windows")]
     unsafe {
         use windows::Win32::System::Threading::CreateMutexW;
-        use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
+        use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS, CloseHandle};
         use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_OK, MB_ICONEXCLAMATION};
         use windows::core::PCWSTR;
 
         // 创建全局互斥体
         let mutex_name = "Global\\Voice2TypeAppMutex\0".encode_utf16().collect::<Vec<u16>>();
-        // CreateMutexW returns Result<HANDLE, Error> in windows 0.54+
-        let result = CreateMutexW(None, true, PCWSTR(mutex_name.as_ptr()));
+        
+        let args: Vec<String> = std::env::args().collect();
+        let is_restart = args.iter().any(|a| a == "--restart");
+        let max_retries = if is_restart { 20 } else { 1 }; // 重启模式下尝试 20 次 (10秒)
+        
+        let mut handle = Ok(windows::Win32::Foundation::HANDLE(0));
+        let mut acquired = false;
 
-        if let Ok(handle) = result {
-             if GetLastError() == ERROR_ALREADY_EXISTS {
-                 let title = "Voice2Type\0".encode_utf16().collect::<Vec<u16>>();
-                 let msg = "程序已在运行中！\nProgram is already running.\0".encode_utf16().collect::<Vec<u16>>();
-                 MessageBoxW(None, PCWSTR(msg.as_ptr()), PCWSTR(title.as_ptr()), MB_OK | MB_ICONEXCLAMATION);
-                 std::process::exit(0);
-             }
-             // 保持互斥体句柄直到进程结束
-             let _ = handle;
+        for _ in 0..max_retries {
+            handle = CreateMutexW(None, true, PCWSTR(mutex_name.as_ptr()));
+            
+            if let Ok(h) = handle {
+                if GetLastError() != ERROR_ALREADY_EXISTS {
+                    // 成功获取锁（是第一个实例）
+                    acquired = true;
+                    break;
+                }
+                // 虽然 CreateMutexW 成功返回句柄，但 ERROR_ALREADY_EXISTS 说明已经有实例存在
+                // 关闭句柄，准备重试
+                let _ = CloseHandle(h);
+            }
+            
+            if is_restart {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            } else {
+                break;
+            }
+        }
+
+        if !acquired {
+             let title = "错误\0".encode_utf16().collect::<Vec<u16>>();
+             let msg = "程序已在运行中。\0".encode_utf16().collect::<Vec<u16>>();
+             MessageBoxW(None, PCWSTR(msg.as_ptr()), PCWSTR(title.as_ptr()), MB_OK | MB_ICONEXCLAMATION);
+             std::process::exit(0);
+        }
+        
+        // 存储句柄以供显式释放
+        if let Ok(h) = handle {
+            *APP_MUTEX.lock().unwrap() = Some(h);
         }
     }
 
