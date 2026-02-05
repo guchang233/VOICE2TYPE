@@ -4,7 +4,6 @@
 
 Voice2Type 是一款基于 Rust 编写的轻量级语音转文字工具。它常驻后台，通过全局热键实现“按住说话，松开上屏”的流畅体验。接入 SiliconFlow 高精度语音模型，支持中英文混合识别，并配有精美的灵动岛式状态悬浮窗。
 
-![GIF](https://github.com/user-attachments/assets/177360a3-9115-4836-b2b4-e314a6e29e54)
 
 ## ✨ 核心特性
 
