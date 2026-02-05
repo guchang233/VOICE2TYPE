@@ -72,12 +72,9 @@ cargo build --release
 *   **Q: 游戏内无法输入？**
     *   A: 请尝试以**管理员身份运行**本程序，或切换到“注入模式”。
 *   **Q: 提示 API Key 错误？**
-    *   A: 请检查 SiliconFlow 控制台的 Key 是否过期或余额不足，并确保没有多余空格。
+    *   A: 请检查 SiliconFlow 控制台的 Key 是否过期，并确保没有因请求频率过高而被暂时限制（如果您使用的不是免费模型则也有可能是余额用尽）
 
 ## 📄 License
 
-MIT License © 2024 guchang233
-<<<<<<< HEAD
+MIT License © 2024
 =======
-
->>>>>>> cc68c5fc4dad382c040640c0505e6028d0347707
