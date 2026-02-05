@@ -221,6 +221,9 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
     let dev_config = device.default_input_config().context("无法获取默认输入配置")?;
     let stream_config: cpal::StreamConfig = dev_config.clone().into();
     let sample_rate = stream_config.sample_rate.0;
+    let channels = stream_config.channels;
+
+    write_log_line(&format!("[音频] 采样率: {}Hz, 通道数: {}", sample_rate, channels));
 
     let audio_buffer: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
     let audio_buffer_writer = audio_buffer.clone();
@@ -231,7 +234,15 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
         move |data: &[f32], _: &_| {
             if IS_RECORDING.load(Ordering::Relaxed) {
                 if let Ok(mut buffer) = audio_buffer_writer.lock() {
-                    buffer.extend_from_slice(data);
+                    if channels > 1 {
+                        // 混音到单声道
+                        for frame in data.chunks(channels as usize) {
+                            let sum: f32 = frame.iter().sum();
+                            buffer.push(sum / channels as f32);
+                        }
+                    } else {
+                        buffer.extend_from_slice(data);
+                    }
                 }
             }
         },
@@ -423,7 +434,25 @@ async fn process_audio_and_type(audio_data: Vec<f32>, sample_rate: u32, config: 
         return Ok(());
     }
 
-    let wav_data = encode_wav_memory(&audio_data, sample_rate)?;
+    let start_time = std::time::Instant::now();
+
+    // 1. 降采样和格式转换 (f32 -> i16, Target 16kHz)
+    let (processed_samples, new_rate) = resample_and_convert(&audio_data, sample_rate);
+    
+    let resample_duration = start_time.elapsed();
+    
+    // 2. 编码 WAV (16-bit)
+    let wav_data = encode_wav_memory(&processed_samples, new_rate)?;
+
+    let encode_duration = start_time.elapsed() - resample_duration;
+
+    write_log_line(&format!(
+        "[性能] 原始大小: {}k, 处理后大小: {}k, 降采样耗时: {:?}, 编码耗时: {:?}", 
+        audio_data.len() * 4 / 1024, 
+        wav_data.len() / 1024,
+        resample_duration,
+        encode_duration
+    ));
 
     let form = reqwest::multipart::Form::new()
         .text("model", config.get_model_name())
@@ -431,11 +460,16 @@ async fn process_audio_and_type(audio_data: Vec<f32>, sample_rate: u32, config: 
             .file_name("recording.wav")
             .mime_str("audio/wav")?);
 
+    let upload_start = std::time::Instant::now();
+
     let resp = HTTP_CLIENT.post(&config.get_api_url())
         .header("Authorization", format!("Bearer {}", api_key))
         .multipart(form)
         .send()
         .await?;
+    
+    let upload_duration = upload_start.elapsed();
+    write_log_line(&format!("[性能] API 请求耗时: {:?}", upload_duration));
 
     if !resp.status().is_success() {
         let error_text = resp.text().await?;
@@ -495,7 +529,7 @@ async fn process_audio_and_type(audio_data: Vec<f32>, sample_rate: u32, config: 
             if let Some(ind) = INDICATOR.get() {
                 ind.set_state(IndicatorState::Error); // 用 Error 状态表示空结果
                 let ind = ind.clone();
-                 tokio::spawn(async move {
+                tokio::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
                     if !IS_RECORDING.load(Ordering::Relaxed) {
                          ind.set_state(IndicatorState::Hidden);
@@ -572,6 +606,44 @@ async fn process_audio_and_type(audio_data: Vec<f32>, sample_rate: u32, config: 
     }
 
     Ok(())
+}
+
+fn resample_and_convert(input: &[f32], input_rate: u32) -> (Vec<i16>, u32) {
+    let target_rate = 16000;
+    
+    // 如果原始采样率小于等于目标采样率，不做降采样，直接转换
+    if input_rate <= target_rate {
+        let output: Vec<i16> = input.iter()
+            .map(|&s| (s.clamp(-1.0, 1.0) * 32767.0) as i16)
+            .collect();
+        return (output, input_rate);
+    }
+
+    // 计算降采样比率 (简单的整数比率)
+    // 例如 48000 / 16000 = 3
+    // 如果不是整数倍，这里会有点误差，但对于语音识别通常可接受
+    let ratio = (input_rate as f32 / target_rate as f32).round() as usize;
+    if ratio <= 1 {
+         let output: Vec<i16> = input.iter()
+            .map(|&s| (s.clamp(-1.0, 1.0) * 32767.0) as i16)
+            .collect();
+        return (output, input_rate);
+    }
+
+    let est_capacity = input.len() / ratio + 1;
+    let mut output = Vec::with_capacity(est_capacity);
+
+    // 均值池化 (Average Pooling) 降采样，充当简单的低通滤波
+    for chunk in input.chunks(ratio) {
+        let sum: f32 = chunk.iter().sum();
+        let avg = sum / chunk.len() as f32;
+        let sample_i16 = (avg.clamp(-1.0, 1.0) * 32767.0) as i16;
+        output.push(sample_i16);
+    }
+    
+    // 计算实际的新采样率
+    let actual_new_rate = input_rate / ratio as u32;
+    (output, actual_new_rate)
 }
 
 #[cfg(target_os = "windows")]
@@ -827,17 +899,17 @@ fn post_process(text: &str, config: &ConfigManager) -> String {
     result.trim().to_string()
 }
 
-fn encode_wav_memory(samples: &[f32], sample_rate: u32) -> Result<Vec<u8>> {
+fn encode_wav_memory(samples: &[i16], sample_rate: u32) -> Result<Vec<u8>> {
     let spec = hound::WavSpec {
         channels: 1,
         sample_rate,
-        bits_per_sample: 32,
-        sample_format: hound::SampleFormat::Float,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
     };
 
-    // 预分配内存：Header (约44 bytes) + Data (samples * 4 bytes)
+    // 预分配内存：Header (约44 bytes) + Data (samples * 2 bytes)
     // 这样可以避免 Vec 扩容带来的内存拷贝
-    let expected_size = 44 + samples.len() * 4;
+    let expected_size = 44 + samples.len() * 2;
     let mut cursor = Cursor::new(Vec::with_capacity(expected_size));
     {
         let mut writer = hound::WavWriter::new(&mut cursor, spec)?;

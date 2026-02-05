@@ -346,7 +346,7 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
             if alpha_f > 0.0 {
                 let idx = (y * w + x) as usize;
                 let bg_val = pixels[idx];
-                let bg_a = (bg_val >> 24) & 0xFF;
+                let _bg_a = (bg_val >> 24) & 0xFF;
                 
                 // Simple blend over black background
                 let final_a = (alpha_f * dot_alpha as f32) as u32;

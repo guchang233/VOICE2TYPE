@@ -43,11 +43,11 @@ pub struct Voice2TypeApp {
     #[nwg_control(parent: tray_menu, text: "设置")]
     pub settings_menu: nwg::Menu,
 
-    #[nwg_control(parent: settings_menu, text: "表情", check: true)]
+    #[nwg_control(parent: settings_menu, text: "允许输出表情", check: true)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_emoji])]
     pub allow_emoji_item: nwg::MenuItem,
 
-    #[nwg_control(parent: settings_menu, text: "标点", check: true)]
+    #[nwg_control(parent: settings_menu, text: "允许输出标点", check: true)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_punctuation])]
     pub allow_punct_item: nwg::MenuItem,
 
@@ -74,21 +74,21 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::open_config_dir])]
     pub config_file_item: nwg::MenuItem,
 
-    #[nwg_control(parent: settings_menu, text: "输出")]
+    #[nwg_control(parent: settings_menu, text: "输出方式")]
     pub output_menu: nwg::Menu,
 
-    #[nwg_control(parent: output_menu, text: "注入", check: true)]
+    #[nwg_control(parent: output_menu, text: "注入(不推荐)", check: true)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_output_inject])]
     pub output_inject_item: nwg::MenuItem,
 
-    #[nwg_control(parent: output_menu, text: "剪贴板", check: false)]
+    #[nwg_control(parent: output_menu, text: "剪贴板(推荐)", check: false)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_output_clipboard])]
     pub output_clipboard_item: nwg::MenuItem,
-    #[nwg_control(parent: config_menu, text: "日志", check: true)]
+    #[nwg_control(parent: config_menu, text: "显示日志", check: true)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_log])]
     pub log_item: nwg::MenuItem,
 
-    #[nwg_control(parent: settings_menu, text: "自启动", check: false)]
+    #[nwg_control(parent: settings_menu, text: "开机自启动", check: false)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_autostart])]
     pub autostart_item: nwg::MenuItem,
 
