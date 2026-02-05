@@ -17,10 +17,6 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 #[derive(Default, NwgUi)]
 pub struct Voice2TypeApp {
     // 1x1 像素透明锚点窗口
-    // Flags: POPUP (无边框/标题), VISIBLE (使其存在), 禁用任务栏 (工具窗口)
-    // 注意: 我们故意移除了 VISIBLE 以防止它出现在任务栏中。
-    // NWG 仍然会创建窗口句柄，这对于托盘图标来说足够了。
-    // ex_flags: 0x80 = WS_EX_TOOLWINDOW (防止显示在任务栏)
     #[nwg_control(size: (1, 1), position: (0, 0), flags: "POPUP", ex_flags: 0x80)]
     #[nwg_events( OnWindowClose: [Voice2TypeApp::quit] )]
     pub window: nwg::Window,
@@ -33,44 +29,38 @@ pub struct Voice2TypeApp {
     #[nwg_resource(source_bin: Some(include_bytes!("../icon.ico")))]
     pub icon: nwg::Icon,
 
-    // 托盘菜单
+    // 托盘菜单 (Root)
     #[nwg_control(parent: window, popup: true)]
     pub tray_menu: nwg::Menu,
 
+    // 设置 (Top Level)
     #[nwg_control(parent: tray_menu, text: "设置")]
     pub settings_menu: nwg::Menu,
 
-    #[nwg_control(parent: settings_menu, text: "允许输出表情", check: true)]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_emoji])]
-    pub allow_emoji_item: nwg::MenuItem,
+    // --- 设置 -> 通用 ---
+    #[nwg_control(parent: settings_menu, text: "通用")]
+    pub general_menu: nwg::Menu,
 
-    #[nwg_control(parent: settings_menu, text: "允许输出标点", check: true)]
+    #[nwg_control(parent: general_menu, text: "开机自启动", check: true)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_autostart])]
+    pub autostart_item: nwg::MenuItem,
+
+    #[nwg_control(parent: general_menu, text: "状态浮窗", check: true)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_indicator])]
+    pub indicator_item: nwg::MenuItem,
+
+    #[nwg_control(parent: general_menu)]
+    pub sep_general: nwg::MenuSeparator,
+
+    #[nwg_control(parent: general_menu, text: "允许输出标点", check: true)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_punctuation])]
     pub allow_punct_item: nwg::MenuItem,
 
-    #[nwg_control(parent: tray_menu, text: "语言")]
-    pub lang_menu: nwg::Menu,
+    #[nwg_control(parent: general_menu, text: "允许输出表情", check: true)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_emoji])]
+    pub allow_emoji_item: nwg::MenuItem,
 
-    #[nwg_control(parent: lang_menu, text: "中文", check: true)]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_lang_zh])]
-    pub lang_zh_item: nwg::MenuItem,
-
-    #[nwg_control(parent: lang_menu, text: "English", check: true)]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_lang_en])]
-    pub lang_en_item: nwg::MenuItem,
-
-    // 配置子菜单
-    #[nwg_control(parent: settings_menu, text: "配置")]
-    pub config_menu: nwg::Menu,
-
-    #[nwg_control(parent: config_menu, text: "模型")]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_config_window])]
-    pub config_api_item: nwg::MenuItem,
-
-    #[nwg_control(parent: config_menu, text: "目录")]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::open_config_dir])]
-    pub config_file_item: nwg::MenuItem,
-
+    // --- 设置 -> 输出模式 ---
     #[nwg_control(parent: settings_menu, text: "输出方式")]
     pub output_menu: nwg::Menu,
 
@@ -81,18 +71,66 @@ pub struct Voice2TypeApp {
     #[nwg_control(parent: output_menu, text: "剪贴板(推荐)", check: false)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_output_clipboard])]
     pub output_clipboard_item: nwg::MenuItem,
-    #[nwg_control(parent: config_menu, text: "显示日志", check: true)]
+
+    // --- 设置 -> 语言 ---
+    #[nwg_control(parent: settings_menu, text: "语言")]
+    pub lang_menu: nwg::Menu,
+
+    #[nwg_control(parent: lang_menu, text: "界面语言")]
+    pub interface_lang_menu: nwg::Menu,
+
+    #[nwg_control(parent: interface_lang_menu, text: "中文", check: true)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_lang_zh])]
+    pub lang_zh_item: nwg::MenuItem,
+
+    #[nwg_control(parent: interface_lang_menu, text: "English", check: true)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_lang_en])]
+    pub lang_en_item: nwg::MenuItem,
+
+    #[nwg_control(parent: lang_menu, text: "输出语言")]
+    pub output_lang_menu: nwg::Menu,
+
+    #[nwg_control(parent: output_lang_menu, text: "自动 (Auto)", check: true)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_out_lang_auto])]
+    pub output_lang_auto_item: nwg::MenuItem,
+
+    #[nwg_control(parent: output_lang_menu, text: "中文 (Zh)", check: true)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_out_lang_zh])]
+    pub output_lang_zh_item: nwg::MenuItem,
+
+    #[nwg_control(parent: output_lang_menu, text: "English (En)", check: true)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_out_lang_en])]
+    pub output_lang_en_item: nwg::MenuItem,
+
+    // --- 设置 -> 配置 ---
+    #[nwg_control(parent: settings_menu, text: "配置")]
+    pub config_menu: nwg::Menu,
+
+    #[nwg_control(parent: config_menu, text: "模型设置")]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_config_window])]
+    pub config_api_item: nwg::MenuItem,
+
+    #[nwg_control(parent: config_menu, text: "热键绑定")]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_hotkey_window])]
+    pub hotkey_settings_item: nwg::MenuItem,
+
+    #[nwg_control(parent: config_menu, text: "配置目录")]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::open_config_dir])]
+    pub config_file_item: nwg::MenuItem,
+
+    // --- 设置 -> 调试 ---
+    #[nwg_control(parent: settings_menu, text: "调试")]
+    pub debug_menu: nwg::Menu,
+
+    #[nwg_control(parent: debug_menu, text: "显示日志", check: true)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_log])]
     pub log_item: nwg::MenuItem,
 
-    #[nwg_control(parent: settings_menu, text: "开机自启动", check: false)]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_autostart])]
-    pub autostart_item: nwg::MenuItem,
+    #[nwg_control(parent: debug_menu, text: "日志目录")]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::open_log_dir])]
+    pub log_dir_item: nwg::MenuItem,
 
-    #[nwg_control(parent: settings_menu, text: "状态浮窗", check: true)]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_indicator])]
-    pub indicator_item: nwg::MenuItem,
-
+    // --- Root Level Items ---
     #[nwg_control(parent: tray_menu)]
     pub sep_update: nwg::MenuSeparator,
 
@@ -100,7 +138,6 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_update_window])]
     pub update_item: nwg::MenuItem,
 
-    // 其他项
     #[nwg_control(parent: tray_menu, text: "关于")]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_about])]
     pub about_item: nwg::MenuItem,
@@ -112,10 +149,10 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::quit])]
     pub quit_item: nwg::MenuItem,
 
-    // --- 配置窗口 ---
+    // --- 模型配置窗口 ---
     #[nwg_control(size: (480, 240), position: (300, 300), title: "模型配置", flags: "WINDOW", icon: Some(&data.icon))]
     #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_config_window])]
-    pub config_window: nwg::Window, // 初始时我们希望它隐藏，在 init 中处理
+    pub config_window: nwg::Window,
 
     #[nwg_layout(parent: config_window, spacing: 10, margin: [20, 20, 20, 20])]
     pub config_layout: nwg::GridLayout,
@@ -124,7 +161,7 @@ pub struct Voice2TypeApp {
     #[nwg_layout_item(layout: config_layout, row: 0, col: 0)]
     pub api_label: nwg::Label,
 
-    #[nwg_control(parent: config_window, text: "")] // 将在 init 中设置
+    #[nwg_control(parent: config_window, text: "")]
     #[nwg_layout_item(layout: config_layout, row: 0, col: 1, col_span: 2)]
     pub api_input: nwg::TextInput,
 
@@ -132,7 +169,7 @@ pub struct Voice2TypeApp {
     #[nwg_layout_item(layout: config_layout, row: 1, col: 0)]
     pub url_label: nwg::Label,
 
-    #[nwg_control(parent: config_window, text: "")] // 在 init 中设置
+    #[nwg_control(parent: config_window, text: "")]
     #[nwg_layout_item(layout: config_layout, row: 1, col: 1, col_span: 2)]
     pub url_input: nwg::TextInput,
 
@@ -140,28 +177,41 @@ pub struct Voice2TypeApp {
     #[nwg_layout_item(layout: config_layout, row: 2, col: 0)]
     pub model_label: nwg::Label,
 
-    #[nwg_control(parent: config_window, text: "")] // 在 init 中设置
+    #[nwg_control(parent: config_window, text: "")]
     #[nwg_layout_item(layout: config_layout, row: 2, col: 1, col_span: 2)]
     pub model_input: nwg::TextInput,
 
     #[nwg_control(parent: config_window, text: "保存")]
-    #[nwg_layout_item(layout: config_layout, row: 4, col: 2)]
+    #[nwg_layout_item(layout: config_layout, row: 3, col: 2)]
     #[nwg_events(OnButtonClick: [Voice2TypeApp::save_config])]
     pub save_btn: nwg::Button,
     
     #[nwg_control(parent: config_window, text: "重置")]
-    #[nwg_layout_item(layout: config_layout, row: 4, col: 1)]
+    #[nwg_layout_item(layout: config_layout, row: 3, col: 1)]
     #[nwg_events(OnButtonClick: [Voice2TypeApp::reset_ai_config])]
     pub reset_btn: nwg::Button,
 
-    #[nwg_control(parent: config_window, text: "热键:")]
-    #[nwg_layout_item(layout: config_layout, row: 3, col: 0)]
-    pub hotkey_label: nwg::Label,
+    // --- 热键设置窗口 ---
+    #[nwg_control(size: (300, 150), position: (350, 350), title: "热键绑定", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_hotkey_window])]
+    pub hotkey_window: nwg::Window,
 
-    #[nwg_control(parent: config_window)]
-    #[nwg_layout_item(layout: config_layout, row: 3, col: 1, col_span: 2)]
-    pub hotkey_combo: nwg::ComboBox<String>,
-    
+    #[nwg_layout(parent: hotkey_window, spacing: 10, margin: [20, 20, 20, 20])]
+    pub hotkey_layout: nwg::GridLayout,
+
+    #[nwg_control(parent: hotkey_window, text: "选择热键:")]
+    #[nwg_layout_item(layout: hotkey_layout, row: 0, col: 0)]
+    pub hotkey_win_label: nwg::Label,
+
+    #[nwg_control(parent: hotkey_window)]
+    #[nwg_layout_item(layout: hotkey_layout, row: 0, col: 1, col_span: 2)]
+    pub hotkey_win_combo: nwg::ComboBox<String>,
+
+    #[nwg_control(parent: hotkey_window, text: "保存")]
+    #[nwg_layout_item(layout: hotkey_layout, row: 1, col: 1)]
+    #[nwg_events(OnButtonClick: [Voice2TypeApp::save_hotkey_config])]
+    pub hotkey_save_btn: nwg::Button,
+
     // --- 版本检测窗口 ---
     #[nwg_control(size: (450, 400), position: (300, 300), title: "版本检测", flags: "WINDOW", icon: Some(&data.icon))]
     #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_update_window])]
@@ -198,6 +248,7 @@ pub struct Voice2TypeApp {
     #[nwg_layout_item(layout: update_layout, row: 6, col: 0)]
     #[nwg_events(OnButtonClick: [Voice2TypeApp::do_check_update])]
     pub check_update_btn: nwg::Button,
+
 
     #[nwg_control(parent: update_window, text: "忽略此版本", enabled: false)]
     #[nwg_layout_item(layout: update_layout, row: 6, col: 1)]
@@ -257,7 +308,6 @@ impl Voice2TypeApp {
         app.log_item.set_checked(show_log);
 
         let lang = config_manager.language();
-        // app.update_ui_text(&lang); // Removed dynamic update
         
         if lang == "en" {
             app.lang_en_item.set_checked(true);
@@ -265,6 +315,26 @@ impl Voice2TypeApp {
         } else {
             app.lang_zh_item.set_checked(true);
             app.lang_en_item.set_checked(false);
+        }
+
+        // Output Language settings
+        let out_lang = config_manager.output_language();
+        match out_lang.as_str() {
+            "zh" => {
+                app.output_lang_zh_item.set_checked(true);
+                app.output_lang_auto_item.set_checked(false);
+                app.output_lang_en_item.set_checked(false);
+            },
+            "en" => {
+                app.output_lang_en_item.set_checked(true);
+                app.output_lang_auto_item.set_checked(false);
+                app.output_lang_zh_item.set_checked(false);
+            },
+            _ => { // "auto" or others
+                app.output_lang_auto_item.set_checked(true);
+                app.output_lang_zh_item.set_checked(false);
+                app.output_lang_en_item.set_checked(false);
+            }
         }
 
         let mode = config_manager.output_mode();
@@ -288,8 +358,9 @@ impl Voice2TypeApp {
 
         app.indicator_item.set_checked(config_manager.enable_indicator());
 
-        // 初始隐藏配置窗口
+        // 初始隐藏窗口
         app.config_window.set_visible(false);
+        app.hotkey_window.set_visible(false);
         app.update_window.set_visible(false);
         app.current_ver_val.set_text(CURRENT_VERSION);
 
@@ -314,12 +385,12 @@ impl Voice2TypeApp {
         let current_vk = config_manager.hotkey();
         
         for (i, (name, vk)) in hotkeys.iter().enumerate() {
-            app.hotkey_combo.push(name.to_string());
+            app.hotkey_win_combo.push(name.to_string());
             if *vk == current_vk {
                 selected_index = i;
             }
         }
-        app.hotkey_combo.set_selection(Some(selected_index));
+        app.hotkey_win_combo.set_selection(Some(selected_index));
 
         app.timer.start();
 
@@ -502,10 +573,16 @@ impl Voice2TypeApp {
             if let Some(parent) = path.parent() {
                 let _ = open::that(parent);
             } else {
-                // 如果没有父目录，尝试打开文件本身或当前目录
                 let _ = open::that(".");
             }
         }
+    }
+
+    fn open_log_dir(&self) {
+         if let Some(mgr) = &*self.config_manager.borrow() {
+             let log_dir = mgr.log_dir();
+             let _ = open::that(log_dir);
+         }
     }
 
     fn hide_config_window(&self) {
@@ -520,22 +597,72 @@ impl Voice2TypeApp {
             mgr.set_api_key(key);
             mgr.set_api_url(url);
             mgr.set_model_name(model);
-
-            // 保存热键设置
-            let hotkeys_vks = vec![
-                0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 
-                0x78, 0x79, 0x7A, 0x7B, 0x14, 0xA2, 0xA3, 0xA4, 0xA5, 0x56
-            ];
-            if let Some(idx) = self.hotkey_combo.selection() {
-                if idx < hotkeys_vks.len() {
-                    mgr.set_hotkey(hotkeys_vks[idx]);
-                }
-            }
-
             let _ = mgr.save();
         }
         nwg::simple_message("已保存", "配置已成功保存！");
         self.config_window.set_visible(false);
+    }
+
+    fn show_hotkey_window(&self) {
+        self.hotkey_window.set_visible(true);
+        self.hotkey_window.set_focus();
+    }
+
+    fn hide_hotkey_window(&self) {
+        self.hotkey_window.set_visible(false);
+    }
+
+    fn save_hotkey_config(&self) {
+         if let Some(mgr) = &*self.config_manager.borrow() {
+            let hotkeys_vks = vec![
+                0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 
+                0x78, 0x79, 0x7A, 0x7B, 0x14, 0xA2, 0xA3, 0xA4, 0xA5, 0x56
+            ];
+            if let Some(idx) = self.hotkey_win_combo.selection() {
+                if idx < hotkeys_vks.len() {
+                    mgr.set_hotkey(hotkeys_vks[idx]);
+                    let _ = mgr.save();
+                }
+            }
+        }
+        nwg::simple_message("已保存", "热键设置已保存 (部分更改可能需要重启生效)");
+        self.hotkey_window.set_visible(false);
+    }
+
+    fn set_out_lang_auto(&self) {
+        if !self.output_lang_auto_item.checked() {
+            self.output_lang_auto_item.set_checked(true);
+            self.output_lang_zh_item.set_checked(false);
+            self.output_lang_en_item.set_checked(false);
+            if let Some(mgr) = &*self.config_manager.borrow() {
+                mgr.set_output_language("auto".to_string());
+                let _ = mgr.save();
+            }
+        }
+    }
+
+    fn set_out_lang_zh(&self) {
+         if !self.output_lang_zh_item.checked() {
+            self.output_lang_zh_item.set_checked(true);
+            self.output_lang_auto_item.set_checked(false);
+            self.output_lang_en_item.set_checked(false);
+            if let Some(mgr) = &*self.config_manager.borrow() {
+                mgr.set_output_language("zh".to_string());
+                let _ = mgr.save();
+            }
+        }
+    }
+
+    fn set_out_lang_en(&self) {
+         if !self.output_lang_en_item.checked() {
+            self.output_lang_en_item.set_checked(true);
+            self.output_lang_auto_item.set_checked(false);
+            self.output_lang_zh_item.set_checked(false);
+            if let Some(mgr) = &*self.config_manager.borrow() {
+                mgr.set_output_language("en".to_string());
+                let _ = mgr.save();
+            }
+        }
     }
 
     fn reset_ai_config(&self) {

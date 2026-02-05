@@ -27,6 +27,7 @@ pub struct AppConfig {
     pub enable_indicator: bool,
     pub last_check_time: u64,
     pub ignored_version: String,
+    pub output_language: String, // "auto", "zh", "en", etc.
 }
 
 impl Default for AppConfig {
@@ -38,13 +39,14 @@ impl Default for AppConfig {
             allow_emoji: true, // 默认开启
             allow_punctuation: true, // 默认开启
             show_log: false, // 默认关闭
-            language: "zh".to_string(), // 默认中文
+            language: "zh".to_string(), // 默认中文 (Interface)
             output_mode: "clipboard".to_string(),
             autostart: false,
             hotkey: 0x71, // 默认 F2
             enable_indicator: true,
             last_check_time: 0,
             ignored_version: String::new(),
+            output_language: "auto".to_string(),
         }
     }
 }
@@ -189,6 +191,14 @@ impl ConfigManager {
 
     pub fn set_ignored_version(&self, version: String) {
         self.config.lock().unwrap().ignored_version = version;
+    }
+
+    pub fn output_language(&self) -> String {
+        self.config.lock().unwrap().output_language.clone()
+    }
+
+    pub fn set_output_language(&self, lang: String) {
+        self.config.lock().unwrap().output_language = lang;
     }
 
     pub fn reset_ai_config(&self) {
