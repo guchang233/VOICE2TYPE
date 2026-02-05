@@ -77,3 +77,7 @@ cargo build --release
 ## 📄 License
 
 MIT License © 2024 guchang233
+<<<<<<< HEAD
+=======
+
+>>>>>>> cc68c5fc4dad382c040640c0505e6028d0347707
