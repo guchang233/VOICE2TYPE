@@ -1,10 +1,8 @@
-# Voice2Type 🎙️
-
 **极简、高效、现代化的 Windows 语音输入助手**
 
 Voice2Type 是一款基于 Rust 编写的轻量级语音转文字工具。它常驻后台，通过全局热键实现“按住说话，松开上屏”的流畅体验。接入 SiliconFlow 高精度语音模型，支持中英文混合识别，并配有精美的灵动岛式状态悬浮窗。
-[![](https://bb-embed.herokuapp.com/embed?v=BV13EFzzCEAL)](https://www.bilibili.com/video/BV13EFzzCEAL)
 
+[![视频演示]({https://github.com/user-attachments/assets/78f04ae6-52c2-406c-b752-fc42724d99fa})]({https://bilibili.com/BV13EFzzCEAL} "Link Title")
 ## ✨ 核心特性
 
 *   **⚡ 极速交互**：按住热键（默认 `F2`）说话，松开立即转写并输入。
