@@ -39,6 +39,7 @@ use std::sync::Mutex as StdMutex;
 enum AppState {
     Idle,
     Recording,
+    Streaming, // 新增：流式处理状态
     Processing,
     Cancelled, // 新增：取消状态
 }
@@ -49,6 +50,36 @@ enum InputMessage {
     StartRecording,
     StopRecording,
     CancelRecording, // 新增：取消录音消息
+}
+
+// 定义流式处理状态
+struct StreamingState {
+    current_chunk: Vec<f32>,
+    chunk_count: usize,
+    last_result: String,
+    output_sent: bool,
+}
+
+impl StreamingState {
+    fn new() -> Self {
+        Self {
+            current_chunk: Vec::new(),
+            chunk_count: 0,
+            last_result: String::new(),
+            output_sent: false,
+        }
+    }
+    
+    fn update_last_result(&mut self, result: &str) {
+        self.last_result = result.to_string();
+    }
+    
+    fn reset(&mut self) {
+        self.current_chunk.clear();
+        self.chunk_count = 0;
+        self.last_result.clear();
+        self.output_sent = false;
+    }
 }
 
 // 全局录音标志
@@ -289,6 +320,9 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
 
     let audio_buffer: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
     let audio_buffer_writer = audio_buffer.clone();
+    
+    // 流式处理状态
+    let streaming_state: Arc<Mutex<StreamingState>> = Arc::new(Mutex::new(StreamingState::new()));
 
     // 创建输入流
     let input_stream = device.build_input_stream(
@@ -329,35 +363,70 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
         
         let vk_esc = VIRTUAL_KEY(0x1B); // ESC
         let mut is_pressed = false;
+        let mut is_recording = false;
 
         loop {
             let current_vk = config_for_hotkey.hotkey();
             let vk_main = VIRTUAL_KEY(current_vk as u16);
+            let trigger_mode = config_for_hotkey.trigger_mode();
             
             // GetAsyncKeyState 的最高位表示按键当前是否按下
             let main_down = unsafe { (GetAsyncKeyState(vk_main.0 as i32) as u16 & 0x8000) != 0 };
             let esc_down = unsafe { (GetAsyncKeyState(vk_esc.0 as i32) as u16 & 0x8000) != 0 };
 
-            if main_down {
-                if !is_pressed {
+            if trigger_mode == "hold" {
+                // 按住输入模式
+                if main_down {
+                    if !is_pressed {
+                        is_pressed = true;
+                        write_log_line(&format!("检测到主热键(VK:0x{:X}) 按下", current_vk));
+                        let _ = tx_clone.blocking_send(InputMessage::StartRecording);
+                    }
+                    
+                    if esc_down {
+                        write_log_line("检测到 ESC 按下 (取消录音)");
+                        let _ = tx_clone.blocking_send(InputMessage::CancelRecording);
+                        // 等待 ESC 松开，防止连续触发
+                        while unsafe { (GetAsyncKeyState(vk_esc.0 as i32) as u16 & 0x8000) != 0 } {
+                            thread::sleep(Duration::from_millis(10));
+                        }
+                    }
+                } else {
+                    if is_pressed {
+                        is_pressed = false;
+                        write_log_line(&format!("检测到主热键(VK:0x{:X}) 松开", current_vk));
+                        let _ = tx_clone.blocking_send(InputMessage::StopRecording);
+                    }
+                }
+            } else {
+                // 按下输入模式
+                if main_down && !is_pressed {
                     is_pressed = true;
                     write_log_line(&format!("检测到主热键(VK:0x{:X}) 按下", current_vk));
-                    let _ = tx_clone.blocking_send(InputMessage::StartRecording);
+                    
+                    if is_recording {
+                        // 停止录音
+                        write_log_line("停止录音");
+                        let _ = tx_clone.blocking_send(InputMessage::StopRecording);
+                        is_recording = false;
+                    } else {
+                        // 开始录音
+                        write_log_line("开始录音");
+                        let _ = tx_clone.blocking_send(InputMessage::StartRecording);
+                        is_recording = true;
+                    }
+                } else if !main_down {
+                    is_pressed = false;
                 }
                 
-                if esc_down {
+                if esc_down && is_recording {
                     write_log_line("检测到 ESC 按下 (取消录音)");
                     let _ = tx_clone.blocking_send(InputMessage::CancelRecording);
+                    is_recording = false;
                     // 等待 ESC 松开，防止连续触发
                     while unsafe { (GetAsyncKeyState(vk_esc.0 as i32) as u16 & 0x8000) != 0 } {
                         thread::sleep(Duration::from_millis(10));
                     }
-                }
-            } else {
-                if is_pressed {
-                    is_pressed = false;
-                    write_log_line(&format!("检测到主热键(VK:0x{:X}) 松开", current_vk));
-                    let _ = tx_clone.blocking_send(InputMessage::StopRecording);
                 }
             }
 
@@ -368,27 +437,51 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
     #[cfg(not(target_os = "windows"))]
     thread::spawn(move || {
         let mut is_f2_pressed = false;
+        let mut is_recording = false;
         if let Err(error) = listen(move |event| {
+            let trigger_mode = config_for_hotkey.trigger_mode();
             match event.event_type {
                 EventType::KeyPress(Key::F2) => {
                     if !is_f2_pressed {
                         is_f2_pressed = true;
                         write_log_line("检测到 F2 按下");
-                        let _ = tx_clone.blocking_send(InputMessage::StartRecording);
+                        
+                        if trigger_mode == "hold" {
+                            // 按住输入模式
+                            let _ = tx_clone.blocking_send(InputMessage::StartRecording);
+                        } else {
+                            // 按下输入模式
+                            if is_recording {
+                                // 停止录音
+                                write_log_line("停止录音");
+                                let _ = tx_clone.blocking_send(InputMessage::StopRecording);
+                                is_recording = false;
+                            } else {
+                                // 开始录音
+                                write_log_line("开始录音");
+                                let _ = tx_clone.blocking_send(InputMessage::StartRecording);
+                                is_recording = true;
+                            }
+                        }
                     }
                 }
                 EventType::KeyRelease(Key::F2) => {
                     if is_f2_pressed {
                         is_f2_pressed = false;
                         write_log_line("检测到 F2 松开");
-                        let _ = tx_clone.blocking_send(InputMessage::StopRecording);
+                        
+                        // 只有在按住输入模式下才发送停止录音消息
+                        if trigger_mode == "hold" {
+                            let _ = tx_clone.blocking_send(InputMessage::StopRecording);
+                        }
                     }
                 }
                 EventType::KeyPress(Key::Escape) => {
-                    if is_f2_pressed {
-                        // 如果 F2 正被按住，此时按下了 ESC -> 取消
+                    if (trigger_mode == "hold" && is_f2_pressed) || (trigger_mode == "toggle" && is_recording) {
+                        // 如果正在录音，此时按下了 ESC -> 取消
                         write_log_line("检测到 ESC 按下 (取消录音)");
                         let _ = tx_clone.blocking_send(InputMessage::CancelRecording);
+                        is_recording = false;
                     }
                 }
                 _ => {}
@@ -400,81 +493,113 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
 
     // 异步事件循环
     let mut current_state = AppState::Idle;
+    
+    // 流式处理定时器
+    let streaming_timer = tokio::time::interval(std::time::Duration::from_millis(config.streaming_interval()));
+    tokio::pin!(streaming_timer);
 
-    while let Some(msg) = rx.recv().await {
-        match msg {
-            InputMessage::StartRecording => {
-                if current_state == AppState::Idle || current_state == AppState::Processing || current_state == AppState::Cancelled {
-                    current_state = AppState::Recording;
-                    write_log_line("--> [录音] 开始录音... (按 ESC 取消)"); 
-                    audio_buffer.lock().unwrap().clear();
-                    IS_RECORDING.store(true, Ordering::Relaxed);
-                    
-                    #[cfg(target_os = "windows")]
-                    if config.enable_indicator() {
-                        if let Some(ind) = INDICATOR.get() {
-                            ind.set_state(IndicatorState::Recording);
+    loop {
+        tokio::select! {
+            Some(msg) = rx.recv() => {
+                match msg {
+                    InputMessage::StartRecording => {
+                        if current_state == AppState::Idle || current_state == AppState::Processing || current_state == AppState::Cancelled {
+                            if config.enable_streaming() {
+                                current_state = AppState::Streaming;
+                            } else {
+                                current_state = AppState::Recording;
+                            }
+                            write_log_line("--> [录音] 开始录音... (按 ESC 取消)"); 
+                            audio_buffer.lock().unwrap().clear();
+                            streaming_state.lock().unwrap().reset();
+                            IS_RECORDING.store(true, Ordering::Relaxed);
+                            
+                            #[cfg(target_os = "windows")]
+                            if config.enable_indicator() {
+                                if let Some(ind) = INDICATOR.get() {
+                                    ind.set_state(IndicatorState::Recording);
+                                }
+                            }
                         }
                     }
-                }
-            }
-            InputMessage::CancelRecording => {
-                if current_state == AppState::Recording {
-                    current_state = AppState::Cancelled;
-                    IS_RECORDING.store(false, Ordering::Relaxed);
-                    write_log_line("--> [取消] 录音已取消");
-                    audio_buffer.lock().unwrap().clear();
-                    
-                    #[cfg(target_os = "windows")]
-                    if config.enable_indicator() {
-                        if let Some(ind) = INDICATOR.get() {
-                            ind.set_state(IndicatorState::Cancelled);
-                            let ind = ind.clone();
+                    InputMessage::CancelRecording => {
+                        if current_state == AppState::Streaming || current_state == AppState::Recording {
+                            current_state = AppState::Cancelled;
+                            IS_RECORDING.store(false, Ordering::Relaxed);
+                            write_log_line("--> [取消] 录音已取消");
+                            audio_buffer.lock().unwrap().clear();
+                            streaming_state.lock().unwrap().reset();
+                            
+                            #[cfg(target_os = "windows")]
+                            if config.enable_indicator() {
+                                if let Some(ind) = INDICATOR.get() {
+                                    ind.set_state(IndicatorState::Cancelled);
+                                    let ind = ind.clone();
+                                    tokio::spawn(async move {
+                                        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                                        if !IS_RECORDING.load(Ordering::Relaxed) {
+                                             ind.set_state(IndicatorState::Hidden);
+                                        }
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    InputMessage::StopRecording => {
+                        if current_state == AppState::Streaming || current_state == AppState::Recording {
+                            // 正常结束录音
+                            IS_RECORDING.store(false, Ordering::Relaxed);
+                            write_log_line("--> [处理] 正在转换音频...");
+
+                            #[cfg(target_os = "windows")]
+                            if config.enable_indicator() {
+                                if let Some(ind) = INDICATOR.get() {
+                                    ind.set_state(IndicatorState::Processing);
+                                }
+                            }
+
+                            let audio_data = {
+                                let mut lock = audio_buffer.lock().unwrap();
+                                std::mem::take(&mut *lock)
+                            };
+                            let config_clone = config.clone();
+                            
                             tokio::spawn(async move {
-                                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-                                if !IS_RECORDING.load(Ordering::Relaxed) {
-                                     ind.set_state(IndicatorState::Hidden);
+                                if let Err(e) = process_audio_and_type(audio_data, sample_rate, config_clone).await {
+                                    write_log(LogLevel::ERROR, &format!("转写失败: {}", e));
                                 }
                             });
+
+                            current_state = AppState::Idle;
+                        } else if current_state == AppState::Cancelled {
+                            // 如果之前被取消了，F2 松开时重置为 Idle
+                            current_state = AppState::Idle;
                         }
                     }
                 }
             }
-            InputMessage::StopRecording => {
-                if current_state == AppState::Recording {
-                    // 正常结束录音
-                    IS_RECORDING.store(false, Ordering::Relaxed);
-                    write_log_line("--> [处理] 正在转换音频...");
-
-                    #[cfg(target_os = "windows")]
-                    if config.enable_indicator() {
-                        if let Some(ind) = INDICATOR.get() {
-                            ind.set_state(IndicatorState::Processing);
-                        }
-                    }
-
+            _ = streaming_timer.tick() => {
+                if current_state == AppState::Streaming {
+                    // 处理音频分片
                     let audio_data = {
                         let mut lock = audio_buffer.lock().unwrap();
                         std::mem::take(&mut *lock)
                     };
-                    let config_clone = config.clone();
                     
-                    tokio::spawn(async move {
-                        if let Err(e) = process_audio_and_type(audio_data, sample_rate, config_clone).await {
-                            write_log(LogLevel::ERROR, &format!("转写失败: {}", e));
-                        }
-                    });
-
-                    current_state = AppState::Idle;
-                } else if current_state == AppState::Cancelled {
-                    // 如果之前被取消了，F2 松开时重置为 Idle
-                    current_state = AppState::Idle;
+                    if !audio_data.is_empty() {
+                        let config_clone = config.clone();
+                        let streaming_state_clone = streaming_state.clone();
+                        
+                        tokio::spawn(async move {
+                            if let Err(e) = process_audio_streaming(audio_data, sample_rate, config_clone, streaming_state_clone).await {
+                                write_log(LogLevel::ERROR, &format!("流式转写失败: {}", e));
+                            }
+                        });
+                    }
                 }
             }
         }
     }
-
-    Ok(())
 }
 
 async fn process_audio_and_type(audio_data: Vec<f32>, sample_rate: u32, config: Arc<ConfigManager>) -> Result<()> {
@@ -672,6 +797,90 @@ async fn process_audio_and_type(audio_data: Vec<f32>, sample_rate: u32, config: 
             let mut enigo = Enigo::new(&Settings::default()).unwrap();
             let _ = enigo.text(&final_text);
         }
+    }
+
+    Ok(())
+}
+
+async fn process_audio_streaming(audio_data: Vec<f32>, sample_rate: u32, config: Arc<ConfigManager>, streaming_state: Arc<Mutex<StreamingState>>) -> Result<()> {
+    if audio_data.is_empty() {
+        return Ok(());
+    }
+
+    // 检查 API Key
+    let api_key = config.get_api_key();
+    if api_key.is_empty() {
+        return Ok(());
+    }
+
+    // 1. 降采样和格式转换 (f32 -> i16, Target 16kHz)
+    let (processed_samples, new_rate) = resample_and_convert(&audio_data, sample_rate);
+    
+    // 2. 编码 WAV (16-bit)
+    let wav_data = encode_wav_memory(&processed_samples, new_rate)?;
+
+    let form = reqwest::multipart::Form::new()
+        .text("model", config.get_model_name())
+        .part("file", reqwest::multipart::Part::bytes(wav_data)
+            .file_name("recording.wav")
+            .mime_str("audio/wav")?);
+
+    let resp = HTTP_CLIENT.post(&config.get_api_url())
+        .header("Authorization", format!("Bearer {}", api_key))
+        .multipart(form)
+        .send()
+        .await?;
+    
+    if !resp.status().is_success() {
+        return Ok(());
+    }
+
+    #[derive(serde::Deserialize)]
+    struct SiliconFlowResponse {
+        text: String,
+    }
+
+    // Handle JSON parse error
+    let result_json: Result<SiliconFlowResponse, _> = resp.json().await;
+    let result = match result_json {
+        Ok(r) => r,
+        Err(_) => return Ok(()),
+    };
+
+    let raw_text = result.text.trim();
+
+    if raw_text.is_empty() {
+        return Ok(());
+    }
+
+    // 后处理
+    let final_text = post_process(raw_text, &config);
+    if final_text.is_empty() {
+        return Ok(());
+    }
+
+    // 处理流式结果
+    let mut streaming = streaming_state.lock().unwrap();
+    let last_result = streaming.last_result.clone();
+    
+    // 计算新增的文本
+    let new_text = if final_text.starts_with(&last_result) {
+        &final_text[last_result.len()..]
+    } else {
+        &final_text
+    };
+    
+    if !new_text.is_empty() {
+        write_log(LogLevel::INFO, &format!("[流式输出] {}", new_text));
+        
+        // 实时输出新增文本
+        #[cfg(target_os = "windows")]
+        unsafe {
+            win_utils::send_unicode_text(new_text);
+        }
+        
+        streaming.update_last_result(&final_text);
+        streaming.output_sent = true;
     }
 
     Ok(())

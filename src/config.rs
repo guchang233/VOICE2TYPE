@@ -28,6 +28,9 @@ pub struct AppConfig {
     pub last_check_time: u64,
     pub ignored_version: String,
     pub output_language: String, // "auto", "zh", "en", etc.
+    pub enable_streaming: bool, // 是否启用流式输出
+    pub streaming_interval: u64, // 流式处理时间间隔（毫秒）
+    pub trigger_mode: String, // 触发模式: "hold" 或 "toggle"
 }
 
 impl Default for AppConfig {
@@ -47,6 +50,9 @@ impl Default for AppConfig {
             last_check_time: 0,
             ignored_version: String::new(),
             output_language: "auto".to_string(),
+            enable_streaming: false, // 默认关闭流式输出
+            streaming_interval: 2000, // 默认 2000 毫秒
+            trigger_mode: "hold".to_string(), // 默认按住输入模式
         }
     }
 }
@@ -201,11 +207,38 @@ impl ConfigManager {
         self.config.lock().unwrap().output_language = lang;
     }
 
+    pub fn enable_streaming(&self) -> bool {
+        self.config.lock().unwrap().enable_streaming
+    }
+
+    pub fn set_enable_streaming(&self, enable: bool) {
+        self.config.lock().unwrap().enable_streaming = enable;
+    }
+
+    pub fn streaming_interval(&self) -> u64 {
+        self.config.lock().unwrap().streaming_interval
+    }
+
+    pub fn set_streaming_interval(&self, interval: u64) {
+        self.config.lock().unwrap().streaming_interval = interval;
+    }
+
+    pub fn trigger_mode(&self) -> String {
+        self.config.lock().unwrap().trigger_mode.clone()
+    }
+
+    pub fn set_trigger_mode(&self, mode: String) {
+        self.config.lock().unwrap().trigger_mode = mode;
+    }
+
     pub fn reset_ai_config(&self) {
         let mut cfg = self.config.lock().unwrap();
         cfg.api_key = AppConfig::default().api_key;
         cfg.api_url = AppConfig::default().api_url;
         cfg.model_name = AppConfig::default().model_name;
+        cfg.enable_streaming = AppConfig::default().enable_streaming;
+        cfg.streaming_interval = AppConfig::default().streaming_interval;
+        cfg.trigger_mode = AppConfig::default().trigger_mode;
     }
 
     pub fn save(&self) -> anyhow::Result<()> {

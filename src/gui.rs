@@ -37,6 +37,18 @@ pub struct Voice2TypeApp {
     #[nwg_control(parent: tray_menu, text: "设置")]
     pub settings_menu: nwg::Menu,
 
+    // --- 设置 -> 触发模式 ---
+    #[nwg_control(parent: settings_menu, text: "触发模式")]
+    pub trigger_menu: nwg::Menu,
+
+    #[nwg_control(parent: trigger_menu, text: "按住输入", check: true)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_trigger_hold])]
+    pub trigger_hold_item: nwg::MenuItem,
+
+    #[nwg_control(parent: trigger_menu, text: "按下输入", check: false)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_trigger_toggle])]
+    pub trigger_toggle_item: nwg::MenuItem,
+
     // --- 设置 -> 通用 ---
     #[nwg_control(parent: settings_menu, text: "通用")]
     pub general_menu: nwg::Menu,
@@ -59,6 +71,17 @@ pub struct Voice2TypeApp {
     #[nwg_control(parent: general_menu, text: "允许输出表情", check: true)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_emoji])]
     pub allow_emoji_item: nwg::MenuItem,
+
+    #[nwg_control(parent: general_menu)]
+    pub sep_streaming: nwg::MenuSeparator,
+
+    #[nwg_control(parent: general_menu, text: "启用流式输出", check: true)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_streaming])]
+    pub streaming_item: nwg::MenuItem,
+
+    #[nwg_control(parent: general_menu, text: "流式间隔设置")]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_streaming_window])]
+    pub streaming_interval_item: nwg::MenuItem,
 
     // --- 设置 -> 输出模式 ---
     #[nwg_control(parent: settings_menu, text: "输出方式")]
@@ -134,13 +157,17 @@ pub struct Voice2TypeApp {
     #[nwg_control(parent: tray_menu)]
     pub sep_update: nwg::MenuSeparator,
 
-    #[nwg_control(parent: tray_menu, text: "版本检测")]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_update_window])]
-    pub update_item: nwg::MenuItem,
-
+    // --- 关于父菜单 ---
     #[nwg_control(parent: tray_menu, text: "关于")]
+    pub about_parent_menu: nwg::Menu,
+
+    #[nwg_control(parent: about_parent_menu, text: "项目信息")]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_about])]
     pub about_item: nwg::MenuItem,
+
+    #[nwg_control(parent: about_parent_menu, text: "版本检测")]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_update_window])]
+    pub update_item: nwg::MenuItem,
 
     #[nwg_control(parent: tray_menu)]
     pub sep: nwg::MenuSeparator,
@@ -263,6 +290,27 @@ pub struct Voice2TypeApp {
     #[nwg_control(parent: update_window, range: 0..100, pos: 0)]
     #[nwg_layout_item(layout: update_layout, row: 7, col: 0, col_span: 3)]
     pub update_progress: nwg::ProgressBar,
+
+    // --- 流式设置窗口 ---
+    #[nwg_control(size: (300, 180), position: (350, 350), title: "流式输出设置", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_streaming_window])]
+    pub streaming_window: nwg::Window,
+
+    #[nwg_layout(parent: streaming_window, spacing: 10, margin: [20, 20, 20, 20])]
+    pub streaming_layout: nwg::GridLayout,
+
+    #[nwg_control(parent: streaming_window, text: "流式间隔 (毫秒):")]
+    #[nwg_layout_item(layout: streaming_layout, row: 0, col: 0)]
+    pub streaming_label: nwg::Label,
+
+    #[nwg_control(parent: streaming_window, text: "2000")]
+    #[nwg_layout_item(layout: streaming_layout, row: 0, col: 1, col_span: 2)]
+    pub streaming_input: nwg::TextInput,
+
+    #[nwg_control(parent: streaming_window, text: "保存")]
+    #[nwg_layout_item(layout: streaming_layout, row: 1, col: 1)]
+    #[nwg_events(OnButtonClick: [Voice2TypeApp::save_streaming_config])]
+    pub streaming_save_btn: nwg::Button,
 
     // --- 关于窗口 ---
     #[nwg_control(size: (300, 320), position: (400, 400), title: "关于 Voice2Type", flags: "WINDOW", icon: Some(&data.icon))]
@@ -393,10 +441,22 @@ impl Voice2TypeApp {
         }
 
         app.indicator_item.set_checked(config_manager.enable_indicator());
+        app.streaming_item.set_checked(config_manager.enable_streaming());
+        
+        // 设置触发模式初始状态
+        let trigger_mode = config_manager.trigger_mode();
+        if trigger_mode == "hold" {
+            app.trigger_hold_item.set_checked(true);
+            app.trigger_toggle_item.set_checked(false);
+        } else {
+            app.trigger_hold_item.set_checked(false);
+            app.trigger_toggle_item.set_checked(true);
+        }
 
         // 初始隐藏窗口
         app.config_window.set_visible(false);
         app.hotkey_window.set_visible(false);
+        app.streaming_window.set_visible(false);
         app.about_window.set_visible(false);
         app.update_window.set_visible(false);
         app.current_ver_val.set_text(CURRENT_VERSION);
@@ -594,6 +654,80 @@ impl Voice2TypeApp {
                  }
             }
         }
+    }
+
+    fn toggle_streaming(&self) {
+        let new_state = !self.streaming_item.checked();
+        
+        // 如果用户要启用流式输出，显示警告提示
+        if new_state {
+            #[cfg(target_os = "windows")]
+            unsafe {
+                use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_YESNO, MB_ICONWARNING, IDYES};
+                use windows::core::PCWSTR;
+                let title = "警告\0".encode_utf16().collect::<Vec<u16>>();
+                let msg = "流式输出精准度极低，且若使用付费API会造成更多的费用\n\n是否仍然开启？\0".encode_utf16().collect::<Vec<u16>>();
+                let result = MessageBoxW(None, PCWSTR(msg.as_ptr()), PCWSTR(title.as_ptr()), MB_YESNO | MB_ICONWARNING);
+                
+                // 如果用户选择取消，不启用流式输出
+                if result != IDYES {
+                    return;
+                }
+            }
+        }
+        
+        self.streaming_item.set_checked(new_state);
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            mgr.set_enable_streaming(new_state);
+            let _ = mgr.save();
+        }
+    }
+
+    fn set_trigger_hold(&self) {
+        self.trigger_hold_item.set_checked(true);
+        self.trigger_toggle_item.set_checked(false);
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            mgr.set_trigger_mode("hold".to_string());
+            let _ = mgr.save();
+        }
+    }
+
+    fn set_trigger_toggle(&self) {
+        self.trigger_hold_item.set_checked(false);
+        self.trigger_toggle_item.set_checked(true);
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            mgr.set_trigger_mode("toggle".to_string());
+            let _ = mgr.save();
+        }
+    }
+
+    fn show_streaming_window(&self) {
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            self.streaming_input.set_text(&mgr.streaming_interval().to_string());
+        }
+        self.streaming_window.set_visible(true);
+        self.streaming_window.set_focus();
+    }
+
+    fn hide_streaming_window(&self) {
+        self.streaming_window.set_visible(false);
+    }
+
+    fn save_streaming_config(&self) {
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            if let Ok(interval) = self.streaming_input.text().parse::<u64>() {
+                if interval >= 500 && interval <= 10000 {
+                    mgr.set_streaming_interval(interval);
+                    let _ = mgr.save();
+                    nwg::simple_message("已保存", "流式输出设置已保存");
+                } else {
+                    nwg::simple_message("错误", "间隔值必须在 500-10000 毫秒之间");
+                }
+            } else {
+                nwg::simple_message("错误", "请输入有效的数字");
+            }
+        }
+        self.streaming_window.set_visible(false);
     }
 
     fn show_config_window(&self) {
