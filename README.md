@@ -1,10 +1,8 @@
-# Voice2Type 🎙️
-
 **极简、高效、现代化的 Windows 语音输入助手**
 
 Voice2Type 是一款基于 Rust 编写的轻量级语音转文字工具。它常驻后台，通过全局热键实现“按住说话，松开上屏”的流畅体验。接入 SiliconFlow 高精度语音模型，支持中英文混合识别，并配有精美的灵动岛式状态悬浮窗。
-
-![GIF](https://github.com/user-attachments/assets/177360a3-9115-4836-b2b4-e314a6e29e54)
+![视频（B站）](https://www.bilibili.com/video/BV13EFzzCEAL)
+![GIF](https://github.com/user-attachments/assets/993838e7-e2bd-4a5a-90a3-b27790a1922f)
 
 ## ✨ 核心特性
 
@@ -72,12 +70,14 @@ cargo build --release
 *   **Q: 游戏内无法输入？**
     *   A: 请尝试以**管理员身份运行**本程序，或切换到“注入模式”。
 *   **Q: 提示 API Key 错误？**
-    *   A: 请检查 SiliconFlow 控制台的 Key 是否过期或余额不足，并确保没有多余空格。
+    *   A: 请检查 SiliconFlow 控制台的 Key 是否过期，并确保没有因请求频率过高而被暂时限制（如果您使用的不是免费模型则也有可能是余额用尽）
+*   **Q: 状态为 聆听中>>>处理中>>>错误 如何解决**
+    *   A:首先请检查是否曾下载过低版本，若是，进入设置>>>配置>>>配置目录 备份你的apikey之后删除json文件后重启软件即可
+    /n 或是检查麦克风是否有声音。
+
+>>更多问题 欢迎提交issue
 
 ## 📄 License
 
-MIT License © 2024 guchang233
-<<<<<<< HEAD
+MIT License © 2024
 =======
-
->>>>>>> cc68c5fc4dad382c040640c0505e6028d0347707
