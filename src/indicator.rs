@@ -61,6 +61,14 @@ struct WindowState {
     // Layout
     width: i32,
     height: i32,
+    
+    // State timing
+    state_start_time: std::time::Instant, // 当前状态的开始时间
+    
+    // Duration settings
+    fade_duration: u64, // 淡出动画时间（毫秒）
+    error_duration: u64, // 错误状态持续时间（毫秒）
+    success_duration: u64, // 成功状态持续时间（毫秒）
 }
 
 #[cfg(target_os = "windows")]
@@ -99,16 +107,21 @@ unsafe fn create_and_run_window(rx: Receiver<IndicatorState>) {
     );
 
     // Initial state
-    let mut state = WindowState {
-        target_state: IndicatorState::Hidden,
-        current_alpha: 0.0,
-        target_alpha: 0.0,
-        current_color: 0x000000,
-        target_color: 0x000000,
-        text: String::new(),
-        width: initial_width,
-        height: initial_height,
-    };
+        let mut state = WindowState {
+            target_state: IndicatorState::Hidden,
+            current_alpha: 0.0,
+            target_alpha: 0.0,
+            current_color: 0x000000,
+            target_color: 0x000000,
+            text: String::new(),
+            width: initial_width,
+            height: initial_height,
+            state_start_time: std::time::Instant::now(),
+            // Default duration settings
+            fade_duration: 300, // 默认 300 毫秒
+            error_duration: 5000, // 默认 5000 毫秒
+            success_duration: 5000, // 默认 5000 毫秒
+        };
 
     // Store state pointer in window user data? 
     // Simplified: Just keep it in the loop since we process messages manually-ish or use static/global if needed.
@@ -126,7 +139,25 @@ unsafe fn create_and_run_window(rx: Receiver<IndicatorState>) {
         if let Ok(new_state) = rx.try_recv() {
             if new_state != state.target_state {
                 state.target_state = new_state.clone();
+                state.state_start_time = std::time::Instant::now(); // 重置状态开始时间
                 update_targets(&mut state, &new_state);
+            }
+        }
+
+        // 检查错误状态和成功状态是否需要自动隐藏
+        if state.target_state == IndicatorState::Error {
+            let elapsed = state.state_start_time.elapsed();
+            if elapsed >= std::time::Duration::from_millis(state.error_duration) {
+                state.target_state = IndicatorState::Hidden;
+                state.state_start_time = std::time::Instant::now();
+                update_targets(&mut state, &IndicatorState::Hidden);
+            }
+        } else if state.target_state == IndicatorState::Success {
+            let elapsed = state.state_start_time.elapsed();
+            if elapsed >= std::time::Duration::from_millis(state.success_duration) {
+                state.target_state = IndicatorState::Hidden;
+                state.state_start_time = std::time::Instant::now();
+                update_targets(&mut state, &IndicatorState::Hidden);
             }
         }
 
@@ -198,7 +229,9 @@ fn update_animation(state: &mut WindowState) -> bool {
     // Lerp alpha
     let alpha_diff = state.target_alpha - state.current_alpha;
     if alpha_diff.abs() > 0.01 {
-        state.current_alpha += alpha_diff * 0.1; // Smooth ease
+        // 基于fade_duration计算平滑因子，确保动画时间符合配置
+        let smooth_factor = 16.0 / state.fade_duration as f32 * 10.0;
+        state.current_alpha += alpha_diff * smooth_factor;
         changed = true;
     } else {
         state.current_alpha = state.target_alpha;

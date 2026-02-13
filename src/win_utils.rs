@@ -229,7 +229,25 @@ pub fn is_autostart_enabled() -> bool {
         if ty != REG_SZ || data_len == 0 {
             return false;
         }
-        true
+        
+        // Second call to get actual data
+        let mut data = vec![0u8; data_len as usize];
+        if RegQueryValueExW(hkey, PCWSTR(name.as_ptr()), None, None, Some(data.as_mut_ptr()), Some(&mut data_len)).is_err() {
+            return false;
+        }
+        
+        // Convert data to string
+        let data_u16 = std::slice::from_raw_parts(data.as_ptr() as *const u16, data_len as usize / 2);
+        let reg_path = String::from_utf16_lossy(data_u16).trim_matches('"').to_string();
+        
+        // Get current executable path
+        if let Ok(current_exe) = std::env::current_exe() {
+            let current_path = current_exe.display().to_string();
+            // Compare paths
+            return reg_path == current_path;
+        }
+        
+        false
     }
 }
 

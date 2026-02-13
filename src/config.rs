@@ -31,6 +31,11 @@ pub struct AppConfig {
     pub enable_streaming: bool, // 是否启用流式输出
     pub streaming_interval: u64, // 流式处理时间间隔（毫秒）
     pub trigger_mode: String, // 触发模式: "hold" 或 "toggle"
+    pub speech_service: String, // 语音识别服务: "siliconflow", "openai", "google", "azure", "baidu", "alibaba", "tencent"
+    // 指示器相关配置
+    pub indicator_fade_duration: u64, // 指示器淡出的动画时间（毫秒）
+    pub indicator_error_duration: u64, // 错误状态指示器存在时间（毫秒）
+    pub indicator_success_duration: u64, // 成功状态指示器存在时间（毫秒）
 }
 
 impl Default for AppConfig {
@@ -53,6 +58,11 @@ impl Default for AppConfig {
             enable_streaming: false, // 默认关闭流式输出
             streaming_interval: 2000, // 默认 2000 毫秒
             trigger_mode: "hold".to_string(), // 默认按住输入模式
+            speech_service: "siliconflow".to_string(), // 默认使用SiliconFlow语音识别服务
+            // 指示器默认配置
+            indicator_fade_duration: 300, // 默认 300 毫秒
+            indicator_error_duration: 5000, // 默认 5000 毫秒
+            indicator_success_duration: 5000, // 默认 5000 毫秒
         }
     }
 }
@@ -231,6 +241,42 @@ impl ConfigManager {
         self.config.lock().unwrap().trigger_mode = mode;
     }
 
+    pub fn get_speech_service(&self) -> String {
+        self.config.lock().unwrap().speech_service.clone()
+    }
+
+    pub fn set_speech_service(&self, service: String) {
+        self.config.lock().unwrap().speech_service = service;
+    }
+
+
+
+
+
+    pub fn indicator_fade_duration(&self) -> u64 {
+        self.config.lock().unwrap().indicator_fade_duration
+    }
+
+    pub fn set_indicator_fade_duration(&self, duration: u64) {
+        self.config.lock().unwrap().indicator_fade_duration = duration;
+    }
+
+    pub fn indicator_error_duration(&self) -> u64 {
+        self.config.lock().unwrap().indicator_error_duration
+    }
+
+    pub fn set_indicator_error_duration(&self, duration: u64) {
+        self.config.lock().unwrap().indicator_error_duration = duration;
+    }
+
+    pub fn indicator_success_duration(&self) -> u64 {
+        self.config.lock().unwrap().indicator_success_duration
+    }
+
+    pub fn set_indicator_success_duration(&self, duration: u64) {
+        self.config.lock().unwrap().indicator_success_duration = duration;
+    }
+
     pub fn reset_ai_config(&self) {
         let mut cfg = self.config.lock().unwrap();
         cfg.api_key = AppConfig::default().api_key;
@@ -239,6 +285,10 @@ impl ConfigManager {
         cfg.enable_streaming = AppConfig::default().enable_streaming;
         cfg.streaming_interval = AppConfig::default().streaming_interval;
         cfg.trigger_mode = AppConfig::default().trigger_mode;
+        cfg.speech_service = AppConfig::default().speech_service;
+        cfg.indicator_fade_duration = AppConfig::default().indicator_fade_duration;
+        cfg.indicator_error_duration = AppConfig::default().indicator_error_duration;
+        cfg.indicator_success_duration = AppConfig::default().indicator_success_duration;
     }
 
     pub fn save(&self) -> anyhow::Result<()> {

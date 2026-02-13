@@ -72,17 +72,6 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_emoji])]
     pub allow_emoji_item: nwg::MenuItem,
 
-    #[nwg_control(parent: general_menu)]
-    pub sep_streaming: nwg::MenuSeparator,
-
-    #[nwg_control(parent: general_menu, text: "启用流式输出", check: true)]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_streaming])]
-    pub streaming_item: nwg::MenuItem,
-
-    #[nwg_control(parent: general_menu, text: "流式间隔设置")]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_streaming_window])]
-    pub streaming_interval_item: nwg::MenuItem,
-
     // --- 设置 -> 输出模式 ---
     #[nwg_control(parent: settings_menu, text: "输出方式")]
     pub output_menu: nwg::Menu,
@@ -137,6 +126,20 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_hotkey_window])]
     pub hotkey_settings_item: nwg::MenuItem,
 
+    #[nwg_control(parent: config_menu, text: "高级")]
+    pub advanced_menu: nwg::Menu,
+
+    #[nwg_control(parent: advanced_menu, text: "流式间隔设置")]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_streaming_window])]
+    pub streaming_interval_item: nwg::MenuItem,
+
+    #[nwg_control(parent: advanced_menu, text: "VAD参数设置")]
+    pub vad_settings_item: nwg::MenuItem,
+
+    #[nwg_control(parent: advanced_menu, text: "指示器参数设置")]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_indicator_window])]
+    pub indicator_settings_item: nwg::MenuItem,
+
     #[nwg_control(parent: config_menu, text: "配置目录")]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::open_config_dir])]
     pub config_file_item: nwg::MenuItem,
@@ -152,6 +155,16 @@ pub struct Voice2TypeApp {
     #[nwg_control(parent: debug_menu, text: "日志目录")]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::open_log_dir])]
     pub log_dir_item: nwg::MenuItem,
+
+    #[nwg_control(parent: debug_menu, text: "不稳定功能")]
+    pub unstable_menu: nwg::Menu,
+
+    #[nwg_control(parent: unstable_menu, text: "启用流式输出", check: true)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_streaming])]
+    pub streaming_item: nwg::MenuItem,
+
+    #[nwg_control(parent: unstable_menu, text: "启用VAD智能切片", check: true)]
+    pub vad_item: nwg::MenuItem,
 
     // --- Root Level Items ---
     #[nwg_control(parent: tray_menu)]
@@ -312,6 +325,80 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnButtonClick: [Voice2TypeApp::save_streaming_config])]
     pub streaming_save_btn: nwg::Button,
 
+    // --- VAD设置窗口 ---
+    #[nwg_control(size: (400, 250), position: (350, 350), title: "VAD参数设置", flags: "WINDOW", icon: Some(&data.icon))]
+    pub vad_window: nwg::Window,
+
+    #[nwg_layout(parent: vad_window, spacing: 10, margin: [20, 20, 20, 20])]
+    pub vad_layout: nwg::GridLayout,
+
+    #[nwg_control(parent: vad_window, text: "能量阈值:")]
+    #[nwg_layout_item(layout: vad_layout, row: 0, col: 0)]
+    pub vad_energy_label: nwg::Label,
+
+    #[nwg_control(parent: vad_window, text: "0.01")]
+    #[nwg_layout_item(layout: vad_layout, row: 0, col: 1, col_span: 2)]
+    pub vad_energy_input: nwg::TextInput,
+
+    #[nwg_control(parent: vad_window, text: "静音帧阈值:")]
+    #[nwg_layout_item(layout: vad_layout, row: 1, col: 0)]
+    pub vad_silence_label: nwg::Label,
+
+    #[nwg_control(parent: vad_window, text: "10")]
+    #[nwg_layout_item(layout: vad_layout, row: 1, col: 1, col_span: 2)]
+    pub vad_silence_input: nwg::TextInput,
+
+    #[nwg_control(parent: vad_window, text: "帧大小:")]
+    #[nwg_layout_item(layout: vad_layout, row: 2, col: 0)]
+    pub vad_frame_label: nwg::Label,
+
+    #[nwg_control(parent: vad_window, text: "1024")]
+    #[nwg_layout_item(layout: vad_layout, row: 2, col: 1, col_span: 2)]
+    pub vad_frame_input: nwg::TextInput,
+
+    #[nwg_control(parent: vad_window, text: "保存")]
+    #[nwg_layout_item(layout: vad_layout, row: 3, col: 1)]
+    pub vad_save_btn: nwg::Button,
+
+
+
+    // --- 指示器参数设置窗口 ---
+    #[nwg_control(size: (400, 300), position: (350, 350), title: "指示器参数设置", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_indicator_window])]
+    pub indicator_window: nwg::Window,
+
+    #[nwg_layout(parent: indicator_window, spacing: 10, margin: [20, 20, 20, 20])]
+    pub indicator_layout: nwg::GridLayout,
+
+    #[nwg_control(parent: indicator_window, text: "淡出动画时间 (毫秒):")]
+    #[nwg_layout_item(layout: indicator_layout, row: 0, col: 0)]
+    pub indicator_fade_label: nwg::Label,
+
+    #[nwg_control(parent: indicator_window, text: "300")]
+    #[nwg_layout_item(layout: indicator_layout, row: 0, col: 1, col_span: 2)]
+    pub indicator_fade_input: nwg::TextInput,
+
+    #[nwg_control(parent: indicator_window, text: "错误状态持续时间 (毫秒):")]
+    #[nwg_layout_item(layout: indicator_layout, row: 1, col: 0)]
+    pub indicator_error_label: nwg::Label,
+
+    #[nwg_control(parent: indicator_window, text: "5000")]
+    #[nwg_layout_item(layout: indicator_layout, row: 1, col: 1, col_span: 2)]
+    pub indicator_error_input: nwg::TextInput,
+
+    #[nwg_control(parent: indicator_window, text: "成功状态持续时间 (毫秒):")]
+    #[nwg_layout_item(layout: indicator_layout, row: 2, col: 0)]
+    pub indicator_success_label: nwg::Label,
+
+    #[nwg_control(parent: indicator_window, text: "5000")]
+    #[nwg_layout_item(layout: indicator_layout, row: 2, col: 1, col_span: 2)]
+    pub indicator_success_input: nwg::TextInput,
+
+    #[nwg_control(parent: indicator_window, text: "保存")]
+    #[nwg_layout_item(layout: indicator_layout, row: 3, col: 1)]
+    #[nwg_events(OnButtonClick: [Voice2TypeApp::save_indicator_config])]
+    pub indicator_save_btn: nwg::Button,
+
     // --- 关于窗口 ---
     #[nwg_control(size: (300, 320), position: (400, 400), title: "关于 Voice2Type", flags: "WINDOW", icon: Some(&data.icon))]
     #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_about_window])]
@@ -448,15 +535,20 @@ impl Voice2TypeApp {
         if trigger_mode == "hold" {
             app.trigger_hold_item.set_checked(true);
             app.trigger_toggle_item.set_checked(false);
-        } else {
+        } else if trigger_mode == "toggle" {
             app.trigger_hold_item.set_checked(false);
             app.trigger_toggle_item.set_checked(true);
+        } else {
+            // 默认使用hold模式
+            app.trigger_hold_item.set_checked(true);
+            app.trigger_toggle_item.set_checked(false);
         }
 
         // 初始隐藏窗口
         app.config_window.set_visible(false);
         app.hotkey_window.set_visible(false);
         app.streaming_window.set_visible(false);
+        app.vad_window.set_visible(false);
         app.about_window.set_visible(false);
         app.update_window.set_visible(false);
         app.current_ver_val.set_text(CURRENT_VERSION);
@@ -590,10 +682,13 @@ impl Voice2TypeApp {
         
         #[cfg(target_os = "windows")]
         {
+            // 使用let绑定创建一个生命周期更长的值
+            let config_ref = self.config_manager.borrow();
+            let config = config_ref.as_ref().map(|v| &**v);
             if new_state {
-                crate::log_set_enabled(false);
+                crate::log_set_enabled(false, config);
             }
-            crate::log_set_enabled(new_state);
+            crate::log_set_enabled(new_state, config);
         }
     }
 
@@ -700,6 +795,10 @@ impl Voice2TypeApp {
             let _ = mgr.save();
         }
     }
+
+
+
+
 
     fn show_streaming_window(&self) {
         if let Some(mgr) = &*self.config_manager.borrow() {
@@ -1018,7 +1117,7 @@ impl Voice2TypeApp {
                     MessageBoxW(None, PCWSTR(msg.as_ptr()), PCWSTR(title.as_ptr()), MB_OK | MB_ICONINFORMATION);
                     
                     // 显式释放资源和互斥锁
-                    crate::log_set_enabled(false);
+                    crate::log_set_enabled(false, None);
                     crate::release_app_mutex();
                 }
                 
@@ -1063,6 +1162,60 @@ impl Voice2TypeApp {
 
     fn quit(&self) {
         nwg::stop_thread_dispatch();
+    }
+
+
+
+    fn show_indicator_window(&self) {
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            self.indicator_fade_input.set_text(&mgr.indicator_fade_duration().to_string());
+            self.indicator_error_input.set_text(&mgr.indicator_error_duration().to_string());
+            self.indicator_success_input.set_text(&mgr.indicator_success_duration().to_string());
+        }
+        self.indicator_window.set_visible(true);
+        self.indicator_window.set_focus();
+    }
+
+    fn hide_indicator_window(&self) {
+        self.indicator_window.set_visible(false);
+    }
+
+    fn save_indicator_config(&self) {
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            // 验证并保存淡出动画时间
+            if let Ok(fade_duration) = self.indicator_fade_input.text().parse::<u64>() {
+                if fade_duration >= 100 && fade_duration <= 2000 {
+                    // 验证并保存错误状态持续时间
+                    if let Ok(error_duration) = self.indicator_error_input.text().parse::<u64>() {
+                        if error_duration >= 1000 && error_duration <= 10000 {
+                            // 验证并保存成功状态持续时间
+                            if let Ok(success_duration) = self.indicator_success_input.text().parse::<u64>() {
+                                if success_duration >= 1000 && success_duration <= 10000 {
+                                    mgr.set_indicator_fade_duration(fade_duration);
+                                    mgr.set_indicator_error_duration(error_duration);
+                                    mgr.set_indicator_success_duration(success_duration);
+                                    let _ = mgr.save();
+                                    nwg::simple_message("已保存", "指示器参数设置已保存");
+                                } else {
+                                    nwg::simple_message("错误", "成功状态持续时间必须在 1000-10000 毫秒之间");
+                                }
+                            } else {
+                                nwg::simple_message("错误", "请输入有效的成功状态持续时间");
+                            }
+                        } else {
+                            nwg::simple_message("错误", "错误状态持续时间必须在 1000-10000 毫秒之间");
+                        }
+                    } else {
+                        nwg::simple_message("错误", "请输入有效的错误状态持续时间");
+                    }
+                } else {
+                    nwg::simple_message("错误", "淡出动画时间必须在 100-2000 毫秒之间");
+                }
+            } else {
+                nwg::simple_message("错误", "请输入有效的淡出动画时间");
+            }
+        }
+        self.indicator_window.set_visible(false);
     }
 }
 
