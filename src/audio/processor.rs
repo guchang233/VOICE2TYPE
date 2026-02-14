@@ -7,21 +7,36 @@ use std::io::Cursor;
 pub fn resample_and_convert(input: &[f32], input_rate: u32) -> (Vec<i16>, u32) {
     let target_rate = 16000;
     
+    // 计算增益因子，提高音频音量
+    // 增加增益到3.0以确保API能检测到语音
+    let gain = 3.0;
+    
+    // 如果输入为空，返回空向量
+    if input.is_empty() {
+        return (Vec::new(), target_rate);
+    }
+    
     // 如果原始采样率小于等于目标采样率，不做降采样，直接转换
     if input_rate <= target_rate {
         let output: Vec<i16> = input.iter()
-            .map(|&s| (s.clamp(-1.0, 1.0) * 32767.0) as i16)
+            .map(|&s| {
+                let amplified = s * gain;
+                (amplified.clamp(-1.0, 1.0) * 32767.0) as i16
+            })
             .collect();
-        return (output, input_rate);
+        return (output, target_rate);
     }
 
     // 计算降采样比率 (简单的整数比率)
     let ratio = (input_rate as f32 / target_rate as f32).round() as usize;
     if ratio <= 1 {
          let output: Vec<i16> = input.iter()
-            .map(|&s| (s.clamp(-1.0, 1.0) * 32767.0) as i16)
+            .map(|&s| {
+                let amplified = s * gain;
+                (amplified.clamp(-1.0, 1.0) * 32767.0) as i16
+            })
             .collect();
-        return (output, input_rate);
+        return (output, target_rate);
     }
 
     let est_capacity = input.len() / ratio + 1;
@@ -31,13 +46,13 @@ pub fn resample_and_convert(input: &[f32], input_rate: u32) -> (Vec<i16>, u32) {
     for chunk in input.chunks(ratio) {
         let sum: f32 = chunk.iter().sum();
         let avg = sum / chunk.len() as f32;
-        let sample_i16 = (avg.clamp(-1.0, 1.0) * 32767.0) as i16;
+        let amplified = avg * gain;
+        let sample_i16 = (amplified.clamp(-1.0, 1.0) * 32767.0) as i16;
         output.push(sample_i16);
     }
     
-    // 计算实际的新采样率
-    let actual_new_rate = input_rate / ratio as u32;
-    (output, actual_new_rate)
+    // 强制使用目标采样率
+    (output, target_rate)
 }
 
 /// 内存中编码WAV数据

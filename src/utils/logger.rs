@@ -62,26 +62,34 @@ pub fn start_log_viewer() {
                     use std::time::Duration;
                     loop {
                         let exited = {
-                            let mut guard = LOG_VIEWER_CHILD.lock().unwrap();
-                            if let Some(ch) = guard.as_mut() {
-                                ch.try_wait().map(|o| o.is_some()).unwrap_or(false)
+                            if let Ok(mut guard) = LOG_VIEWER_CHILD.try_lock() {
+                                if let Some(ch) = guard.as_mut() {
+                                    ch.try_wait().map(|o| o.is_some()).unwrap_or(false)
+                                } else {
+                                    // 已被外部关闭
+                                    true
+                                }
                             } else {
-                                // 已被外部关闭
-                                true
+                                // 无法获取锁，继续检查
+                                false
                             }
                         };
                         if exited {
                             // 子进程已退出：关闭日志并同步 UI 勾选
                             #[cfg(target_os = "windows")]
                             {
-                                if let Some(handle) = LOG_PIPE_HANDLE.lock().unwrap().take() {
-                                    unsafe { let _ = CloseHandle(handle); }
+                                if let Ok(mut guard) = LOG_PIPE_HANDLE.try_lock() {
+                                    if let Some(handle) = guard.take() {
+                                        unsafe { let _ = CloseHandle(handle); }
+                                    }
                                 }
                                 if let Some(cfg) = crate::CONFIG_GLOBAL.get() {
                                     cfg.set_show_log(false);
                                     let _ = cfg.save();
                                 }
-                                *LOG_VIEWER_CHILD.lock().unwrap() = None;
+                                if let Ok(mut guard) = LOG_VIEWER_CHILD.try_lock() {
+                                    *guard = None;
+                                }
                                 crate::request_uncheck_log_menu();
                             }
                             break;
@@ -144,14 +152,25 @@ pub fn log_set_enabled(enabled: bool, config: Option<&crate::config::ConfigManag
         }
     } else {
         // 停止子进程
-        if let Some(mut child) = LOG_VIEWER_CHILD.lock().unwrap().take() {
-            let _ = child.kill();
-            let _ = child.wait();
+        if let Ok(mut guard) = LOG_VIEWER_CHILD.try_lock() {
+            if let Some(mut child) = guard.take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
         }
         // 关闭管道
-        if let Some(handle) = LOG_PIPE_HANDLE.lock().unwrap().take() {
-            unsafe { let _ = CloseHandle(handle); }
+        if let Ok(mut guard) = LOG_PIPE_HANDLE.try_lock() {
+            if let Some(handle) = guard.take() {
+                unsafe { let _ = CloseHandle(handle); }
+            }
         }
+        // 更新配置
+        if let Some(cfg) = config {
+            cfg.set_show_log(false);
+            let _ = cfg.save();
+        }
+        // 请求取消日志菜单的勾选
+        crate::request_uncheck_log_menu();
     }
 }
 

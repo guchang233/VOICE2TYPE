@@ -56,7 +56,7 @@ impl Default for AppConfig {
             ignored_version: String::new(),
             output_language: "auto".to_string(),
             enable_streaming: false, // 默认关闭流式输出
-            streaming_interval: 2000, // 默认 2000 毫秒
+            streaming_interval: 500, // 默认 500 毫秒
             trigger_mode: "hold".to_string(), // 默认按住输入模式
             speech_service: "siliconflow".to_string(), // 默认使用SiliconFlow语音识别服务
             // 指示器默认配置

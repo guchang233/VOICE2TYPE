@@ -22,9 +22,48 @@ use tokio::sync::mpsc;
 use chrono::Local;
 
 use audio::processor::{resample_and_convert, encode_wav_memory};
+use audio::vad::AudioSegmenter;
 use api::client::HTTP_CLIENT;
 use config::ConfigManager;
-use core::state::{AppState, StreamingState};
+use core::state::AppState;
+
+/// 流式处理状态
+#[derive(Debug, Clone)]
+struct StreamingState {
+    pub last_result: String,
+    pub output_sent: bool,
+    // API调用节流相关字段
+    pub processing: bool, // 是否有正在进行的API调用
+}
+
+impl Default for StreamingState {
+    fn default() -> Self {
+        Self {
+            last_result: String::new(),
+            output_sent: false,
+            processing: false,
+        }
+    }
+}
+
+impl StreamingState {
+    /// 创建新的流式处理状态
+    pub fn new() -> Self {
+        Default::default()
+    }
+    
+    /// 更新最后结果
+    pub fn update_last_result(&mut self, result: &str) {
+        self.last_result = result.to_string();
+    }
+    
+    /// 重置流式处理状态
+    pub fn reset(&mut self) {
+        self.last_result.clear();
+        self.output_sent = false;
+        self.processing = false;
+    }
+}
 use gui::Voice2TypeApp;
 use indicator::{StatusIndicator, IndicatorState};
 use output::handler::{OutputHandler, post_process};
@@ -292,11 +331,11 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
     let audio_buffer: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
     let audio_buffer_writer = audio_buffer.clone();
     
+    // 音频分片器
+    let segmenter: Arc<Mutex<AudioSegmenter>> = Arc::new(Mutex::new(AudioSegmenter::new(sample_rate)));
+    
     // 流式处理状态
     let streaming_state: Arc<Mutex<StreamingState>> = Arc::new(Mutex::new(StreamingState::new()));
-    
-    // 初始化流式处理状态
-    streaming_state.lock().unwrap().reset();
 
     // 创建输入流
     let config_clone = config.clone();
@@ -342,7 +381,7 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
     let mut current_state = AppState::Idle;
     
     // 流式处理定时器
-    let streaming_timer = tokio::time::interval(std::time::Duration::from_millis(config.streaming_interval()));
+    let streaming_timer = tokio::time::interval(std::time::Duration::from_millis(500));
     tokio::pin!(streaming_timer);
 
     loop {
@@ -351,13 +390,10 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
                 match msg {
                     InputMessage::StartRecording => {
                         if current_state == AppState::Idle || current_state == AppState::Processing || current_state == AppState::Cancelled {
-                            if config.enable_streaming() {
-                                current_state = AppState::Streaming;
-                            } else {
-                                current_state = AppState::Recording;
-                            }
+                            current_state = AppState::Recording;
                             write_log_line("--> [录音] 开始录音... (按 ESC 取消)", Some(&config)); 
                             audio_buffer.lock().unwrap().clear();
+                            segmenter.lock().unwrap().reset();
                             streaming_state.lock().unwrap().reset();
                             IS_RECORDING.store(true, Ordering::Relaxed);
                             
@@ -370,11 +406,12 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
                         }
                     }
                     InputMessage::CancelRecording => {
-                        if current_state == AppState::Streaming || current_state == AppState::Recording {
+                        if current_state == AppState::Recording {
                             current_state = AppState::Cancelled;
                             IS_RECORDING.store(false, Ordering::Relaxed);
                             write_log_line("--> [取消] 录音已取消", Some(&config));
                             audio_buffer.lock().unwrap().clear();
+                            segmenter.lock().unwrap().reset();
                             streaming_state.lock().unwrap().reset();
                             
                             #[cfg(target_os = "windows")]
@@ -393,7 +430,7 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
                         }
                     }
                     InputMessage::StopRecording => {
-                        if current_state == AppState::Streaming || current_state == AppState::Recording {
+                        if current_state == AppState::Recording {
                             // 正常结束录音
                             IS_RECORDING.store(false, Ordering::Relaxed);
                             write_log_line("--> [处理] 正在转换音频...", Some(&config));
@@ -406,27 +443,10 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
                             }
 
                             // 获取缓冲区中的音频数据
-                            let mut audio_data = {
+                            let audio_data = {
                                 let mut lock = audio_buffer.lock().unwrap();
                                 std::mem::take(&mut *lock)
                             };
-                            
-                            // 只有在未启用流式输出时，才获取VAD缓冲区中的数据
-                            if !config.enable_streaming() {
-                                let vad_data = {
-                                    let mut streaming = streaming_state.lock().unwrap();
-                                    let data = streaming.current_chunk.clone();
-                                    streaming.reset();
-                                    data
-                                };
-                                
-                                // 合并数据
-                                audio_data.extend(vad_data);
-                            } else {
-                                // 启用了流式输出，重置streaming_state以避免冲突
-                                let mut streaming = streaming_state.lock().unwrap();
-                                streaming.reset();
-                            }
                             
                             let config_clone = config.clone();
                             let config_clone_for_log = config_clone.clone();
@@ -446,7 +466,7 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
                 }
             }
             _ = streaming_timer.tick() => {
-                if current_state == AppState::Streaming {
+                if current_state == AppState::Recording && config.enable_streaming() {
                     // 获取音频数据
                     let audio_data = {
                         let mut lock = audio_buffer.lock().unwrap();
@@ -454,44 +474,30 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
                     };
                     
                     if !audio_data.is_empty() {
-                        // 直接处理音频数据，基于数据大小进行切片
-                        let mut streaming = streaming_state.lock().unwrap();
+                        // 使用VAD进行音频分片
+                        let mut segmenter_lock = segmenter.lock().unwrap();
+                        let need_segment = segmenter_lock.process_audio(&audio_data);
                         
-                        // 将音频数据添加到当前块
-                        streaming.current_chunk.extend_from_slice(&audio_data);
-                        
-                        // 检查是否需要切片
-                        // 1. 音频数据积累过多
-                        // 2. 定期处理以确保实时性（当有足够数据时）
-                        let audio_size = streaming.current_chunk.len();
-                        let max_chunk_size = sample_rate as usize * 5; // 最大5秒音频
-                        let min_chunk_size = sample_rate as usize * 1; // 最小1秒音频，确保有足够数据进行识别
-                        
-                        // 检查是否有正在进行的API调用
-                        if streaming.processing {
-                            // 如果正在处理，跳过此次触发，避免并发请求
-                            write_log(LogLevel::DEBUG, "流式处理: 跳过，已有请求在处理中", Some(&config));
-                        } else {
-                            // 每次定时器触发时，如果有足够的音频数据，就进行处理
-                            if audio_size > max_chunk_size || (audio_size >= min_chunk_size) {
-                                // 音频数据过多或有足够数据进行实时处理，进行切片处理
-                                let chunk_data = streaming.current_chunk.clone();
-                                streaming.current_chunk.clear();
-                                streaming.processing = true; // 标记为正在处理
+                        if need_segment {
+                            let chunk_data = segmenter_lock.take_current_segment();
+                            drop(segmenter_lock);
+                            
+                            if !chunk_data.is_empty() {
+                                let mut streaming = streaming_state.lock().unwrap();
                                 
-                                // 处理切片
-                                // 如果数据为空，重置processing状态
-                                if chunk_data.is_empty() {
-                                    streaming.processing = false;
-                                }
-                                
-                                drop(streaming);
-                                
-                                if !chunk_data.is_empty() {
+                                // 检查是否有正在进行的API调用
+                                if streaming.processing {
+                                    // 如果正在处理，跳过此次触发，避免并发请求
+                                    write_log(LogLevel::DEBUG, "流式处理: 跳过，已有请求在处理中", Some(&config));
+                                } else {
+                                    streaming.processing = true; // 标记为正在处理
+                                    
                                     let config_clone = config.clone();
                                     let config_clone_for_log = config_clone.clone();
                                     let streaming_state_clone1 = streaming_state.clone();
                                     let streaming_state_clone2 = streaming_state.clone();
+                                    
+                                    drop(streaming);
                                     
                                     tokio::spawn(async move {
                                         if let Err(e) = process_audio_streaming(chunk_data, sample_rate, config_clone, streaming_state_clone1).await {
@@ -538,7 +544,7 @@ async fn process_audio_and_type(audio_data: Vec<f32>, sample_rate: u32, config: 
     let resample_duration = start_time.elapsed();
     
     // 2. 编码 WAV (16-bit)
-    let wav_data = encode_wav_memory(&processed_samples, new_rate)?;
+    let wav_data = encode_wav_memory(&processed_samples, 16000)?;
 
     let encode_duration = start_time.elapsed() - resample_duration;
 
@@ -550,9 +556,22 @@ async fn process_audio_and_type(audio_data: Vec<f32>, sample_rate: u32, config: 
         encode_duration
     ), Some(&config));
 
+    // 确保使用明确的语言参数
+    let language = if config.output_language() == "auto" {
+        "zh".to_string() // 默认使用中文
+    } else {
+        config.output_language()
+    };
+
+    write_log_line(&format!(
+        "[API] 模型: {}, 语言: {}", 
+        config.get_model_name(),
+        language
+    ), Some(&config));
+
     let form = reqwest::multipart::Form::new()
         .text("model", config.get_model_name())
-        .text("language", config.output_language())
+        .text("language", language)
         .part("file", reqwest::multipart::Part::bytes(wav_data)
             .file_name("recording.wav")
             .mime_str("audio/wav")?);
@@ -694,11 +713,18 @@ async fn process_audio_streaming(audio_data: Vec<f32>, sample_rate: u32, config:
     let (processed_samples, new_rate) = resample_and_convert(&audio_data, sample_rate);
     
     // 2. 编码 WAV (16-bit)
-    let wav_data = encode_wav_memory(&processed_samples, new_rate)?;
+    let wav_data = encode_wav_memory(&processed_samples, 16000)?;
+
+    // 确保使用明确的语言参数
+    let language = if config.output_language() == "auto" {
+        "zh".to_string() // 默认使用中文
+    } else {
+        config.output_language()
+    };
 
     let form = reqwest::multipart::Form::new()
         .text("model", config.get_model_name())
-        .text("language", config.output_language())
+        .text("language", language)
         .part("file", reqwest::multipart::Part::bytes(wav_data)
             .file_name("recording.wav")
             .mime_str("audio/wav")?);
@@ -763,6 +789,8 @@ async fn process_audio_streaming(audio_data: Vec<f32>, sample_rate: u32, config:
 
     Ok(())
 }
+
+
 
 
 

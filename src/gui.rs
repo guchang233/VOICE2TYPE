@@ -84,6 +84,10 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_output_clipboard])]
     pub output_clipboard_item: nwg::MenuItem,
 
+    #[nwg_control(parent: output_menu, text: "启用流式输出", check: true)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_streaming])]
+    pub streaming_item: nwg::MenuItem,
+
     // --- 设置 -> 语言 ---
     #[nwg_control(parent: settings_menu, text: "语言")]
     pub lang_menu: nwg::Menu,
@@ -129,12 +133,7 @@ pub struct Voice2TypeApp {
     #[nwg_control(parent: config_menu, text: "高级")]
     pub advanced_menu: nwg::Menu,
 
-    #[nwg_control(parent: advanced_menu, text: "流式间隔设置")]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_streaming_window])]
-    pub streaming_interval_item: nwg::MenuItem,
 
-    #[nwg_control(parent: advanced_menu, text: "VAD参数设置")]
-    pub vad_settings_item: nwg::MenuItem,
 
     #[nwg_control(parent: advanced_menu, text: "指示器参数设置")]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_indicator_window])]
@@ -159,12 +158,7 @@ pub struct Voice2TypeApp {
     #[nwg_control(parent: debug_menu, text: "不稳定功能")]
     pub unstable_menu: nwg::Menu,
 
-    #[nwg_control(parent: unstable_menu, text: "启用流式输出", check: true)]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_streaming])]
-    pub streaming_item: nwg::MenuItem,
 
-    #[nwg_control(parent: unstable_menu, text: "启用VAD智能切片", check: true)]
-    pub vad_item: nwg::MenuItem,
 
     // --- Root Level Items ---
     #[nwg_control(parent: tray_menu)]
@@ -190,7 +184,7 @@ pub struct Voice2TypeApp {
     pub quit_item: nwg::MenuItem,
 
     // --- 模型配置窗口 ---
-    #[nwg_control(size: (480, 240), position: (300, 300), title: "模型配置", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_control(size: (480, 280), position: (300, 300), title: "模型配置", flags: "WINDOW", icon: Some(&data.icon))]
     #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_config_window])]
     pub config_window: nwg::Window,
 
@@ -217,17 +211,21 @@ pub struct Voice2TypeApp {
     #[nwg_layout_item(layout: config_layout, row: 2, col: 0)]
     pub model_label: nwg::Label,
 
-    #[nwg_control(parent: config_window, text: "")]
+    #[nwg_control(parent: config_window)]
     #[nwg_layout_item(layout: config_layout, row: 2, col: 1, col_span: 2)]
-    pub model_input: nwg::TextInput,
+    pub model_input: nwg::ComboBox<String>,
+
+    #[nwg_control(parent: config_window, text: "")]
+    #[nwg_layout_item(layout: config_layout, row: 3, col: 1, col_span: 2)]
+    pub custom_model_input: nwg::TextInput,
 
     #[nwg_control(parent: config_window, text: "保存")]
-    #[nwg_layout_item(layout: config_layout, row: 3, col: 2)]
+    #[nwg_layout_item(layout: config_layout, row: 4, col: 2)]
     #[nwg_events(OnButtonClick: [Voice2TypeApp::save_config])]
     pub save_btn: nwg::Button,
     
     #[nwg_control(parent: config_window, text: "重置")]
-    #[nwg_layout_item(layout: config_layout, row: 3, col: 1)]
+    #[nwg_layout_item(layout: config_layout, row: 4, col: 1)]
     #[nwg_events(OnButtonClick: [Voice2TypeApp::reset_ai_config])]
     pub reset_btn: nwg::Button,
 
@@ -304,61 +302,9 @@ pub struct Voice2TypeApp {
     #[nwg_layout_item(layout: update_layout, row: 7, col: 0, col_span: 3)]
     pub update_progress: nwg::ProgressBar,
 
-    // --- 流式设置窗口 ---
-    #[nwg_control(size: (300, 180), position: (350, 350), title: "流式输出设置", flags: "WINDOW", icon: Some(&data.icon))]
-    #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_streaming_window])]
-    pub streaming_window: nwg::Window,
 
-    #[nwg_layout(parent: streaming_window, spacing: 10, margin: [20, 20, 20, 20])]
-    pub streaming_layout: nwg::GridLayout,
 
-    #[nwg_control(parent: streaming_window, text: "流式间隔 (毫秒):")]
-    #[nwg_layout_item(layout: streaming_layout, row: 0, col: 0)]
-    pub streaming_label: nwg::Label,
 
-    #[nwg_control(parent: streaming_window, text: "2000")]
-    #[nwg_layout_item(layout: streaming_layout, row: 0, col: 1, col_span: 2)]
-    pub streaming_input: nwg::TextInput,
-
-    #[nwg_control(parent: streaming_window, text: "保存")]
-    #[nwg_layout_item(layout: streaming_layout, row: 1, col: 1)]
-    #[nwg_events(OnButtonClick: [Voice2TypeApp::save_streaming_config])]
-    pub streaming_save_btn: nwg::Button,
-
-    // --- VAD设置窗口 ---
-    #[nwg_control(size: (400, 250), position: (350, 350), title: "VAD参数设置", flags: "WINDOW", icon: Some(&data.icon))]
-    pub vad_window: nwg::Window,
-
-    #[nwg_layout(parent: vad_window, spacing: 10, margin: [20, 20, 20, 20])]
-    pub vad_layout: nwg::GridLayout,
-
-    #[nwg_control(parent: vad_window, text: "能量阈值:")]
-    #[nwg_layout_item(layout: vad_layout, row: 0, col: 0)]
-    pub vad_energy_label: nwg::Label,
-
-    #[nwg_control(parent: vad_window, text: "0.01")]
-    #[nwg_layout_item(layout: vad_layout, row: 0, col: 1, col_span: 2)]
-    pub vad_energy_input: nwg::TextInput,
-
-    #[nwg_control(parent: vad_window, text: "静音帧阈值:")]
-    #[nwg_layout_item(layout: vad_layout, row: 1, col: 0)]
-    pub vad_silence_label: nwg::Label,
-
-    #[nwg_control(parent: vad_window, text: "10")]
-    #[nwg_layout_item(layout: vad_layout, row: 1, col: 1, col_span: 2)]
-    pub vad_silence_input: nwg::TextInput,
-
-    #[nwg_control(parent: vad_window, text: "帧大小:")]
-    #[nwg_layout_item(layout: vad_layout, row: 2, col: 0)]
-    pub vad_frame_label: nwg::Label,
-
-    #[nwg_control(parent: vad_window, text: "1024")]
-    #[nwg_layout_item(layout: vad_layout, row: 2, col: 1, col_span: 2)]
-    pub vad_frame_input: nwg::TextInput,
-
-    #[nwg_control(parent: vad_window, text: "保存")]
-    #[nwg_layout_item(layout: vad_layout, row: 3, col: 1)]
-    pub vad_save_btn: nwg::Button,
 
 
 
@@ -547,8 +493,6 @@ impl Voice2TypeApp {
         // 初始隐藏窗口
         app.config_window.set_visible(false);
         app.hotkey_window.set_visible(false);
-        app.streaming_window.set_visible(false);
-        app.vad_window.set_visible(false);
         app.about_window.set_visible(false);
         app.update_window.set_visible(false);
         app.current_ver_val.set_text(CURRENT_VERSION);
@@ -559,7 +503,22 @@ impl Voice2TypeApp {
         // 设置输入框文本
         app.api_input.set_text(&config_manager.get_api_key());
         app.url_input.set_text(&config_manager.get_api_url());
-        app.model_input.set_text(&config_manager.get_model_name());
+        
+        // 初始化模型下拉框
+        // NWG的ComboBox没有clear方法，需要重新创建
+        app.model_input.push("TeleAI/TeleSpeechASR".to_string());
+        app.model_input.push("FunAudioLLM/SenseVoiceSmall".to_string());
+        app.model_input.push("自定义".to_string());
+        
+        // 设置当前选中项
+        let current_model = config_manager.get_model_name();
+        let models = vec!["TeleAI/TeleSpeechASR", "FunAudioLLM/SenseVoiceSmall"];
+        if let Some(index) = models.iter().position(|&m| m == current_model) {
+            app.model_input.set_selection(Some(index));
+        } else {
+            // 如果当前模型不在预设列表中，设置为自定义选项
+            app.model_input.set_selection(Some(2));
+        }
 
         // 初始化热键下拉框
         let hotkeys = vec![
@@ -778,6 +737,8 @@ impl Voice2TypeApp {
         }
     }
 
+
+
     fn set_trigger_hold(&self) {
         self.trigger_hold_item.set_checked(true);
         self.trigger_toggle_item.set_checked(false);
@@ -800,38 +761,25 @@ impl Voice2TypeApp {
 
 
 
-    fn show_streaming_window(&self) {
-        if let Some(mgr) = &*self.config_manager.borrow() {
-            self.streaming_input.set_text(&mgr.streaming_interval().to_string());
-        }
-        self.streaming_window.set_visible(true);
-        self.streaming_window.set_focus();
-    }
 
-    fn hide_streaming_window(&self) {
-        self.streaming_window.set_visible(false);
-    }
-
-    fn save_streaming_config(&self) {
-        if let Some(mgr) = &*self.config_manager.borrow() {
-            if let Ok(interval) = self.streaming_input.text().parse::<u64>() {
-                if interval >= 500 && interval <= 10000 {
-                    mgr.set_streaming_interval(interval);
-                    let _ = mgr.save();
-                    nwg::simple_message("已保存", "流式输出设置已保存");
-                } else {
-                    nwg::simple_message("错误", "间隔值必须在 500-10000 毫秒之间");
-                }
-            } else {
-                nwg::simple_message("错误", "请输入有效的数字");
-            }
-        }
-        self.streaming_window.set_visible(false);
-    }
 
     fn show_config_window(&self) {
         if let Some(mgr) = &*self.config_manager.borrow() {
             self.api_input.set_text(&mgr.get_api_key());
+            self.url_input.set_text(&mgr.get_api_url());
+            
+            // 设置当前选中项
+            let current_model = mgr.get_model_name();
+            let models = vec!["TeleAI/TeleSpeechASR", "FunAudioLLM/SenseVoiceSmall"];
+            if let Some(index) = models.iter().position(|&m| m == current_model) {
+                self.model_input.set_selection(Some(index));
+                self.custom_model_input.set_visible(false);
+            } else {
+                // 如果当前模型不在预设列表中，设置为自定义选项
+                self.model_input.set_selection(Some(2));
+                self.custom_model_input.set_visible(true);
+                self.custom_model_input.set_text(&current_model);
+            }
         }
         self.config_window.set_visible(true);
         self.config_window.set_focus();
@@ -862,7 +810,23 @@ impl Voice2TypeApp {
     fn save_config(&self) {
         let key = self.api_input.text();
         let url = self.url_input.text();
-        let model = self.model_input.text();
+        let model = if let Some(index) = self.model_input.selection() {
+            if index == 0 {
+                "TeleAI/TeleSpeechASR".to_string()
+            } else if index == 1 {
+                "FunAudioLLM/SenseVoiceSmall".to_string()
+            } else {
+                // 自定义模型
+                let custom_model = self.custom_model_input.text();
+                if custom_model.is_empty() {
+                    "自定义模型".to_string()
+                } else {
+                    custom_model
+                }
+            }
+        } else {
+            "TeleAI/TeleSpeechASR".to_string()
+        };
         if let Some(mgr) = &*self.config_manager.borrow() {
             mgr.set_api_key(key);
             mgr.set_api_url(url);
@@ -951,7 +915,11 @@ impl Voice2TypeApp {
             mgr.reset_ai_config();
             self.api_input.set_text(&mgr.get_api_key());
             self.url_input.set_text(&mgr.get_api_url());
-            self.model_input.set_text(&mgr.get_model_name());
+            
+            // 重置模型选择
+            self.model_input.set_selection(Some(0)); // 默认选择第一个模型
+            self.custom_model_input.set_visible(false);
+            
             let _ = mgr.save();
         }
         nwg::simple_message("已重置", "已重置 API Key、API URL 与模型为默认值");
