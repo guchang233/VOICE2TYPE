@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 
 use crate::config::ConfigManager;
 use crate::core::state::AppState;
-use crate::utils::logger::{LogLevel, write_log};
+use crate::utils::logger::{write_log, LogLevel};
 
 /// API请求类型
 #[derive(Debug, Deserialize)]
@@ -50,16 +50,13 @@ impl ApiServer {
     /// 创建新的API服务器
     pub fn new(config: Arc<ConfigManager>) -> Self {
         let (tx, rx) = mpsc::channel(100);
-        
+
         // 启动处理线程
         Self::start_processing_thread(rx, config.clone());
-        
-        Self {
-            config,
-            tx,
-        }
+
+        Self { config, tx }
     }
-    
+
     /// 启动处理线程
     fn start_processing_thread(mut rx: mpsc::Receiver<ApiRequest>, config: Arc<ConfigManager>) {
         thread::spawn(move || {
@@ -84,26 +81,38 @@ impl ApiServer {
                     }
                     ApiRequest::SetConfig { key, value } => {
                         // 处理设置配置请求
-                        write_log(LogLevel::INFO, &format!("API: 收到设置配置请求: {} = {}", key, value), Some(&config));
+                        write_log(
+                            LogLevel::INFO,
+                            &format!("API: 收到设置配置请求: {} = {}", key, value),
+                            Some(&config),
+                        );
                     }
                     ApiRequest::GetConfig { key } => {
                         // 处理获取配置请求
-                        write_log(LogLevel::INFO, &format!("API: 收到获取配置请求: {}", key), Some(&config));
+                        write_log(
+                            LogLevel::INFO,
+                            &format!("API: 收到获取配置请求: {}", key),
+                            Some(&config),
+                        );
                     }
                 }
             }
         });
     }
-    
+
     /// 启动服务器
     pub fn start(&self) {
         let config = self.config.clone();
         let tx = self.tx.clone();
-        
+
         thread::spawn(move || {
             let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
-            write_log(LogLevel::INFO, "API服务器已启动，监听端口 8080", Some(&config));
-            
+            write_log(
+                LogLevel::INFO,
+                "API服务器已启动，监听端口 8080",
+                Some(&config),
+            );
+
             for stream in listener.incoming() {
                 match stream {
                     Ok(stream) => {
@@ -114,50 +123,82 @@ impl ApiServer {
                         });
                     }
                     Err(e) => {
-                        write_log(LogLevel::ERROR, &format!("API服务器错误: {}", e), Some(&config));
+                        write_log(
+                            LogLevel::ERROR,
+                            &format!("API服务器错误: {}", e),
+                            Some(&config),
+                        );
                     }
                 }
             }
         });
     }
-    
+
     /// 处理连接
-    fn handle_connection(mut stream: TcpStream, tx: mpsc::Sender<ApiRequest>, config: Arc<ConfigManager>) {
+    fn handle_connection(
+        mut stream: TcpStream,
+        tx: mpsc::Sender<ApiRequest>,
+        config: Arc<ConfigManager>,
+    ) {
         let mut buffer = [0; 1024];
-        
+
         match stream.read(&mut buffer) {
             Ok(size) => {
                 let message = String::from_utf8_lossy(&buffer[..size]);
-                write_log(LogLevel::INFO, &format!("API服务器收到请求: {}", message), Some(&config));
-                
+                write_log(
+                    LogLevel::INFO,
+                    &format!("API服务器收到请求: {}", message),
+                    Some(&config),
+                );
+
                 // 解析请求
                 match serde_json::from_str::<ApiRequest>(&message) {
                     Ok(request) => {
                         // 发送请求到处理线程
                         if let Err(e) = tx.blocking_send(request) {
-                            write_log(LogLevel::ERROR, &format!("API服务器错误: {}", e), Some(&config));
-                            let response = ApiResponse::Error { message: e.to_string() };
+                            write_log(
+                                LogLevel::ERROR,
+                                &format!("API服务器错误: {}", e),
+                                Some(&config),
+                            );
+                            let response = ApiResponse::Error {
+                                message: e.to_string(),
+                            };
                             Self::send_response(&mut stream, response);
                         } else {
-                            let response = ApiResponse::Success { message: "请求已接收".to_string() };
+                            let response = ApiResponse::Success {
+                                message: "请求已接收".to_string(),
+                            };
                             Self::send_response(&mut stream, response);
                         }
                     }
                     Err(e) => {
-                        write_log(LogLevel::ERROR, &format!("API服务器错误: {}", e), Some(&config));
-                        let response = ApiResponse::Error { message: e.to_string() };
+                        write_log(
+                            LogLevel::ERROR,
+                            &format!("API服务器错误: {}", e),
+                            Some(&config),
+                        );
+                        let response = ApiResponse::Error {
+                            message: e.to_string(),
+                        };
                         Self::send_response(&mut stream, response);
                     }
                 }
             }
             Err(e) => {
-                write_log(LogLevel::ERROR, &format!("API服务器错误: {}", e), Some(&config));
-                let response = ApiResponse::Error { message: e.to_string() };
+                write_log(
+                    LogLevel::ERROR,
+                    &format!("API服务器错误: {}", e),
+                    Some(&config),
+                );
+                let response = ApiResponse::Error {
+                    message: e.to_string(),
+                };
                 Self::send_response(&mut stream, response);
             }
         }
     }
-    
+
     /// 发送响应
     fn send_response(stream: &mut TcpStream, response: ApiResponse) {
         let json = serde_json::to_string(&response).unwrap();

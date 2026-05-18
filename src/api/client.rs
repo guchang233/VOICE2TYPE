@@ -1,95 +1,101 @@
 use anyhow::{Context, Result};
-use reqwest::multipart::Form;
-use reqwest::Client;
-use std::sync::Arc;
 use once_cell::sync::Lazy;
+use reqwest::{multipart::Form, Client};
 
 use crate::config::ConfigManager;
 
-#[cfg(target_os = "windows")]
-pub static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| Client::new());
+pub static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| {
+    Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .expect("failed to build HTTP client")
+});
 
-/// API响应结构体
+/// 多数兼容 OpenAI 的转写接口都会返回 text 字段。
 #[derive(serde::Deserialize, Debug)]
 pub struct ApiResponse {
     pub text: String,
 }
 
-/// API客户端
-#[derive(Clone)]
-pub struct ApiClient {
-    client: Arc<Client>,
-}
+#[derive(Clone, Default)]
+pub struct ApiClient;
 
 impl ApiClient {
-    /// 创建新的API客户端
     pub fn new() -> Self {
-        Self {
-            client: Arc::new(Client::new()),
-        }
+        Self
     }
 
-    /// 处理音频并获取转写结果
-    pub async fn process_audio(&self, audio_data: Vec<u8>, config: &ConfigManager) -> Result<String> {
+    pub async fn process_audio(
+        &self,
+        audio_data: Vec<u8>,
+        config: &ConfigManager,
+    ) -> Result<String> {
         let api_key = config.get_api_key();
         if api_key.is_empty() {
             anyhow::bail!("API Key is not configured");
         }
 
-        let form = Form::new()
-            .text("model", config.get_model_name())
-            .part("file", reqwest::multipart::Part::bytes(audio_data)
-                .file_name("recording.wav")
-                .mime_str("audio/wav")?);
-
-        let resp = HTTP_CLIENT.post(&config.get_api_url())
+        let resp = HTTP_CLIENT
+            .post(self.api_url(config))
             .header("Authorization", format!("Bearer {}", api_key))
-            .multipart(form)
+            .multipart(self.build_form(audio_data, config, "recording.wav")?)
             .send()
             .await
             .context("Failed to send API request")?;
-        
+
         if !resp.status().is_success() {
-            let error_text = resp.text().await
-                .context("Failed to read error response")?;
-            anyhow::bail!("API error: {}", error_text);
+            let status = resp.status();
+            let error_text = resp.text().await.context("Failed to read error response")?;
+            anyhow::bail!("API error {}: {}", status, error_text);
         }
 
-        let result = resp.json::<ApiResponse>()
+        let result = resp
+            .json::<ApiResponse>()
             .await
             .context("Failed to parse API response")?;
 
         Ok(result.text.trim().to_string())
     }
 
-    /// 流式处理音频并获取转写结果
-    pub async fn process_audio_streaming(&self, audio_data: Vec<u8>, config: &ConfigManager) -> Result<String> {
-        let api_key = config.get_api_key();
-        if api_key.is_empty() {
-            return Ok(String::new());
+    /// 保留给后续真正的分段上传。现在整段上传，避免把 WAV 字节硬切成非法音频。
+    pub async fn process_audio_streaming(
+        &self,
+        audio_data: Vec<u8>,
+        config: &ConfigManager,
+    ) -> Result<Vec<String>> {
+        let text = self.process_audio(audio_data, config).await?;
+        Ok(vec![text])
+    }
+
+    fn api_url(&self, config: &ConfigManager) -> String {
+        if config.get_speech_service() == "groq" {
+            "https://api.groq.com/openai/v1/audio/transcriptions".to_string()
+        } else {
+            config.get_api_url()
+        }
+    }
+
+    fn build_form(
+        &self,
+        audio_data: Vec<u8>,
+        config: &ConfigManager,
+        file_name: &str,
+    ) -> Result<Form> {
+        let mut form = Form::new().text("model", config.get_model_name()).part(
+            "file",
+            reqwest::multipart::Part::bytes(audio_data)
+                .file_name(file_name.to_string())
+                .mime_str("audio/wav")?,
+        );
+
+        if config.get_speech_service() == "groq" {
+            form = form
+                .text("temperature", "0")
+                .text("response_format", "verbose_json");
+        } else if config.output_language() != "auto" {
+            form = form.text("language", config.output_language());
         }
 
-        let form = Form::new()
-            .text("model", config.get_model_name())
-            .part("file", reqwest::multipart::Part::bytes(audio_data)
-                .file_name("recording.wav")
-                .mime_str("audio/wav")?);
-
-        let resp = HTTP_CLIENT.post(&config.get_api_url())
-            .header("Authorization", format!("Bearer {}", api_key))
-            .multipart(form)
-            .send()
-            .await
-            .context("Failed to send streaming API request")?;
-        
-        if !resp.status().is_success() {
-            return Ok(String::new());
-        }
-
-        let result = resp.json::<ApiResponse>()
-            .await
-            .context("Failed to parse streaming API response")?;
-
-        Ok(result.text.trim().to_string())
+        Ok(form)
     }
 }

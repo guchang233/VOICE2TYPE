@@ -32,7 +32,7 @@ pub fn start_hotkey_listener(tx: mpsc::Sender<InputMessage>, config: Arc<ConfigM
             let current_vk = config.hotkey();
             let vk_main = VIRTUAL_KEY(current_vk as u16);
             let trigger_mode = config.trigger_mode();
-            
+
             // GetAsyncKeyState 的最高位表示按键当前是否按下
             let main_down = unsafe { (GetAsyncKeyState(vk_main.0 as i32) as u16 & 0x8000) != 0 };
             let esc_down = unsafe { (GetAsyncKeyState(vk_esc.0 as i32) as u16 & 0x8000) != 0 };
@@ -44,7 +44,7 @@ pub fn start_hotkey_listener(tx: mpsc::Sender<InputMessage>, config: Arc<ConfigM
                         is_pressed = true;
                         let _ = tx.blocking_send(InputMessage::StartRecording);
                     }
-                    
+
                     if esc_down {
                         let _ = tx.blocking_send(InputMessage::CancelRecording);
                         // 等待 ESC 松开，防止连续触发
@@ -62,10 +62,10 @@ pub fn start_hotkey_listener(tx: mpsc::Sender<InputMessage>, config: Arc<ConfigM
                 // 按下输入模式
                 static mut LAST_STOP_TIME: Option<Instant> = None;
                 const COOLDOWN_DURATION: Duration = Duration::from_millis(500); // 500ms冷却时间
-                
+
                 if main_down && !is_pressed {
                     is_pressed = true;
-                    
+
                     // 检查是否在冷却期内
                     let in_cooldown = unsafe {
                         if let Some(last_stop) = LAST_STOP_TIME {
@@ -74,7 +74,7 @@ pub fn start_hotkey_listener(tx: mpsc::Sender<InputMessage>, config: Arc<ConfigM
                             false
                         }
                     };
-                    
+
                     if !in_cooldown {
                         if is_recording {
                             // 停止录音
@@ -93,7 +93,7 @@ pub fn start_hotkey_listener(tx: mpsc::Sender<InputMessage>, config: Arc<ConfigM
                 } else if !main_down {
                     is_pressed = false;
                 }
-                
+
                 if esc_down && is_recording {
                     let _ = tx.blocking_send(InputMessage::CancelRecording);
                     is_recording = false;
@@ -122,7 +122,7 @@ pub fn start_hotkey_listener(tx: mpsc::Sender<InputMessage>, config: Arc<ConfigM
                 EventType::KeyPress(Key::F2) => {
                     if !is_f2_pressed {
                         is_f2_pressed = true;
-                        
+
                         if trigger_mode == "hold" {
                             // 按住输入模式
                             let _ = tx.blocking_send(InputMessage::StartRecording);
@@ -143,7 +143,7 @@ pub fn start_hotkey_listener(tx: mpsc::Sender<InputMessage>, config: Arc<ConfigM
                 EventType::KeyRelease(Key::F2) => {
                     if is_f2_pressed {
                         is_f2_pressed = false;
-                        
+
                         if trigger_mode == "hold" {
                             // 只有在按住输入模式下才发送停止录音消息
                             let _ = tx.blocking_send(InputMessage::StopRecording);
@@ -153,7 +153,9 @@ pub fn start_hotkey_listener(tx: mpsc::Sender<InputMessage>, config: Arc<ConfigM
                     }
                 }
                 EventType::KeyPress(Key::Escape) => {
-                    if (trigger_mode == "hold" && is_f2_pressed) || (trigger_mode == "toggle" && is_recording) {
+                    if (trigger_mode == "hold" && is_f2_pressed)
+                        || (trigger_mode == "toggle" && is_recording)
+                    {
                         // 如果正在录音，此时按下了 ESC -> 取消
                         let _ = tx.blocking_send(InputMessage::CancelRecording);
                         is_recording = false;

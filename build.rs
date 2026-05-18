@@ -5,7 +5,8 @@ fn main() {
         let mut res = winres::WindowsResource::new();
         res.set_icon("icon.ico");
         let level = "requireAdministrator";
-        let manifest = format!(r#"
+        let manifest = format!(
+            r#"
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
 <dependency>
     <dependentAssembly>
@@ -27,7 +28,8 @@ fn main() {
     </security>
 </trustInfo>
 </assembly>
-"#);
+"#
+        );
         res.set_manifest(&manifest);
         if let Err(e) = res.compile() {
             eprintln!("Error compiling windows resources: {}", e);

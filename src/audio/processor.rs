@@ -2,60 +2,37 @@ use anyhow::{Context, Result};
 use hound::{SampleFormat, WavSpec, WavWriter};
 use std::io::Cursor;
 
-/// 音频重采样和格式转换
-/// 将f32格式的音频转换为i16格式，并将采样率转换为16kHz
+const TARGET_SAMPLE_RATE: u32 = 16_000;
+
+/// 把录音缓冲转换成识别接口更稳的 16kHz / i16 / mono 数据。
+///
+/// 这里用线性插值，质量比“整数比例抽样”稳定，也不会在 44.1kHz 这类采样率下写错 WAV 头。
 pub fn resample_and_convert(input: &[f32], input_rate: u32) -> (Vec<i16>, u32) {
-    let target_rate = 16000;
-    
-    // 计算增益因子，提高音频音量
-    // 增加增益到3.0以确保API能检测到语音
-    let gain = 3.0;
-    
-    // 如果输入为空，返回空向量
-    if input.is_empty() {
-        return (Vec::new(), target_rate);
-    }
-    
-    // 如果原始采样率小于等于目标采样率，不做降采样，直接转换
-    if input_rate <= target_rate {
-        let output: Vec<i16> = input.iter()
-            .map(|&s| {
-                let amplified = s * gain;
-                (amplified.clamp(-1.0, 1.0) * 32767.0) as i16
-            })
-            .collect();
-        return (output, target_rate);
+    if input.is_empty() || input_rate == 0 {
+        return (Vec::new(), TARGET_SAMPLE_RATE);
     }
 
-    // 计算降采样比率 (简单的整数比率)
-    let ratio = (input_rate as f32 / target_rate as f32).round() as usize;
-    if ratio <= 1 {
-         let output: Vec<i16> = input.iter()
-            .map(|&s| {
-                let amplified = s * gain;
-                (amplified.clamp(-1.0, 1.0) * 32767.0) as i16
-            })
-            .collect();
-        return (output, target_rate);
+    if input_rate == TARGET_SAMPLE_RATE {
+        return (float_to_i16(input), TARGET_SAMPLE_RATE);
     }
 
-    let est_capacity = input.len() / ratio + 1;
-    let mut output = Vec::with_capacity(est_capacity);
+    let output_len =
+        ((input.len() as u64 * TARGET_SAMPLE_RATE as u64) / input_rate as u64).max(1) as usize;
+    let step = input_rate as f64 / TARGET_SAMPLE_RATE as f64;
+    let mut output = Vec::with_capacity(output_len);
 
-    // 均值池化 (Average Pooling) 降采样，充当简单的低通滤波
-    for chunk in input.chunks(ratio) {
-        let sum: f32 = chunk.iter().sum();
-        let avg = sum / chunk.len() as f32;
-        let amplified = avg * gain;
-        let sample_i16 = (amplified.clamp(-1.0, 1.0) * 32767.0) as i16;
-        output.push(sample_i16);
+    for i in 0..output_len {
+        let pos = i as f64 * step;
+        let left = pos.floor() as usize;
+        let right = (left + 1).min(input.len() - 1);
+        let frac = (pos - left as f64) as f32;
+        let sample = input[left] * (1.0 - frac) + input[right] * frac;
+        output.push(to_i16(sample));
     }
-    
-    // 强制使用目标采样率
-    (output, target_rate)
+
+    (output, TARGET_SAMPLE_RATE)
 }
 
-/// 内存中编码WAV数据
 pub fn encode_wav_memory(samples: &[i16], sample_rate: u32) -> Result<Vec<u8>> {
     let spec = WavSpec {
         channels: 1,
@@ -65,26 +42,31 @@ pub fn encode_wav_memory(samples: &[i16], sample_rate: u32) -> Result<Vec<u8>> {
     };
 
     let mut cursor = Cursor::new(Vec::new());
-    let mut writer = WavWriter::new(&mut cursor, spec)
-        .context("Failed to create WAV writer")?;
+    let mut writer = WavWriter::new(&mut cursor, spec).context("Failed to create WAV writer")?;
 
     for &sample in samples {
-        writer.write_sample(sample)
+        writer
+            .write_sample(sample)
             .context("Failed to write WAV sample")?;
     }
 
-    writer.finalize()
-        .context("Failed to finalize WAV writer")?;
-
+    writer.finalize().context("Failed to finalize WAV writer")?;
     Ok(cursor.into_inner())
 }
 
-/// 计算音频能量，用于VAD检测
 pub fn calculate_audio_energy(audio: &[f32]) -> f32 {
     if audio.is_empty() {
         return 0.0;
     }
-    
+
     let sum_squared: f32 = audio.iter().map(|&x| x * x).sum();
     sum_squared / audio.len() as f32
+}
+
+fn float_to_i16(input: &[f32]) -> Vec<i16> {
+    input.iter().map(|&sample| to_i16(sample)).collect()
+}
+
+fn to_i16(sample: f32) -> i16 {
+    (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16
 }

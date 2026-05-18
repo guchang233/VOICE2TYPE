@@ -1,14 +1,11 @@
-use std::sync::mpsc::{channel, Sender, Receiver};
-use std::thread;
 use std::ffi::c_void;
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::thread;
 
 #[cfg(target_os = "windows")]
 use windows::{
-    core::*,
-    Win32::Foundation::*,
-    Win32::Graphics::Gdi::*,
-    Win32::UI::WindowsAndMessaging::*,
-    Win32::System::LibraryLoader::GetModuleHandleW,
+    core::*, Win32::Foundation::*, Win32::Graphics::Gdi::*,
+    Win32::System::LibraryLoader::GetModuleHandleW, Win32::UI::WindowsAndMessaging::*,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -29,7 +26,7 @@ pub struct StatusIndicator {
 impl StatusIndicator {
     pub fn new() -> Self {
         let (tx, rx) = channel();
-        
+
         thread::spawn(move || {
             #[cfg(target_os = "windows")]
             unsafe {
@@ -48,26 +45,26 @@ impl StatusIndicator {
 #[cfg(target_os = "windows")]
 struct WindowState {
     target_state: IndicatorState,
-    
+
     // Animation state
     current_alpha: f32, // 0.0 to 1.0
     target_alpha: f32,
-    
+
     current_color: u32, // RGB
     target_color: u32,
-    
+
     text: String,
-    
+
     // Layout
     width: i32,
     height: i32,
-    
+
     // State timing
     state_start_time: std::time::Instant, // 当前状态的开始时间
-    
+
     // Duration settings
-    fade_duration: u64, // 淡出动画时间（毫秒）
-    error_duration: u64, // 错误状态持续时间（毫秒）
+    fade_duration: u64,    // 淡出动画时间（毫秒）
+    error_duration: u64,   // 错误状态持续时间（毫秒）
     success_duration: u64, // 成功状态持续时间（毫秒）
 }
 
@@ -99,7 +96,10 @@ unsafe fn create_and_run_window(rx: Receiver<IndicatorState>) {
         class_name,
         w!("Voice2Type Indicator"),
         WS_POPUP | WS_VISIBLE,
-        x, y, initial_width, initial_height,
+        x,
+        y,
+        initial_width,
+        initial_height,
         None,
         None,
         instance,
@@ -107,29 +107,29 @@ unsafe fn create_and_run_window(rx: Receiver<IndicatorState>) {
     );
 
     // Initial state
-        let mut state = WindowState {
-            target_state: IndicatorState::Hidden,
-            current_alpha: 0.0,
-            target_alpha: 0.0,
-            current_color: 0x000000,
-            target_color: 0x000000,
-            text: String::new(),
-            width: initial_width,
-            height: initial_height,
-            state_start_time: std::time::Instant::now(),
-            // Default duration settings
-            fade_duration: 300, // 默认 300 毫秒
-            error_duration: 5000, // 默认 5000 毫秒
-            success_duration: 5000, // 默认 5000 毫秒
-        };
+    let mut state = WindowState {
+        target_state: IndicatorState::Hidden,
+        current_alpha: 0.0,
+        target_alpha: 0.0,
+        current_color: 0x000000,
+        target_color: 0x000000,
+        text: String::new(),
+        width: initial_width,
+        height: initial_height,
+        state_start_time: std::time::Instant::now(),
+        // Default duration settings
+        fade_duration: 300,     // 默认 300 毫秒
+        error_duration: 5000,   // 默认 5000 毫秒
+        success_duration: 5000, // 默认 5000 毫秒
+    };
 
-    // Store state pointer in window user data? 
+    // Store state pointer in window user data?
     // Simplified: Just keep it in the loop since we process messages manually-ish or use static/global if needed.
-    // But wnd_proc needs to be static. 
+    // But wnd_proc needs to be static.
     // For this simple single-window thread, we can handle logic in the loop and just use DefWindowProc for the basics.
-    // However, WM_PAINT/TIMER might be dispatched. 
+    // However, WM_PAINT/TIMER might be dispatched.
     // Let's keep logic in the main loop as much as possible, using PeekMessage or MsgWaitForMultipleObjects.
-    
+
     // Setup Timer for animation (approx 60fps -> 16ms)
     SetTimer(hwnd, 1, 16, None);
 
@@ -168,7 +168,7 @@ unsafe fn create_and_run_window(rx: Receiver<IndicatorState>) {
             }
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
-            
+
             // Handle Timer manually if dispatch doesn't cover it well (it does)
             if msg.message == WM_TIMER && msg.wParam.0 == 1 {
                 if update_animation(&mut state) {
@@ -176,7 +176,7 @@ unsafe fn create_and_run_window(rx: Receiver<IndicatorState>) {
                 }
             }
         }
-        
+
         // Sleep a bit to avoid CPU spin if no messages
         // MsgWaitForMultipleObjects would be better but Sleep(1) is okay for this simple thread
         thread::sleep(std::time::Duration::from_millis(5));
@@ -216,16 +216,16 @@ fn update_targets(state: &mut WindowState, new_state: &IndicatorState) {
             state.text = "已取消".to_string();
         }
     }
-    
+
     // Recalculate width based on text
     // Fixed width for now for stability, or dynamic:
-    // state.width = 160; 
+    // state.width = 160;
 }
 
 #[cfg(target_os = "windows")]
 fn update_animation(state: &mut WindowState) -> bool {
     let mut changed = false;
-    
+
     // Lerp alpha
     let alpha_diff = state.target_alpha - state.current_alpha;
     if alpha_diff.abs() > 0.01 {
@@ -247,14 +247,17 @@ fn update_animation(state: &mut WindowState) -> bool {
     let b_curr = state.current_color & 0xFF;
 
     let lerp = |c: u32, t: u32| -> u32 {
-        if c < t { c + ((t - c) as f32 * 0.1).ceil() as u32 }
-        else { c - ((c - t) as f32 * 0.1).ceil() as u32 }
+        if c < t {
+            c + ((t - c) as f32 * 0.1).ceil() as u32
+        } else {
+            c - ((c - t) as f32 * 0.1).ceil() as u32
+        }
     };
 
     let r_new = lerp(r_curr, r_target);
     let g_new = lerp(g_curr, g_target);
     let b_new = lerp(b_curr, b_target);
-    
+
     let new_color = (r_new << 16) | (g_new << 8) | b_new;
     if new_color != state.current_color {
         state.current_color = new_color;
@@ -270,7 +273,12 @@ fn update_animation(state: &mut WindowState) -> bool {
 }
 
 #[cfg(target_os = "windows")]
-unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+unsafe extern "system" fn wnd_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
     match msg {
         WM_DESTROY => {
             PostQuitMessage(0);
@@ -292,7 +300,7 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
 
     let hdc_screen = GetDC(None);
     let hdc_mem = CreateCompatibleDC(hdc_screen);
-    
+
     // Create 32-bit DIB
     let bmi = BITMAPINFO {
         bmiHeader: BITMAPINFOHEADER {
@@ -313,10 +321,12 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
 
     // Cast bits to slice
     let pixels = std::slice::from_raw_parts_mut(p_bits as *mut u32, (w * h) as usize);
-    
+
     // Clear to transparent
     // pixels.fill(0); // Already zero initialized? Usually yes but safer to fill.
-    for p in pixels.iter_mut() { *p = 0; }
+    for p in pixels.iter_mut() {
+        *p = 0;
+    }
 
     // Constants
     let radius = 16.0; // Corner radius
@@ -324,20 +334,20 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
     let dot_radius = 5.0; // 10px diameter
     let dot_x = padding + dot_radius;
     let dot_y = h as f32 / 2.0;
-    
+
     // Background Color (Black #000000 with some opacity)
     // User asked for black background. Opacity is not strictly defined for bg, but "semi-transparent" implied?
     // User: "悬浮窗整体背景色设置为黑色... 指示灯...透明度70-80%... 窗口...淡入淡出"
     // Let's make the background opaque black for high contrast as requested, but the whole window fades.
     // Wait, "半透明效果" in technical requirements implies the window itself might be semi-transparent.
     // Let's use 220 alpha for background to look "modern".
-    let bg_alpha = 220u32; 
+    let bg_alpha = 220u32;
 
     // Draw Background (Rounded Rect)
     for y in 0..h {
         for x in 0..w {
             let idx = (y * w + x) as usize;
-            
+
             // Signed distance to rounded rect
             // Rect: 0,0, w, h. Radius r.
             // Symmetry: map x,y to top-left quadrant relative to center
@@ -345,19 +355,19 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
             let cy = h as f32 / 2.0;
             let px = (x as f32 - cx).abs();
             let py = (y as f32 - cy).abs();
-            
+
             let qw = w as f32 / 2.0 - radius;
             let qh = h as f32 / 2.0 - radius;
-            
+
             let dx = (px - qw).max(0.0);
             let dy = (py - qh).max(0.0);
-            let dist = (dx*dx + dy*dy).sqrt();
-            
+            let dist = (dx * dx + dy * dy).sqrt();
+
             // Alpha based on distance (Anti-aliasing)
-            // if dist > radius -> outside. 
+            // if dist > radius -> outside.
             // alpha = clamp(radius - dist + 0.5, 0, 1)
             let alpha_f = (radius - dist + 0.5).clamp(0.0, 1.0);
-            
+
             if alpha_f > 0.0 {
                 let pixel_alpha = (alpha_f * bg_alpha as f32) as u32;
                 // Pre-multiplied alpha (Black is 0,0,0 so just Alpha channel matters)
@@ -379,27 +389,27 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
         for x in 0..w {
             let dx = x as f32 - dot_x;
             let dy = y as f32 - dot_y;
-            let dist = (dx*dx + dy*dy).sqrt();
-            
+            let dist = (dx * dx + dy * dy).sqrt();
+
             let alpha_f = (dot_radius - dist + 0.5).clamp(0.0, 1.0);
             if alpha_f > 0.0 {
                 let idx = (y * w + x) as usize;
                 let bg_val = pixels[idx];
                 let _bg_a = (bg_val >> 24) & 0xFF;
-                
+
                 // Simple blend over black background
                 let final_a = (alpha_f * dot_alpha as f32) as u32;
-                
+
                 // Premultiply
                 let r = (dr * final_a) / 255;
                 let g = (dg * final_a) / 255;
                 let b = (db * final_a) / 255;
-                
+
                 // Composite over existing background (Painter's algorithm)
                 // Src: (r,g,b, final_a), Dst: (0,0,0, bg_a)
                 // OutA = SrcA + DstA * (1 - SrcA)
                 // OutC = SrcC + DstC * (1 - SrcA)
-                
+
                 // Simplified: just set it since dot is on top and opaque-ish
                 pixels[idx] = (final_a << 24) | (r << 16) | (g << 8) | b;
             }
@@ -410,24 +420,40 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
     // We draw to the DC, then fix up alpha
     SetBkMode(hdc_mem, TRANSPARENT);
     SetTextColor(hdc_mem, COLORREF(0x00FFFFFF)); // White
-    
+
     let font_height = 18; // 14pt approx
     let font = CreateFontW(
-        -font_height, 0, 0, 0, FW_BOLD.0 as i32, 0, 0, 0,
-        DEFAULT_CHARSET.0 as u32, OUT_DEFAULT_PRECIS.0 as u32, CLIP_DEFAULT_PRECIS.0 as u32,
-        CLEARTYPE_QUALITY.0 as u32, DEFAULT_PITCH.0 as u32, w!("Microsoft YaHei UI")
+        -font_height,
+        0,
+        0,
+        0,
+        FW_BOLD.0 as i32,
+        0,
+        0,
+        0,
+        DEFAULT_CHARSET.0 as u32,
+        OUT_DEFAULT_PRECIS.0 as u32,
+        CLIP_DEFAULT_PRECIS.0 as u32,
+        CLEARTYPE_QUALITY.0 as u32,
+        DEFAULT_PITCH.0 as u32,
+        w!("Microsoft YaHei UI"),
     );
     let old_font = SelectObject(hdc_mem, font);
 
-    let mut text_rect = RECT { 
-        left: (dot_x + dot_radius + 15.0) as i32, 
-        top: 0, 
-        right: w, 
-        bottom: h 
+    let mut text_rect = RECT {
+        left: (dot_x + dot_radius + 15.0) as i32,
+        top: 0,
+        right: w,
+        bottom: h,
     };
-    
+
     let mut text_wide: Vec<u16> = state.text.encode_utf16().chain(Some(0)).collect();
-    DrawTextW(hdc_mem, &mut text_wide, &mut text_rect, DT_VCENTER | DT_SINGLELINE);
+    DrawTextW(
+        hdc_mem,
+        &mut text_wide,
+        &mut text_rect,
+        DT_VCENTER | DT_SINGLELINE,
+    );
 
     // Fix up alpha for text
     // GDI draws RGB but often leaves Alpha=0 for text.
@@ -443,7 +469,7 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
                 let r = (val >> 16) & 0xFF;
                 let g = (val >> 8) & 0xFF;
                 let b = val & 0xFF;
-                
+
                 // If it has color (white text), ensure it's visible
                 // Simple heuristic: max(r,g,b) > 0 -> it's text (or background/dot)
                 // Background is black (0,0,0) with Alpha.
@@ -451,7 +477,7 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
                 // Text pixels drawn by GDI will be (255,255,255) with Alpha=0 (usually).
                 // So if we see R/G/B > 0, it is text (since background is black).
                 // (Dot is also colored, but we already drew it with alpha).
-                
+
                 if r > 0 || g > 0 || b > 0 {
                     // Check if it's the dot (we know dot area) or just trust the loop order?
                     // Text is drawn AFTER dot.
@@ -463,15 +489,15 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
                     // Actually GDI drawing blends with the *existing* buffer if we didn't clear it?
                     // No, standard GDI operations on DIBSection are read-modify-write.
                     // But Text drawing might ignore alpha.
-                    
+
                     // Let's assume text pixels are meant to be opaque white.
                     // We just take the max channel as the alpha for the text part.
                     let max_c = r.max(g).max(b);
                     if max_c > 0 {
-                         // This is text.
-                         // Set Alpha to max_c (so full white = 255 alpha, gray = partial)
-                         // And keep the RGB (pre-multiplied logic holds since R=G=B for white/gray)
-                         pixels[idx] = (max_c << 24) | (val & 0x00FFFFFF);
+                        // This is text.
+                        // Set Alpha to max_c (so full white = 255 alpha, gray = partial)
+                        // And keep the RGB (pre-multiplied logic holds since R=G=B for white/gray)
+                        pixels[idx] = (max_c << 24) | (val & 0x00FFFFFF);
                     }
                 } else {
                     // It's black. Could be background.
@@ -488,14 +514,14 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
     // Final Update
     let pt_src = POINT { x: 0, y: 0 };
     let size = SIZE { cx: w, cy: h };
-    
+
     // Global alpha for fade-in/out animation
     let global_alpha = (state.current_alpha * 255.0) as u8;
-    
+
     let blend = BLENDFUNCTION {
         BlendOp: AC_SRC_OVER as u8,
         BlendFlags: 0,
-        SourceConstantAlpha: global_alpha, 
+        SourceConstantAlpha: global_alpha,
         AlphaFormat: AC_SRC_ALPHA as u8,
     };
 
@@ -510,7 +536,7 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
         Some(&blend),
         ULW_ALPHA,
     );
-    
+
     ShowWindow(hwnd, SW_SHOWNOACTIVATE);
 
     SelectObject(hdc_mem, old_bitmap);

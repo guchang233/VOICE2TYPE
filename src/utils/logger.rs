@@ -5,11 +5,11 @@ use std::io::Write;
 use std::sync::Mutex;
 
 #[cfg(target_os = "windows")]
+use windows::core::PCWSTR;
+#[cfg(target_os = "windows")]
 use windows::Win32::Foundation::CloseHandle;
 #[cfg(target_os = "windows")]
 use windows::Win32::Storage::FileSystem::WriteFile;
-#[cfg(target_os = "windows")]
-use windows::core::PCWSTR;
 
 /// 日志级别
 #[derive(Debug, Clone, Copy)]
@@ -21,32 +21,32 @@ pub enum LogLevel {
 }
 
 #[cfg(target_os = "windows")]
-pub static LOG_PIPE_HANDLE: Lazy<Mutex<Option<windows::Win32::Foundation::HANDLE>>> = Lazy::new(|| Mutex::new(None));
+pub static LOG_PIPE_HANDLE: Lazy<Mutex<Option<windows::Win32::Foundation::HANDLE>>> =
+    Lazy::new(|| Mutex::new(None));
 
 #[cfg(target_os = "windows")]
-pub static LOG_VIEWER_CHILD: Lazy<Mutex<Option<std::process::Child>>> = Lazy::new(|| Mutex::new(None));
+pub static LOG_VIEWER_CHILD: Lazy<Mutex<Option<std::process::Child>>> =
+    Lazy::new(|| Mutex::new(None));
 
 /// 初始化日志管道
 #[cfg(target_os = "windows")]
 pub fn init_log_pipe() {
     use std::thread;
-    use windows::Win32::System::Pipes::{CreateNamedPipeW, ConnectNamedPipe};
+    use windows::Win32::System::Pipes::{ConnectNamedPipe, CreateNamedPipeW};
     let name: Vec<u16> = "\\\\.\\pipe\\voice2type_log\0".encode_utf16().collect();
-    thread::spawn(move || {
-        unsafe {
-            let handle = CreateNamedPipeW(
-                PCWSTR(name.as_ptr()),
-                windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES(0x00000002),
-                windows::Win32::System::Pipes::NAMED_PIPE_MODE(0),
-                1,
-                4096,
-                4096,
-                0,
-                None,
-            );
-            *LOG_PIPE_HANDLE.lock().unwrap() = Some(handle);
-            let _ = ConnectNamedPipe(handle, None);
-        }
+    thread::spawn(move || unsafe {
+        let handle = CreateNamedPipeW(
+            PCWSTR(name.as_ptr()),
+            windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES(0x00000002),
+            windows::Win32::System::Pipes::NAMED_PIPE_MODE(0),
+            1,
+            4096,
+            4096,
+            0,
+            None,
+        );
+        *LOG_PIPE_HANDLE.lock().unwrap() = Some(handle);
+        let _ = ConnectNamedPipe(handle, None);
     });
 }
 
@@ -62,34 +62,28 @@ pub fn start_log_viewer() {
                     use std::time::Duration;
                     loop {
                         let exited = {
-                            if let Ok(mut guard) = LOG_VIEWER_CHILD.try_lock() {
-                                if let Some(ch) = guard.as_mut() {
-                                    ch.try_wait().map(|o| o.is_some()).unwrap_or(false)
-                                } else {
-                                    // 已被外部关闭
-                                    true
-                                }
+                            let mut guard = LOG_VIEWER_CHILD.lock().unwrap();
+                            if let Some(ch) = guard.as_mut() {
+                                ch.try_wait().map(|o| o.is_some()).unwrap_or(false)
                             } else {
-                                // 无法获取锁，继续检查
-                                false
+                                // 已被外部关闭
+                                true
                             }
                         };
                         if exited {
                             // 子进程已退出：关闭日志并同步 UI 勾选
                             #[cfg(target_os = "windows")]
                             {
-                                if let Ok(mut guard) = LOG_PIPE_HANDLE.try_lock() {
-                                    if let Some(handle) = guard.take() {
-                                        unsafe { let _ = CloseHandle(handle); }
+                                if let Some(handle) = LOG_PIPE_HANDLE.lock().unwrap().take() {
+                                    unsafe {
+                                        let _ = CloseHandle(handle);
                                     }
                                 }
                                 if let Some(cfg) = crate::CONFIG_GLOBAL.get() {
                                     cfg.set_show_log(false);
                                     let _ = cfg.save();
                                 }
-                                if let Ok(mut guard) = LOG_VIEWER_CHILD.try_lock() {
-                                    *guard = None;
-                                }
+                                *LOG_VIEWER_CHILD.lock().unwrap() = None;
                                 crate::request_uncheck_log_menu();
                             }
                             break;
@@ -111,7 +105,7 @@ pub fn write_log(level: LogLevel, s: &str, config: Option<&crate::config::Config
         LogLevel::WARN => "WARN ",
         LogLevel::ERROR => "ERROR",
     };
-    
+
     let time_str = Local::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string();
     let log_entry = format!("[{}][{}] {}", time_str, level_str, s);
 
@@ -152,25 +146,24 @@ pub fn log_set_enabled(enabled: bool, config: Option<&crate::config::ConfigManag
         }
     } else {
         // 停止子进程
-        if let Ok(mut guard) = LOG_VIEWER_CHILD.try_lock() {
+        {
+            let mut guard = LOG_VIEWER_CHILD.lock().unwrap();
             if let Some(mut child) = guard.take() {
                 let _ = child.kill();
                 let _ = child.wait();
             }
         }
         // 关闭管道
-        if let Ok(mut guard) = LOG_PIPE_HANDLE.try_lock() {
+        {
+            let mut guard = LOG_PIPE_HANDLE.lock().unwrap();
             if let Some(handle) = guard.take() {
-                unsafe { let _ = CloseHandle(handle); }
+                unsafe {
+                    let _ = CloseHandle(handle);
+                }
             }
         }
-        // 更新配置
-        if let Some(cfg) = config {
-            cfg.set_show_log(false);
-            let _ = cfg.save();
-        }
-        // 请求取消日志菜单的勾选
-        crate::request_uncheck_log_menu();
+        // 重置 LOG_MENU_NEEDS_UNCHECK 标志
+        crate::LOG_MENU_NEEDS_UNCHECK.store(false, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -190,7 +183,9 @@ pub fn viewer_main() {
     }
 
     // 2. 连接管道读取实时日志
-    use windows::Win32::Storage::FileSystem::{CreateFileW, ReadFile, FILE_GENERIC_READ, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING};
+    use windows::Win32::Storage::FileSystem::{
+        CreateFileW, ReadFile, FILE_GENERIC_READ, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+    };
     let name: Vec<u16> = "\\\\.\\pipe\\voice2type_log\0".encode_utf16().collect();
     unsafe {
         let h = CreateFileW(

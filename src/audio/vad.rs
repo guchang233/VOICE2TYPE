@@ -85,7 +85,7 @@ impl VoiceActivityDetector {
     pub fn process_frame(&mut self, frame: &[f32]) -> bool {
         // 计算当前帧的能量
         let energy = self.calculate_frame_energy(frame);
-        
+
         // 更新能量历史
         self.energy_history.push_back(energy);
         if self.energy_history.len() > 30 {
@@ -181,7 +181,8 @@ impl AudioSegmenter {
         frame_size: usize,
     ) {
         self.vad.set_energy_threshold(energy_threshold);
-        self.vad.set_silence_frame_threshold(silence_frame_threshold);
+        self.vad
+            .set_silence_frame_threshold(silence_frame_threshold);
         self.vad.set_speech_frame_threshold(speech_frame_threshold);
         self.vad.set_frame_size(frame_size);
     }
@@ -195,6 +196,7 @@ impl AudioSegmenter {
     /// 处理音频数据
     /// 返回是否需要分片
     pub fn process_audio(&mut self, audio_data: &[f32]) -> bool {
+        let mut need_segment = false;
         // 将音频数据分帧处理
         for frame in audio_data.chunks(self.vad.frame_size) {
             // 处理当前帧
@@ -206,12 +208,16 @@ impl AudioSegmenter {
             // 检查是否需要分片
             // 1. 如果片段长度超过最大值
             // 2. 如果检测到静默且片段不为空
-            if self.current_segment.len() > self.max_segment_length || (!is_speech && !self.current_segment.is_empty()) {
-                return true;
+            if self.current_segment.len() > self.max_segment_length
+                || (!is_speech
+                    && !self.current_segment.is_empty()
+                    && self.current_segment.len() > self.vad.frame_size * 5)
+            {
+                need_segment = true;
             }
         }
 
-        false
+        need_segment
     }
 
     /// 获取当前片段

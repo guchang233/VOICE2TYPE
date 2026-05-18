@@ -3,8 +3,14 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-// 配置管理器
-// 处理 API Key 和设置的加载/保存
+const MODEL_TELEAI: &str = "TeleAI/TeleSpeechASR";
+const MODEL_SENSEVOICE: &str = "FunAudioLLM/SenseVoiceSmall";
+const MODEL_WHISPER: &str = "whisper-large-v3";
+const MODEL_CUSTOM: &str = "custom";
+
+const SILICONFLOW_TRANSCRIPTIONS_URL: &str = "https://api.siliconflow.cn/v1/audio/transcriptions";
+const GROQ_TRANSCRIPTIONS_URL: &str = "https://api.groq.com/openai/v1/audio/transcriptions";
+
 #[derive(Clone)]
 pub struct ConfigManager {
     config: Arc<Mutex<AppConfig>>,
@@ -13,89 +19,297 @@ pub struct ConfigManager {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
-pub struct AppConfig {
-    pub api_key: String,
-    pub api_url: String,
+pub struct BasicConfig {
     pub model_name: String,
-    pub allow_emoji: bool,
-    pub allow_punctuation: bool,
-    pub show_log: bool,
-    pub language: String, // "zh" 或 "en"
+    pub language: String,
+    pub output_language: String,
     pub output_mode: String,
     pub autostart: bool,
-    pub hotkey: u32, // Windows 虚拟键码
+    pub hotkey: u32,
+    pub show_log: bool,
+}
+
+impl Default for BasicConfig {
+    fn default() -> Self {
+        Self {
+            model_name: MODEL_SENSEVOICE.to_string(),
+            language: "zh".to_string(),
+            output_language: "auto".to_string(),
+            output_mode: "clipboard".to_string(),
+            autostart: false,
+            hotkey: 0x71, // F2
+            show_log: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FeatureConfig {
+    pub allow_emoji: bool,
+    pub allow_punctuation: bool,
     pub enable_indicator: bool,
+    pub enable_streaming: bool,
+}
+
+impl Default for FeatureConfig {
+    fn default() -> Self {
+        Self {
+            allow_emoji: true,
+            allow_punctuation: true,
+            enable_indicator: true,
+            enable_streaming: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AdvancedConfig {
+    pub trigger_mode: String,
+    pub streaming_interval: u64,
+}
+
+impl Default for AdvancedConfig {
+    fn default() -> Self {
+        Self {
+            trigger_mode: "hold".to_string(),
+            streaming_interval: 500,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UpdateConfig {
     pub last_check_time: u64,
     pub ignored_version: String,
-    pub output_language: String, // "auto", "zh", "en", etc.
-    pub enable_streaming: bool, // 是否启用流式输出
-    pub streaming_interval: u64, // 流式处理时间间隔（毫秒）
-    pub trigger_mode: String, // 触发模式: "hold" 或 "toggle"
-    pub speech_service: String, // 语音识别服务: "siliconflow", "openai", "google", "azure", "baidu", "alibaba", "tencent"
-    // 指示器相关配置
-    pub indicator_fade_duration: u64, // 指示器淡出的动画时间（毫秒）
-    pub indicator_error_duration: u64, // 错误状态指示器存在时间（毫秒）
-    pub indicator_success_duration: u64, // 成功状态指示器存在时间（毫秒）
+}
+
+impl Default for UpdateConfig {
+    fn default() -> Self {
+        Self {
+            last_check_time: 0,
+            ignored_version: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ModelConfig {
+    pub siliconflow_api_key: String,
+    pub groq_api_key: String,
+    pub custom_api_key: String,
+    pub custom_api_url: String,
+    pub custom_model_name: String,
+}
+
+impl Default for ModelConfig {
+    fn default() -> Self {
+        Self {
+            siliconflow_api_key: String::new(),
+            groq_api_key: String::new(),
+            custom_api_key: String::new(),
+            custom_api_url: SILICONFLOW_TRANSCRIPTIONS_URL.to_string(),
+            custom_model_name: "自定义模型".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct IndicatorConfig {
+    pub fade_duration: u64,
+    pub error_duration: u64,
+    pub success_duration: u64,
+}
+
+impl Default for IndicatorConfig {
+    fn default() -> Self {
+        Self {
+            fade_duration: 300,
+            error_duration: 5000,
+            success_duration: 5000,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AppConfig {
+    pub basic: BasicConfig,
+    pub features: FeatureConfig,
+    pub advanced: AdvancedConfig,
+    pub update: UpdateConfig,
+    pub model: ModelConfig,
+    pub indicator: IndicatorConfig,
+
+    // 旧版平铺字段，读取后会迁移到上面的分组结构。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub autostart: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hotkey: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show_log: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_emoji: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_punctuation: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_indicator: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_check_time: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ignored_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub siliconflow_api_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub groq_api_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom_api_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom_api_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom_model_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub indicator_fade_duration: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub indicator_error_duration: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub indicator_success_duration: Option<u64>,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            api_key: String::new(),
-            api_url: "https://api.siliconflow.cn/v1/audio/transcriptions".to_string(),
-            model_name: "FunAudioLLM/SenseVoiceSmall".to_string(),
-            allow_emoji: true, // 默认开启
-            allow_punctuation: true, // 默认开启
-            show_log: false, // 默认关闭
-            language: "zh".to_string(), // 默认中文 (Interface)
-            output_mode: "clipboard".to_string(),
-            autostart: false,
-            hotkey: 0x71, // 默认 F2
-            enable_indicator: true,
-            last_check_time: 0,
-            ignored_version: String::new(),
-            output_language: "auto".to_string(),
-            enable_streaming: false, // 默认关闭流式输出
-            streaming_interval: 500, // 默认 500 毫秒
-            trigger_mode: "hold".to_string(), // 默认按住输入模式
-            speech_service: "siliconflow".to_string(), // 默认使用SiliconFlow语音识别服务
-            // 指示器默认配置
-            indicator_fade_duration: 300, // 默认 300 毫秒
-            indicator_error_duration: 5000, // 默认 5000 毫秒
-            indicator_success_duration: 5000, // 默认 5000 毫秒
+            basic: BasicConfig::default(),
+            features: FeatureConfig::default(),
+            advanced: AdvancedConfig::default(),
+            update: UpdateConfig::default(),
+            model: ModelConfig::default(),
+            indicator: IndicatorConfig::default(),
+            model_name: None,
+            language: None,
+            output_language: None,
+            output_mode: None,
+            autostart: None,
+            hotkey: None,
+            show_log: None,
+            allow_emoji: None,
+            allow_punctuation: None,
+            enable_indicator: None,
+            trigger_mode: None,
+            last_check_time: None,
+            ignored_version: None,
+            siliconflow_api_key: None,
+            groq_api_key: None,
+            custom_api_key: None,
+            custom_api_url: None,
+            custom_model_name: None,
+            indicator_fade_duration: None,
+            indicator_error_duration: None,
+            indicator_success_duration: None,
+        }
+    }
+}
+
+impl AppConfig {
+    pub fn initialize(&mut self) {
+        if let Some(value) = self.model_name.take() {
+            self.basic.model_name = value;
+        }
+        if let Some(value) = self.language.take() {
+            self.basic.language = value;
+        }
+        if let Some(value) = self.output_language.take() {
+            self.basic.output_language = value;
+        }
+        if let Some(value) = self.output_mode.take() {
+            self.basic.output_mode = value;
+        }
+        if let Some(value) = self.autostart.take() {
+            self.basic.autostart = value;
+        }
+        if let Some(value) = self.hotkey.take() {
+            self.basic.hotkey = value;
+        }
+        if let Some(value) = self.show_log.take() {
+            self.basic.show_log = value;
+        }
+        if let Some(value) = self.allow_emoji.take() {
+            self.features.allow_emoji = value;
+        }
+        if let Some(value) = self.allow_punctuation.take() {
+            self.features.allow_punctuation = value;
+        }
+        if let Some(value) = self.enable_indicator.take() {
+            self.features.enable_indicator = value;
+        }
+        if let Some(value) = self.trigger_mode.take() {
+            self.advanced.trigger_mode = value;
+        }
+        if let Some(value) = self.last_check_time.take() {
+            self.update.last_check_time = value;
+        }
+        if let Some(value) = self.ignored_version.take() {
+            self.update.ignored_version = value;
+        }
+        if let Some(value) = self.siliconflow_api_key.take() {
+            self.model.siliconflow_api_key = value;
+        }
+        if let Some(value) = self.groq_api_key.take() {
+            self.model.groq_api_key = value;
+        }
+        if let Some(value) = self.custom_api_key.take() {
+            self.model.custom_api_key = value;
+        }
+        if let Some(value) = self.custom_api_url.take() {
+            self.model.custom_api_url = value;
+        }
+        if let Some(value) = self.custom_model_name.take() {
+            self.model.custom_model_name = value;
+        }
+        if let Some(value) = self.indicator_fade_duration.take() {
+            self.indicator.fade_duration = value;
+        }
+        if let Some(value) = self.indicator_error_duration.take() {
+            self.indicator.error_duration = value;
+        }
+        if let Some(value) = self.indicator_success_duration.take() {
+            self.indicator.success_duration = value;
         }
     }
 }
 
 impl ConfigManager {
     pub fn new() -> Self {
-        // 尝试确定合适的配置目录
-        // 1. 本地目录 (便携模式)
-        // 2. Roaming AppData
         let mut path = PathBuf::from("voice2type_config.json");
         if !path.exists() {
-            if let Some(proj_dirs) = directories::ProjectDirs::from("com", "guchang233", "voice2type") {
+            if let Some(proj_dirs) =
+                directories::ProjectDirs::from("com", "guchang233", "voice2type")
+            {
                 let config_dir = proj_dirs.config_dir();
-                if !config_dir.exists() {
-                    let _ = fs::create_dir_all(config_dir);
-                }
+                let _ = fs::create_dir_all(config_dir);
                 path = config_dir.join("settings.json");
             }
         }
 
-        let mut config = AppConfig::default();
+        let mut config = Self::load_config(&path).unwrap_or_default();
 
-        // 尝试加载现有配置
-        if path.exists() {
-            if let Ok(content) = fs::read_to_string(&path) {
-                if let Ok(loaded) = serde_json::from_str::<AppConfig>(&content) {
-                    config = loaded;
-                }
-            }
-        } else {
-            // 如果为空，尝试从 .env 加载 (迁移/首次运行)
+        if !path.exists() {
             if let Ok(key) = std::env::var("SILICONFLOW_API_KEY") {
-                config.api_key = key;
+                config.model.siliconflow_api_key = key;
             }
         }
 
@@ -105,190 +319,250 @@ impl ConfigManager {
         }
     }
 
+    fn load_config(path: &PathBuf) -> Option<AppConfig> {
+        let content = fs::read_to_string(path).ok()?;
+
+        if let Ok(mut loaded) = serde_json::from_str::<AppConfig>(&content) {
+            loaded.initialize();
+            return Some(loaded);
+        }
+
+        #[derive(Debug, Deserialize)]
+        struct OldAppConfig {
+            api_key: String,
+            api_url: String,
+            model_name: String,
+        }
+
+        let old = serde_json::from_str::<OldAppConfig>(&content).ok()?;
+        let mut config = AppConfig::default();
+        config.basic.model_name = old.model_name.clone();
+
+        match old.model_name.as_str() {
+            MODEL_TELEAI | MODEL_SENSEVOICE => config.model.siliconflow_api_key = old.api_key,
+            MODEL_WHISPER => config.model.groq_api_key = old.api_key,
+            _ => {
+                config.basic.model_name = MODEL_CUSTOM.to_string();
+                config.model.custom_model_name = old.model_name;
+                config.model.custom_api_key = old.api_key;
+                config.model.custom_api_url = old.api_url;
+            }
+        }
+
+        Some(config)
+    }
+
     pub fn get_api_key(&self) -> String {
-        self.config.lock().unwrap().api_key.clone()
+        let cfg = self.config.lock().unwrap();
+        match cfg.basic.model_name.as_str() {
+            MODEL_TELEAI | MODEL_SENSEVOICE => cfg.model.siliconflow_api_key.clone(),
+            MODEL_WHISPER => cfg.model.groq_api_key.clone(),
+            _ => cfg.model.custom_api_key.clone(),
+        }
     }
 
     pub fn set_api_key(&self, key: String) {
-        self.config.lock().unwrap().api_key = key;
+        let mut cfg = self.config.lock().unwrap();
+        match cfg.basic.model_name.as_str() {
+            MODEL_TELEAI | MODEL_SENSEVOICE => cfg.model.siliconflow_api_key = key,
+            MODEL_WHISPER => cfg.model.groq_api_key = key,
+            _ => cfg.model.custom_api_key = key,
+        }
     }
 
     pub fn get_api_url(&self) -> String {
-        self.config.lock().unwrap().api_url.clone()
+        let cfg = self.config.lock().unwrap();
+        match cfg.basic.model_name.as_str() {
+            MODEL_TELEAI | MODEL_SENSEVOICE => SILICONFLOW_TRANSCRIPTIONS_URL.to_string(),
+            MODEL_WHISPER => GROQ_TRANSCRIPTIONS_URL.to_string(),
+            _ => cfg.model.custom_api_url.clone(),
+        }
     }
 
     pub fn set_api_url(&self, url: String) {
-        self.config.lock().unwrap().api_url = url;
+        let mut cfg = self.config.lock().unwrap();
+        if cfg.basic.model_name == MODEL_CUSTOM {
+            cfg.model.custom_api_url = url;
+        }
     }
 
     pub fn get_model_name(&self) -> String {
-        self.config.lock().unwrap().model_name.clone()
+        let cfg = self.config.lock().unwrap();
+        if cfg.basic.model_name == MODEL_CUSTOM {
+            cfg.model.custom_model_name.clone()
+        } else {
+            cfg.basic.model_name.clone()
+        }
     }
 
     pub fn set_model_name(&self, model: String) {
-        self.config.lock().unwrap().model_name = model;
+        let mut cfg = self.config.lock().unwrap();
+        match model.as_str() {
+            MODEL_TELEAI | MODEL_SENSEVOICE | MODEL_WHISPER => cfg.basic.model_name = model,
+            _ => {
+                cfg.basic.model_name = MODEL_CUSTOM.to_string();
+                cfg.model.custom_model_name = model;
+            }
+        }
     }
 
     pub fn allow_emoji(&self) -> bool {
-        self.config.lock().unwrap().allow_emoji
+        self.config.lock().unwrap().features.allow_emoji
     }
 
     pub fn set_allow_emoji(&self, allow: bool) {
-        self.config.lock().unwrap().allow_emoji = allow;
+        self.config.lock().unwrap().features.allow_emoji = allow;
     }
 
     pub fn allow_punctuation(&self) -> bool {
-        self.config.lock().unwrap().allow_punctuation
+        self.config.lock().unwrap().features.allow_punctuation
     }
 
     pub fn set_allow_punctuation(&self, allow: bool) {
-        self.config.lock().unwrap().allow_punctuation = allow;
+        self.config.lock().unwrap().features.allow_punctuation = allow;
     }
 
     pub fn show_log(&self) -> bool {
-        self.config.lock().unwrap().show_log
+        self.config.lock().unwrap().basic.show_log
     }
 
     pub fn set_show_log(&self, show: bool) {
-        self.config.lock().unwrap().show_log = show;
+        self.config.lock().unwrap().basic.show_log = show;
     }
 
     pub fn language(&self) -> String {
-        self.config.lock().unwrap().language.clone()
+        self.config.lock().unwrap().basic.language.clone()
     }
 
     pub fn set_language(&self, lang: String) {
-        self.config.lock().unwrap().language = lang;
+        self.config.lock().unwrap().basic.language = lang;
     }
 
     pub fn output_mode(&self) -> String {
-        self.config.lock().unwrap().output_mode.clone()
+        self.config.lock().unwrap().basic.output_mode.clone()
     }
 
     pub fn set_output_mode(&self, mode: String) {
-        self.config.lock().unwrap().output_mode = mode;
+        self.config.lock().unwrap().basic.output_mode = mode;
     }
 
     pub fn autostart_enabled(&self) -> bool {
-        self.config.lock().unwrap().autostart
+        self.config.lock().unwrap().basic.autostart
     }
 
     pub fn set_autostart_enabled(&self, enabled: bool) {
-        self.config.lock().unwrap().autostart = enabled;
+        self.config.lock().unwrap().basic.autostart = enabled;
     }
 
     pub fn hotkey(&self) -> u32 {
-        self.config.lock().unwrap().hotkey
+        self.config.lock().unwrap().basic.hotkey
     }
 
     pub fn set_hotkey(&self, vk: u32) {
-        self.config.lock().unwrap().hotkey = vk;
+        self.config.lock().unwrap().basic.hotkey = vk;
     }
 
     pub fn enable_indicator(&self) -> bool {
-        self.config.lock().unwrap().enable_indicator
+        self.config.lock().unwrap().features.enable_indicator
     }
 
     pub fn set_enable_indicator(&self, enable: bool) {
-        self.config.lock().unwrap().enable_indicator = enable;
+        self.config.lock().unwrap().features.enable_indicator = enable;
     }
 
     pub fn last_check_time(&self) -> u64 {
-        self.config.lock().unwrap().last_check_time
+        self.config.lock().unwrap().update.last_check_time
     }
 
     pub fn set_last_check_time(&self, time: u64) {
-        self.config.lock().unwrap().last_check_time = time;
+        self.config.lock().unwrap().update.last_check_time = time;
     }
 
     pub fn ignored_version(&self) -> String {
-        self.config.lock().unwrap().ignored_version.clone()
+        self.config.lock().unwrap().update.ignored_version.clone()
     }
 
     pub fn set_ignored_version(&self, version: String) {
-        self.config.lock().unwrap().ignored_version = version;
+        self.config.lock().unwrap().update.ignored_version = version;
     }
 
     pub fn output_language(&self) -> String {
-        self.config.lock().unwrap().output_language.clone()
+        self.config.lock().unwrap().basic.output_language.clone()
     }
 
     pub fn set_output_language(&self, lang: String) {
-        self.config.lock().unwrap().output_language = lang;
+        self.config.lock().unwrap().basic.output_language = lang;
     }
 
     pub fn enable_streaming(&self) -> bool {
-        self.config.lock().unwrap().enable_streaming
+        self.config.lock().unwrap().features.enable_streaming
     }
 
     pub fn set_enable_streaming(&self, enable: bool) {
-        self.config.lock().unwrap().enable_streaming = enable;
+        self.config.lock().unwrap().features.enable_streaming = enable;
     }
 
     pub fn streaming_interval(&self) -> u64 {
-        self.config.lock().unwrap().streaming_interval
+        self.config.lock().unwrap().advanced.streaming_interval
     }
 
     pub fn set_streaming_interval(&self, interval: u64) {
-        self.config.lock().unwrap().streaming_interval = interval;
+        self.config.lock().unwrap().advanced.streaming_interval = interval;
     }
 
     pub fn trigger_mode(&self) -> String {
-        self.config.lock().unwrap().trigger_mode.clone()
+        self.config.lock().unwrap().advanced.trigger_mode.clone()
     }
 
     pub fn set_trigger_mode(&self, mode: String) {
-        self.config.lock().unwrap().trigger_mode = mode;
+        self.config.lock().unwrap().advanced.trigger_mode = mode;
     }
 
     pub fn get_speech_service(&self) -> String {
-        self.config.lock().unwrap().speech_service.clone()
+        let cfg = self.config.lock().unwrap();
+        match cfg.basic.model_name.as_str() {
+            MODEL_TELEAI | MODEL_SENSEVOICE => "siliconflow".to_string(),
+            MODEL_WHISPER => "groq".to_string(),
+            _ => "custom".to_string(),
+        }
     }
 
-    pub fn set_speech_service(&self, service: String) {
-        self.config.lock().unwrap().speech_service = service;
+    pub fn set_speech_service(&self, _service: String) {
+        // 服务由所选模型决定。保留这个方法是为了兼容旧 UI 调用。
     }
-
-
-
-
 
     pub fn indicator_fade_duration(&self) -> u64 {
-        self.config.lock().unwrap().indicator_fade_duration
+        self.config.lock().unwrap().indicator.fade_duration
     }
 
     pub fn set_indicator_fade_duration(&self, duration: u64) {
-        self.config.lock().unwrap().indicator_fade_duration = duration;
+        self.config.lock().unwrap().indicator.fade_duration = duration;
     }
 
     pub fn indicator_error_duration(&self) -> u64 {
-        self.config.lock().unwrap().indicator_error_duration
+        self.config.lock().unwrap().indicator.error_duration
     }
 
     pub fn set_indicator_error_duration(&self, duration: u64) {
-        self.config.lock().unwrap().indicator_error_duration = duration;
+        self.config.lock().unwrap().indicator.error_duration = duration;
     }
 
     pub fn indicator_success_duration(&self) -> u64 {
-        self.config.lock().unwrap().indicator_success_duration
+        self.config.lock().unwrap().indicator.success_duration
     }
 
     pub fn set_indicator_success_duration(&self, duration: u64) {
-        self.config.lock().unwrap().indicator_success_duration = duration;
+        self.config.lock().unwrap().indicator.success_duration = duration;
     }
 
     pub fn reset_ai_config(&self) {
         let mut cfg = self.config.lock().unwrap();
-        cfg.api_key = AppConfig::default().api_key;
-        cfg.api_url = AppConfig::default().api_url;
-        cfg.model_name = AppConfig::default().model_name;
-        cfg.enable_streaming = AppConfig::default().enable_streaming;
-        cfg.streaming_interval = AppConfig::default().streaming_interval;
-        cfg.trigger_mode = AppConfig::default().trigger_mode;
-        cfg.speech_service = AppConfig::default().speech_service;
-        cfg.indicator_fade_duration = AppConfig::default().indicator_fade_duration;
-        cfg.indicator_error_duration = AppConfig::default().indicator_error_duration;
-        cfg.indicator_success_duration = AppConfig::default().indicator_success_duration;
+        cfg.basic.model_name = MODEL_SENSEVOICE.to_string();
+        cfg.model = ModelConfig::default();
+        cfg.features.enable_streaming = FeatureConfig::default().enable_streaming;
+        cfg.advanced.streaming_interval = AdvancedConfig::default().streaming_interval;
+        cfg.advanced.trigger_mode = AdvancedConfig::default().trigger_mode;
+        cfg.indicator = IndicatorConfig::default();
     }
 
     pub fn save(&self) -> anyhow::Result<()> {
@@ -303,9 +577,10 @@ impl ConfigManager {
     }
 
     pub fn log_dir(&self) -> PathBuf {
-        let mut p = self.config_path.clone();
-        p.pop(); // 移除文件名
-        p.join("logs")
+        self.config_path
+            .parent()
+            .map(|path| path.join("logs"))
+            .unwrap_or_else(|| PathBuf::from("logs"))
     }
 
     pub fn log_file_path(&self) -> PathBuf {

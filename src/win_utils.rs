@@ -4,12 +4,15 @@ use anyhow::Result;
 use windows::Win32::Foundation::HANDLE;
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, VIRTUAL_KEY, KEYBD_EVENT_FLAGS
+    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
+    KEYEVENTF_UNICODE, VIRTUAL_KEY,
 };
 
 #[cfg(target_os = "windows")]
 pub fn is_admin() -> bool {
-    use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
+    use windows::Win32::Security::{
+        GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
+    };
     use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
     unsafe {
@@ -23,7 +26,9 @@ pub fn is_admin() -> bool {
                 Some(&mut elevation as *mut _ as *mut _),
                 size,
                 &mut size,
-            ).is_ok() {
+            )
+            .is_ok()
+            {
                 return elevation.TokenIsElevated != 0;
             }
         }
@@ -74,10 +79,12 @@ pub unsafe fn send_unicode_text(text: &str) {
 
 #[cfg(target_os = "windows")]
 pub unsafe fn get_clipboard_text() -> Option<String> {
-    use windows::Win32::System::DataExchange::{OpenClipboard, GetClipboardData, CloseClipboard, IsClipboardFormatAvailable};
-    use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
     use windows::Win32::Foundation::HGLOBAL;
-    
+    use windows::Win32::System::DataExchange::{
+        CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
+    };
+    use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
+
     const CF_UNICODETEXT: u32 = 13;
 
     if !OpenClipboard(None).is_ok() {
@@ -105,9 +112,11 @@ pub unsafe fn get_clipboard_text() -> Option<String> {
 
 #[cfg(target_os = "windows")]
 pub unsafe fn set_clipboard_text(text: &str, exclude_from_history: bool) {
-    use windows::Win32::System::DataExchange::{OpenClipboard, EmptyClipboard, SetClipboardData, CloseClipboard, RegisterClipboardFormatW};
-    use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
     use windows::core::w;
+    use windows::Win32::System::DataExchange::{
+        CloseClipboard, EmptyClipboard, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
+    };
+    use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
 
     let _ = OpenClipboard(None);
     let _ = EmptyClipboard();
@@ -139,7 +148,7 @@ pub unsafe fn set_clipboard_text(text: &str, exclude_from_history: bool) {
                 let _ = SetClipboardData(format_id, HANDLE(h_meta.0 as isize));
             }
         }
-        
+
         // 同时排除在云剪贴板同步之外
         let format_sync = w!("CanUploadToCloudClipboard");
         let format_sync_id = RegisterClipboardFormatW(format_sync);
@@ -162,19 +171,63 @@ pub unsafe fn set_clipboard_text(text: &str, exclude_from_history: bool) {
 pub unsafe fn paste_clipboard() {
     let vk_ctrl = VIRTUAL_KEY(0x11);
     let vk_v = VIRTUAL_KEY(0x56);
-    let down_ctrl = INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: vk_ctrl, wScan: 0, dwFlags: KEYBD_EVENT_FLAGS(0), time: 0, dwExtraInfo: 0 } } };
-    let down_v = INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: vk_v, wScan: 0, dwFlags: KEYBD_EVENT_FLAGS(0), time: 0, dwExtraInfo: 0 } } };
-    let up_v = INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: vk_v, wScan: 0, dwFlags: KEYEVENTF_KEYUP, time: 0, dwExtraInfo: 0 } } };
-    let up_ctrl = INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: vk_ctrl, wScan: 0, dwFlags: KEYEVENTF_KEYUP, time: 0, dwExtraInfo: 0 } } };
+    let down_ctrl = INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: vk_ctrl,
+                wScan: 0,
+                dwFlags: KEYBD_EVENT_FLAGS(0),
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+    let down_v = INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: vk_v,
+                wScan: 0,
+                dwFlags: KEYBD_EVENT_FLAGS(0),
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+    let up_v = INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: vk_v,
+                wScan: 0,
+                dwFlags: KEYEVENTF_KEYUP,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+    let up_ctrl = INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: vk_ctrl,
+                wScan: 0,
+                dwFlags: KEYEVENTF_KEYUP,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
     let inputs = [down_ctrl, down_v, up_v, up_ctrl];
     SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
 }
 
 #[cfg(target_os = "windows")]
 pub unsafe fn show_console_with_redirect() {
+    use std::ffi::CString;
     use windows::Win32::System::Console::{AllocConsole, GetConsoleWindow};
     use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOW};
-    use std::ffi::CString;
 
     // 1. Check if console already exists
     let hwnd = GetConsoleWindow();
@@ -206,59 +259,92 @@ pub unsafe fn show_console_with_redirect() {
         libc::freopen(conout.as_ptr(), mode.as_ptr(), stdout_ptr);
         libc::freopen(conout.as_ptr(), mode.as_ptr(), stderr_ptr);
     }
-    
+
     // Optional: Update Rust's own buffering if needed, but usually freopen is enough
     println!("Console allocated and stdout redirected successfully!");
 }
 
 #[cfg(target_os = "windows")]
 pub fn is_autostart_enabled() -> bool {
-    use windows::Win32::System::Registry::{RegOpenKeyExW, RegQueryValueExW, HKEY_CURRENT_USER, HKEY, KEY_READ, REG_VALUE_TYPE, REG_SZ};
     use windows::core::PCWSTR;
-    let subkey: Vec<u16> = "Software\\Microsoft\\Windows\\CurrentVersion\\Run\0".encode_utf16().collect();
+    use windows::Win32::System::Registry::{
+        RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_CURRENT_USER, KEY_READ, REG_SZ, REG_VALUE_TYPE,
+    };
+    let subkey: Vec<u16> = "Software\\Microsoft\\Windows\\CurrentVersion\\Run\0"
+        .encode_utf16()
+        .collect();
     unsafe {
         let mut hkey: HKEY = HKEY::default();
-        if RegOpenKeyExW(HKEY_CURRENT_USER, PCWSTR(subkey.as_ptr()), 0, KEY_READ, &mut hkey).is_err() {
+        if RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            PCWSTR(subkey.as_ptr()),
+            0,
+            KEY_READ,
+            &mut hkey,
+        )
+        .is_err()
+        {
             return false;
         }
         let name: Vec<u16> = "Voice2Type\0".encode_utf16().collect();
         let mut data_len: u32 = 0;
         let mut ty = REG_VALUE_TYPE(0);
         // First call to get required length
-        let _ = RegQueryValueExW(hkey, PCWSTR(name.as_ptr()), None, Some(&mut ty), None, Some(&mut data_len));
+        let _ = RegQueryValueExW(
+            hkey,
+            PCWSTR(name.as_ptr()),
+            None,
+            Some(&mut ty),
+            None,
+            Some(&mut data_len),
+        );
         if ty != REG_SZ || data_len == 0 {
             return false;
         }
-        
+
         // Second call to get actual data
         let mut data = vec![0u8; data_len as usize];
-        if RegQueryValueExW(hkey, PCWSTR(name.as_ptr()), None, None, Some(data.as_mut_ptr()), Some(&mut data_len)).is_err() {
+        if RegQueryValueExW(
+            hkey,
+            PCWSTR(name.as_ptr()),
+            None,
+            None,
+            Some(data.as_mut_ptr()),
+            Some(&mut data_len),
+        )
+        .is_err()
+        {
             return false;
         }
-        
+
         // Convert data to string
-        let data_u16 = std::slice::from_raw_parts(data.as_ptr() as *const u16, data_len as usize / 2);
-        let reg_path = String::from_utf16_lossy(data_u16).trim_matches('"').to_string();
-        
+        let data_u16 =
+            std::slice::from_raw_parts(data.as_ptr() as *const u16, data_len as usize / 2);
+        let reg_path = String::from_utf16_lossy(data_u16)
+            .trim_matches('"')
+            .to_string();
+
         // Get current executable path
         if let Ok(current_exe) = std::env::current_exe() {
             let current_path = current_exe.display().to_string();
             // Compare paths
             return reg_path == current_path;
         }
-        
+
         false
     }
 }
 
 #[cfg(target_os = "windows")]
 pub unsafe fn set_autostart(enabled: bool) -> Result<()> {
-    use windows::Win32::System::Registry::{
-        RegCreateKeyExW, RegSetValueExW, RegDeleteValueW, HKEY_CURRENT_USER, HKEY, REG_OPTION_NON_VOLATILE,
-        KEY_SET_VALUE, KEY_WRITE, REG_SZ
-    };
     use windows::core::PCWSTR;
-    let subkey: Vec<u16> = "Software\\Microsoft\\Windows\\CurrentVersion\\Run\0".encode_utf16().collect();
+    use windows::Win32::System::Registry::{
+        RegCreateKeyExW, RegDeleteValueW, RegSetValueExW, HKEY, HKEY_CURRENT_USER, KEY_SET_VALUE,
+        KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SZ,
+    };
+    let subkey: Vec<u16> = "Software\\Microsoft\\Windows\\CurrentVersion\\Run\0"
+        .encode_utf16()
+        .collect();
     let mut hkey: HKEY = HKEY::default();
     let rc = RegCreateKeyExW(
         HKEY_CURRENT_USER,
@@ -269,7 +355,7 @@ pub unsafe fn set_autostart(enabled: bool) -> Result<()> {
         KEY_SET_VALUE | KEY_WRITE,
         None,
         &mut hkey,
-        None
+        None,
     );
     if rc.is_err() {
         anyhow::bail!("RegCreateKeyExW failed");
@@ -280,7 +366,8 @@ pub unsafe fn set_autostart(enabled: bool) -> Result<()> {
         if let Ok(exe) = std::env::current_exe() {
             let quoted = format!("\"{}\"", exe.display());
             let data: Vec<u16> = quoted.encode_utf16().chain(std::iter::once(0)).collect();
-            let bytes: &[u8] = std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 2);
+            let bytes: &[u8] =
+                std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 2);
             let rv = RegSetValueExW(hkey, PCWSTR(name.as_ptr()), 0, REG_SZ, Some(bytes));
             if rv.is_err() {
                 anyhow::bail!("RegSetValueExW failed");
