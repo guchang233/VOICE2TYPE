@@ -27,6 +27,7 @@ pub fn start_hotkey_listener(tx: mpsc::Sender<InputMessage>, config: Arc<ConfigM
         let vk_esc = VIRTUAL_KEY(0x1B); // ESC
         let mut is_pressed = false;
         let mut is_recording = false;
+        let mut last_stop_time: Option<Instant> = None;
 
         loop {
             let current_vk = config.hotkey();
@@ -60,19 +61,16 @@ pub fn start_hotkey_listener(tx: mpsc::Sender<InputMessage>, config: Arc<ConfigM
                 }
             } else if trigger_mode == "toggle" {
                 // 按下输入模式
-                static mut LAST_STOP_TIME: Option<Instant> = None;
                 const COOLDOWN_DURATION: Duration = Duration::from_millis(500); // 500ms冷却时间
 
                 if main_down && !is_pressed {
                     is_pressed = true;
 
                     // 检查是否在冷却期内
-                    let in_cooldown = unsafe {
-                        if let Some(last_stop) = LAST_STOP_TIME {
-                            last_stop.elapsed() < COOLDOWN_DURATION
-                        } else {
-                            false
-                        }
+                    let in_cooldown = if let Some(last_stop) = last_stop_time {
+                        last_stop.elapsed() < COOLDOWN_DURATION
+                    } else {
+                        false
                     };
 
                     if !in_cooldown {
@@ -81,9 +79,7 @@ pub fn start_hotkey_listener(tx: mpsc::Sender<InputMessage>, config: Arc<ConfigM
                             let _ = tx.blocking_send(InputMessage::StopRecording);
                             is_recording = false;
                             // 记录停止时间
-                            unsafe {
-                                LAST_STOP_TIME = Some(Instant::now());
-                            }
+                            last_stop_time = Some(Instant::now());
                         } else {
                             // 开始录音
                             let _ = tx.blocking_send(InputMessage::StartRecording);

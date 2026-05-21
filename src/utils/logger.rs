@@ -25,6 +25,10 @@ pub static LOG_PIPE_HANDLE: Lazy<Mutex<Option<windows::Win32::Foundation::HANDLE
     Lazy::new(|| Mutex::new(None));
 
 #[cfg(target_os = "windows")]
+pub static LOG_FILE_HANDLE: Lazy<Mutex<Option<(std::path::PathBuf, std::fs::File)>>> =
+    Lazy::new(|| Mutex::new(None));
+
+#[cfg(target_os = "windows")]
 pub static LOG_VIEWER_CHILD: Lazy<Mutex<Option<std::process::Child>>> =
     Lazy::new(|| Mutex::new(None));
 
@@ -112,8 +116,22 @@ pub fn write_log(level: LogLevel, s: &str, config: Option<&crate::config::Config
     // 1. 写入本地文件
     if let Some(cfg) = config {
         let log_file = cfg.log_file_path();
-        if let Ok(mut file) = OpenOptions::new().append(true).open(log_file) {
+        let mut guard = LOG_FILE_HANDLE.lock().unwrap();
+        let file_ok = if let Some((ref path, _)) = *guard {
+            path == &log_file
+        } else {
+            false
+        };
+
+        if !file_ok {
+            if let Ok(file) = OpenOptions::new().create(true).append(true).open(&log_file) {
+                *guard = Some((log_file.clone(), file));
+            }
+        }
+
+        if let Some((_, ref mut file)) = *guard {
             let _ = writeln!(file, "{}", log_entry);
+            let _ = file.flush();
         }
     }
 
@@ -161,6 +179,11 @@ pub fn log_set_enabled(enabled: bool, config: Option<&crate::config::ConfigManag
                     let _ = CloseHandle(handle);
                 }
             }
+        }
+        // 关闭并释放缓存的文件句柄
+        {
+            let mut guard = LOG_FILE_HANDLE.lock().unwrap();
+            *guard = None;
         }
         // 重置 LOG_MENU_NEEDS_UNCHECK 标志
         crate::LOG_MENU_NEEDS_UNCHECK.store(false, std::sync::atomic::Ordering::SeqCst);
