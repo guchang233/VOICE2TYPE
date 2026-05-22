@@ -365,6 +365,10 @@ impl ConfigManager {
         self.config.lock().unwrap().basic.model_name == MODEL_LOCAL_WHISPER
     }
 
+    pub fn needs_api_key(&self) -> bool {
+        self.config.lock().unwrap().basic.model_name != MODEL_LOCAL_WHISPER
+    }
+
     pub fn get_api_key(&self) -> String {
         let cfg = self.config.lock().unwrap();
         match cfg.basic.model_name.as_str() {
@@ -382,6 +386,22 @@ impl ConfigManager {
             MODEL_WHISPER => cfg.model.groq_api_key = key,
             _ => cfg.model.custom_api_key = key,
         }
+    }
+
+    pub fn get_siliconflow_api_key(&self) -> String {
+        self.config.lock().unwrap().model.siliconflow_api_key.clone()
+    }
+
+    pub fn set_siliconflow_api_key(&self, key: String) {
+        self.config.lock().unwrap().model.siliconflow_api_key = key;
+    }
+
+    pub fn get_groq_api_key(&self) -> String {
+        self.config.lock().unwrap().model.groq_api_key.clone()
+    }
+
+    pub fn set_groq_api_key(&self, key: String) {
+        self.config.lock().unwrap().model.groq_api_key = key;
     }
 
     pub fn get_api_url(&self) -> String {

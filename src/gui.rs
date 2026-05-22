@@ -502,11 +502,14 @@ impl Voice2TypeApp {
         #[cfg(target_os = "windows")]
         {
             let enabled = crate::win_utils::is_autostart_enabled();
-            app.autostart_item
-                .set_checked(enabled || config_manager.autostart_enabled());
-            if let Some(mgr) = &*app.config_manager.borrow() {
-                mgr.set_autostart_enabled(app.autostart_item.checked());
-                mgr.save_or_notify();
+            let config_autostart = config_manager.autostart_enabled();
+            let new_autostart = enabled || config_autostart;
+            app.autostart_item.set_checked(new_autostart);
+            if new_autostart != config_autostart {
+                if let Some(mgr) = &*app.config_manager.borrow() {
+                    mgr.set_autostart_enabled(new_autostart);
+                    mgr.save_or_notify();
+                }
             }
         }
 
@@ -575,8 +578,8 @@ impl Voice2TypeApp {
 
         app.timer.start();
 
-        // 检查 API Key 是否为空 (首次运行)
-        if config_manager.get_api_key().is_empty() {
+        // 检查 API Key 是否为空 (首次运行，仅当不是本地离线模型时进行检查)
+        if config_manager.needs_api_key() && config_manager.get_api_key().is_empty() {
             #[cfg(target_os = "windows")]
             unsafe {
                 use windows::core::PCWSTR;
@@ -991,26 +994,10 @@ impl Voice2TypeApp {
     // API Key 配置窗口方法
     fn show_key_config_window(&self) {
         if let Some(mgr) = &*self.config_manager.borrow() {
-            // 保存当前模型
-            let current_model = mgr.get_model_name();
-
-            // 显示所有模型的API Key
-            let original_model = mgr.get_model_name();
-
-            // 显示TeleAI/TeleSpeechASR的API Key
-            mgr.set_model_name("TeleAI/TeleSpeechASR".to_string());
-            self.key_teleai_input.set_text(&mgr.get_api_key());
-
-            // 显示FunAudioLLM/SenseVoiceSmall的API Key
-            mgr.set_model_name("FunAudioLLM/SenseVoiceSmall".to_string());
-            self.key_sensevoice_input.set_text(&mgr.get_api_key());
-
-            // 显示whisper-large-v3的API Key
-            mgr.set_model_name("whisper-large-v3".to_string());
-            self.key_whisper_input.set_text(&mgr.get_api_key());
-
-            // 恢复原始模型
-            mgr.set_model_name(original_model);
+            let sf_key = mgr.get_siliconflow_api_key();
+            self.key_teleai_input.set_text(&sf_key);
+            self.key_sensevoice_input.set_text(&sf_key);
+            self.key_whisper_input.set_text(&mgr.get_groq_api_key());
         }
 
         self.key_config_window.set_visible(true);
@@ -1023,23 +1010,15 @@ impl Voice2TypeApp {
 
     fn save_key_config(&self) {
         if let Some(mgr) = &*self.config_manager.borrow() {
-            // 保存当前模型
-            let current_model = mgr.get_model_name();
-
-            // 保存TeleAI/TeleSpeechASR的API Key
-            mgr.set_model_name("TeleAI/TeleSpeechASR".to_string());
-            mgr.set_api_key(self.key_teleai_input.text());
-
-            // 保存FunAudioLLM/SenseVoiceSmall的API Key
-            mgr.set_model_name("FunAudioLLM/SenseVoiceSmall".to_string());
-            mgr.set_api_key(self.key_sensevoice_input.text());
-
-            // 保存whisper-large-v3的API Key
-            mgr.set_model_name("whisper-large-v3".to_string());
-            mgr.set_api_key(self.key_whisper_input.text());
-
-            // 恢复原始模型
-            mgr.set_model_name(current_model);
+            let teleai_key = self.key_teleai_input.text();
+            let sensevoice_key = self.key_sensevoice_input.text();
+            let sf_key = if teleai_key.is_empty() {
+                sensevoice_key
+            } else {
+                teleai_key
+            };
+            mgr.set_siliconflow_api_key(sf_key);
+            mgr.set_groq_api_key(self.key_whisper_input.text());
 
             mgr.save_or_notify();
             nwg::simple_message("已保存", "API Key 已保存。");
