@@ -3,20 +3,32 @@
 mod api;
 mod audio;
 mod config;
-mod core;
 mod gui;
+mod history;
 mod indicator;
+mod notify;
 mod output;
 mod update;
 mod utils;
+mod whisper_local;
 mod win_utils;
+
+/// 单次录音最长秒数，超出后自动结束并转写。
+const MAX_RECORDING_SECS: u32 = 90;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum AppState {
+    Idle,
+    Recording,
+    Processing,
+    Cancelled,
+}
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
 use anyhow::{Context, Result};
-use chrono::Local;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use dotenv::dotenv;
 use tokio::sync::mpsc;
@@ -24,7 +36,6 @@ use tokio::sync::mpsc;
 use api::client::ApiClient;
 use audio::processor::{encode_wav_memory, resample_and_convert};
 use config::ConfigManager;
-use core::state::AppState;
 
 use gui::Voice2TypeApp;
 use indicator::{IndicatorState, StatusIndicator};
@@ -175,21 +186,6 @@ fn main() -> Result<()> {
 
     // 1. 初始化环境与日志
     dotenv().ok();
-
-    #[cfg(target_os = "windows")]
-    unsafe {
-        use windows::Win32::System::Console::GetConsoleWindow;
-        use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
-        // 仅在主线程处理窗口隐藏，日志启动移至异步线程以加快启动速度
-        let temp_config = ConfigManager::new();
-        if !temp_config.show_log() {
-            let hwnd = GetConsoleWindow();
-            if hwnd.0 != 0 {
-                ShowWindow(hwnd, SW_HIDE);
-            }
-        }
-    }
-
     env_logger::init();
 
     // 2. 初始化 NWG
@@ -198,6 +194,18 @@ fn main() -> Result<()> {
 
     // 3. 初始化配置
     let config_manager = Arc::new(ConfigManager::new());
+
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows::Win32::System::Console::GetConsoleWindow;
+        use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+        if !config_manager.show_log() {
+            let hwnd = GetConsoleWindow();
+            if hwnd.0 != 0 {
+                ShowWindow(hwnd, SW_HIDE);
+            }
+        }
+    }
     #[cfg(target_os = "windows")]
     {
         let _ = CONFIG_GLOBAL.set(config_manager.clone());
@@ -210,14 +218,7 @@ fn main() -> Result<()> {
         let _ = std::fs::File::create(log_file); // 创建或清空文件
     }
 
-    // 4. 启动API服务器
-    #[cfg(feature = "api_server")]
-    {
-        use api::server::ApiServer;
-        let api_server = ApiServer::new(config_manager.clone());
-        api_server.start();
-        write_log(LogLevel::INFO, "API服务器已启动", Some(&config_manager));
-    }
+    history::init(config_manager.config_dir());
 
     // 5. 启动逻辑线程 (Tokio Runtime)
     let cm_clone = config_manager.clone();
@@ -238,7 +239,11 @@ fn main() -> Result<()> {
     // 初始化状态指示器
     #[cfg(target_os = "windows")]
     if config_manager.enable_indicator() {
-        let _ = INDICATOR.set(StatusIndicator::new());
+        let _ = INDICATOR.set(StatusIndicator::new(
+            config_manager.indicator_fade_duration(),
+            config_manager.indicator_error_duration(),
+            config_manager.indicator_success_duration(),
+        ));
     }
 
     // 6. 运行 GUI 事件循环 (主线程阻塞在此)
@@ -250,10 +255,6 @@ fn main() -> Result<()> {
         // 强制关闭日志子进程
         if let Some(cfg) = CONFIG_GLOBAL.get() {
             log_set_enabled(false, Some(cfg));
-            let log_dir = cfg.log_dir();
-            if log_dir.exists() {
-                let _ = std::fs::remove_dir_all(log_dir);
-            }
         } else {
             log_set_enabled(false, None);
         }
@@ -314,7 +315,8 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
 
     // 音频系统初始化
     let host = cpal::default_host();
-    let device = host.default_input_device().context("未找到音频输入设备")?;
+    let device = select_input_device(&host, &config)?;
+    let device_name = device.name().unwrap_or_else(|_| "未知设备".to_string());
     let dev_config = device
         .default_input_config()
         .context("无法获取默认输入配置")?;
@@ -323,34 +325,36 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
     let channels = stream_config.channels;
 
     write_log_line(
-        &format!("[音频] 采样率: {}Hz, 通道数: {}", sample_rate, channels),
+        &format!(
+            "[音频] 设备: {}, 采样率: {}Hz, 通道数: {}",
+            device_name, sample_rate, channels
+        ),
         Some(&config),
     );
 
     let audio_buffer: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
     let audio_buffer_writer = audio_buffer.clone();
+    let channels_usize = channels as usize;
 
     // 创建输入流
     let config_clone = config.clone();
     let input_stream = device.build_input_stream(
         &stream_config,
         move |data: &[f32], _: &_| {
-            if IS_RECORDING.load(Ordering::Relaxed) {
-                if let Ok(mut buffer) = audio_buffer_writer.lock() {
-                    let mut processed_data = Vec::new();
-
-                    if channels > 1 {
-                        // 混音到单声道
-                        for frame in data.chunks(channels as usize) {
-                            let sum: f32 = frame.iter().sum();
-                            processed_data.push(sum / channels as f32);
-                        }
-                    } else {
-                        processed_data.extend_from_slice(data);
+            if !IS_RECORDING.load(Ordering::Relaxed) {
+                return;
+            }
+            if let Ok(mut buffer) = audio_buffer_writer.lock() {
+                if channels_usize > 1 {
+                    // 混音到单声道，直接写入缓冲区，避免每帧分配临时 Vec
+                    buffer.reserve(data.len() / channels_usize);
+                    let scale = 1.0 / channels as f32;
+                    for frame in data.chunks(channels_usize) {
+                        let sum: f32 = frame.iter().sum();
+                        buffer.push(sum * scale);
                     }
-
-                    // 将处理后的数据添加到缓冲区
-                    buffer.extend_from_slice(&processed_data);
+                } else {
+                    buffer.extend_from_slice(data);
                 }
             }
         },
@@ -375,30 +379,49 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
     utils::hotkey::start_hotkey_listener(tx_clone, config_for_hotkey);
 
     // 异步事件循环
-    let mut current_state = AppState::Idle;
+    let app_state = Arc::new(Mutex::new(AppState::Idle));
+    let mut recording_tick = tokio::time::interval(std::time::Duration::from_secs(1));
+    recording_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
         tokio::select! {
             Some(msg) = rx.recv() => {
                 match msg {
                     InputMessage::StartRecording => {
-                        if current_state == AppState::Idle || current_state == AppState::Processing || current_state == AppState::Cancelled {
-                            current_state = AppState::Recording;
-                            write_log_line("--> [录音] 开始录音... (按 ESC 取消)", Some(&config));
-                            audio_buffer.lock().unwrap().clear();
-                            IS_RECORDING.store(true, Ordering::Relaxed);
+                        let can_start = {
+                            let st = app_state.lock().unwrap();
+                            matches!(*st, AppState::Idle | AppState::Cancelled)
+                        };
+                        if !can_start {
+                            notify::queue_tray_message(
+                                "Voice2Type",
+                                "正在转写上一段录音，请稍候再录。",
+                            );
+                            continue;
+                        }
+                        {
+                            let mut st = app_state.lock().unwrap();
+                            *st = AppState::Recording;
+                        }
+                        write_log_line("--> [录音] 开始录音... (按 ESC 取消)", Some(&config));
+                        {
+                            let mut buf = audio_buffer.lock().unwrap();
+                            buf.clear();
+                            buf.reserve(sample_rate as usize * 30);
+                        }
+                        IS_RECORDING.store(true, Ordering::Relaxed);
 
-                            #[cfg(target_os = "windows")]
-                            if config.enable_indicator() {
-                                if let Some(ind) = INDICATOR.get() {
-                                    ind.set_state(IndicatorState::Recording);
-                                }
+                        #[cfg(target_os = "windows")]
+                        if config.enable_indicator() {
+                            if let Some(ind) = INDICATOR.get() {
+                                ind.set_state(IndicatorState::Recording);
                             }
                         }
                     }
                     InputMessage::CancelRecording => {
-                        if current_state == AppState::Recording {
-                            current_state = AppState::Cancelled;
+                        let is_recording = *app_state.lock().unwrap() == AppState::Recording;
+                        if is_recording {
+                            *app_state.lock().unwrap() = AppState::Cancelled;
                             IS_RECORDING.store(false, Ordering::Relaxed);
                             write_log_line("--> [取消] 录音已取消", Some(&config));
                             audio_buffer.lock().unwrap().clear();
@@ -418,42 +441,98 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
                         }
                     }
                     InputMessage::StopRecording => {
-                        if current_state == AppState::Recording {
-                            // 正常结束录音
-                            IS_RECORDING.store(false, Ordering::Relaxed);
-                            write_log_line("--> [处理] 正在转换音频...", Some(&config));
-                            #[cfg(target_os = "windows")]
-                            if config.enable_indicator() {
-                                if let Some(ind) = INDICATOR.get() {
-                                    ind.set_state(IndicatorState::Processing);
-                                }
-                            }
-
-                            // 获取缓冲区中的音频数据
-                            let audio_data = {
-                                let mut lock = audio_buffer.lock().unwrap();
-                                std::mem::take(&mut *lock)
-                            };
-
-                            let config_clone = config.clone();
-                            let config_clone_for_log = config_clone.clone();
-
-                            tokio::spawn(async move {
-                                if let Err(e) = process_audio_and_type(audio_data, sample_rate, config_clone).await {
-                                    write_log(LogLevel::ERROR, &format!("转写失败: {}", e), Some(&config_clone_for_log));
-                                }
-                            });
-
-                            current_state = AppState::Idle;
-                        } else if current_state == AppState::Cancelled {
-                            // 如果之前被取消了，F2 松开时重置为 Idle
-                            current_state = AppState::Idle;
+                        let state_now = *app_state.lock().unwrap();
+                        if state_now == AppState::Recording {
+                            begin_audio_processing(
+                                &audio_buffer,
+                                &app_state,
+                                sample_rate,
+                                config.clone(),
+                                None,
+                            );
+                        } else if state_now == AppState::Cancelled {
+                            *app_state.lock().unwrap() = AppState::Idle;
                         }
                     }
                 }
             }
+            _ = recording_tick.tick() => {
+                let should_stop = {
+                    let st = *app_state.lock().unwrap();
+                    if st != AppState::Recording {
+                        false
+                    } else {
+                        let max_samples = sample_rate as usize * MAX_RECORDING_SECS as usize;
+                        audio_buffer.lock().unwrap().len() >= max_samples
+                    }
+                };
+                if should_stop {
+                    write_log_line(
+                        &format!(
+                            "--> [录音] 已达最长 {} 秒，自动结束并转写",
+                            MAX_RECORDING_SECS
+                        ),
+                        Some(&config),
+                    );
+                    notify::queue_tray_message(
+                        "Voice2Type",
+                        &format!("录音已达 {} 秒上限，正在转写…", MAX_RECORDING_SECS),
+                    );
+                    begin_audio_processing(
+                        &audio_buffer,
+                        &app_state,
+                        sample_rate,
+                        config.clone(),
+                        Some(format!(
+                            "录音已达 {} 秒上限，正在转写…",
+                            MAX_RECORDING_SECS
+                        )),
+                    );
+                }
+            }
         }
     }
+}
+
+fn begin_audio_processing(
+    audio_buffer: &Arc<Mutex<Vec<f32>>>,
+    app_state: &Arc<Mutex<AppState>>,
+    sample_rate: u32,
+    config: Arc<ConfigManager>,
+    limit_notice: Option<String>,
+) {
+    IS_RECORDING.store(false, Ordering::Relaxed);
+    *app_state.lock().unwrap() = AppState::Processing;
+    if let Some(msg) = limit_notice {
+        write_log_line(&format!("--> [处理] {}", msg), Some(&config));
+    } else {
+        write_log_line("--> [处理] 正在转换音频...", Some(&config));
+    }
+    #[cfg(target_os = "windows")]
+    if config.enable_indicator() {
+        if let Some(ind) = INDICATOR.get() {
+            ind.set_state(IndicatorState::Processing);
+        }
+    }
+
+    let audio_data = {
+        let mut lock = audio_buffer.lock().unwrap();
+        std::mem::take(&mut *lock)
+    };
+
+    let state_clone = app_state.clone();
+    tokio::spawn(async move {
+        let result = process_audio_and_type(audio_data, sample_rate, config.clone()).await;
+        if let Err(e) = &result {
+            write_log(
+                LogLevel::ERROR,
+                &format!("转写失败: {}", e),
+                Some(&config),
+            );
+            notify::queue_tray_message("转写失败", &e.to_string());
+        }
+        *state_clone.lock().unwrap() = AppState::Idle;
+    });
 }
 
 async fn process_audio_and_type(
@@ -467,22 +546,33 @@ async fn process_audio_and_type(
             "音频数据为空，已跳过本次转写",
             Some(&config),
         );
+        notify::queue_tray_message("Voice2Type", "录音太短或未采集到声音");
+        set_indicator_state(IndicatorState::Error, &config);
         return Ok(());
     }
 
-    if config.get_api_key().is_empty() {
-        write_log(
-            LogLevel::ERROR,
-            "API Key 未配置，请先在托盘菜单里填写",
-            Some(&config),
-        );
-        #[cfg(target_os = "windows")]
-        if config.enable_indicator() {
-            if let Some(ind) = INDICATOR.get() {
-                ind.set_state(IndicatorState::Error);
+    if !config.is_local_whisper() && config.get_api_key().is_empty() {
+        let msg = "API Key 未配置，请在托盘菜单「配置 -> API Key」中填写";
+        write_log(LogLevel::ERROR, msg, Some(&config));
+        notify::queue_tray_message("Voice2Type", msg);
+        set_indicator_state(IndicatorState::Error, &config);
+        return Ok(());
+    }
+
+    if config.is_local_whisper() {
+        match whisper_local::LocalWhisper::status(&config) {
+            whisper_local::LocalWhisperStatus::Ready => {}
+            whisper_local::LocalWhisperStatus::NotConfigured
+            | whisper_local::LocalWhisperStatus::InvalidDirectory
+            | whisper_local::LocalWhisperStatus::MissingExecutable
+            | whisper_local::LocalWhisperStatus::MissingModel => {
+                let msg = whisper_local::LocalWhisper::status_message(&config);
+                write_log(LogLevel::ERROR, &msg, Some(&config));
+                notify::queue_tray_message("本地 Whisper 未就绪", &msg);
+                set_indicator_state(IndicatorState::Error, &config);
+                return Ok(());
             }
         }
-        return Ok(());
     }
 
     let start_time = std::time::Instant::now();
@@ -507,33 +597,31 @@ async fn process_audio_and_type(
         Some(&config),
     );
 
-    let api_client = ApiClient::new();
     let output = OutputHandler::new();
-    let is_whisper_model = config.get_model_name().starts_with("whisper");
-    let use_streaming = config.enable_streaming() && is_whisper_model;
-    let upload_start = std::time::Instant::now();
+    let transcribe_start = std::time::Instant::now();
 
-    if use_streaming {
-        write_log_line("[识别] 使用分段转写模式", Some(&config));
-        let transcriptions = api_client
-            .process_audio_streaming(wav_data, &config)
-            .await?;
-        write_log_line(
-            &format!("[性能] API 请求耗时: {:?}", upload_start.elapsed()),
-            Some(&config),
-        );
-
-        let final_text = post_process(&transcriptions.join(" "), &config);
-        finish_transcription(final_text, &config, &output).await?;
+    let raw_text = if config.is_local_whisper() {
+        let cfg = config.clone();
+        let wav = wav_data;
+        tokio::task::spawn_blocking(move || whisper_local::LocalWhisper::transcribe_sync(&wav, &cfg))
+            .await
+            .context("本地 Whisper 任务异常")??
     } else {
-        let raw_text = api_client.process_audio(wav_data, &config).await?;
-        write_log_line(
-            &format!("[性能] API 请求耗时: {:?}", upload_start.elapsed()),
-            Some(&config),
-        );
-        let final_text = post_process(&raw_text, &config);
-        finish_transcription(final_text, &config, &output).await?;
-    }
+        let api_client = ApiClient::new();
+        api_client.process_audio(wav_data, &config).await?
+    };
+
+    let label = if config.is_local_whisper() {
+        "本地 Whisper"
+    } else {
+        "API"
+    };
+    write_log_line(
+        &format!("[性能] {} 耗时: {:?}", label, transcribe_start.elapsed()),
+        Some(&config),
+    );
+    let final_text = post_process(&raw_text, &config);
+    finish_transcription(final_text, &config, &output).await?;
 
     Ok(())
 }
@@ -545,6 +633,7 @@ async fn finish_transcription(
 ) -> Result<()> {
     if final_text.is_empty() {
         write_log(LogLevel::WARN, "识别结果为空，未输出文本", Some(config));
+        notify::queue_tray_message("Voice2Type", "识别结果为空，请靠近麦克风再试");
         set_indicator_state(IndicatorState::Error, config);
         return Ok(());
     }
@@ -554,9 +643,36 @@ async fn finish_transcription(
         &format!("[输出] {}", final_text),
         Some(config),
     );
+    history::push(final_text.clone());
     output.handle_output(final_text, config).await?;
     set_indicator_state(IndicatorState::Success, config);
     Ok(())
+}
+
+fn select_input_device(
+    host: &cpal::Host,
+    config: &ConfigManager,
+) -> Result<cpal::Device> {
+    let wanted = config.input_device();
+    if wanted.is_empty() {
+        return host
+            .default_input_device()
+            .context("未找到音频输入设备");
+    }
+
+    for device in host.input_devices()? {
+        if device.name().ok().as_deref() == Some(wanted.as_str()) {
+            return Ok(device);
+        }
+    }
+
+    write_log(
+        LogLevel::WARN,
+        &format!("未找到麦克风「{}」，使用系统默认设备", wanted),
+        Some(config),
+    );
+    host.default_input_device()
+        .context("未找到音频输入设备")
 }
 
 fn set_indicator_state(state: IndicatorState, config: &ConfigManager) {

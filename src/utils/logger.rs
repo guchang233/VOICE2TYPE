@@ -85,7 +85,7 @@ pub fn start_log_viewer() {
                                 }
                                 if let Some(cfg) = crate::CONFIG_GLOBAL.get() {
                                     cfg.set_show_log(false);
-                                    let _ = cfg.save();
+                                    cfg.save_or_notify();
                                 }
                                 *LOG_VIEWER_CHILD.lock().unwrap() = None;
                                 crate::request_uncheck_log_menu();

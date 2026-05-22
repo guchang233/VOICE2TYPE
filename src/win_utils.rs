@@ -381,3 +381,36 @@ pub unsafe fn set_autostart(enabled: bool) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(target_os = "windows")]
+pub unsafe fn show_tray_balloon(hwnd: windows::Win32::Foundation::HWND, title: &str, body: &str) {
+    use std::mem::size_of;
+    use windows::Win32::UI::Shell::{
+        Shell_NotifyIconW, NIF_INFO, NIF_TIP, NIIF_INFO, NIM_MODIFY, NOTIFYICONDATAW,
+    };
+
+    let mut data = NOTIFYICONDATAW {
+        cbSize: size_of::<NOTIFYICONDATAW>() as u32,
+        hWnd: hwnd,
+        uID: 1,
+        uFlags: NIF_INFO | NIF_TIP,
+        dwInfoFlags: NIIF_INFO,
+        szInfoTitle: [0; 64],
+        szInfo: [0; 256],
+        szTip: [0; 128],
+        ..Default::default()
+    };
+
+    copy_wide_truncated(&mut data.szInfoTitle, title);
+    copy_wide_truncated(&mut data.szInfo, body);
+    let _ = Shell_NotifyIconW(NIM_MODIFY, &data);
+}
+
+#[cfg(target_os = "windows")]
+fn copy_wide_truncated(dest: &mut [u16], src: &str) {
+    let mut encoded: Vec<u16> = src.encode_utf16().collect();
+    if encoded.len() >= dest.len() {
+        encoded.truncate(dest.len().saturating_sub(1));
+    }
+    dest[..encoded.len()].copy_from_slice(&encoded);
+}

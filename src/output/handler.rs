@@ -1,6 +1,15 @@
 use anyhow::Result;
+use once_cell::sync::Lazy;
+use regex::Regex;
 
 use crate::config::ConfigManager;
+
+static EMOJI_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"[\p{Emoji_Presentation}\p{Extended_Pictographic}]")
+        .expect("emoji regex")
+});
+static WHITESPACE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s+").expect("whitespace regex"));
+static PUNCT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"[\p{P}]").expect("punctuation regex"));
 
 #[derive(Clone, Default)]
 pub struct OutputHandler;
@@ -11,14 +20,23 @@ impl OutputHandler {
     }
 
     pub async fn handle_output(&self, text: String, config: &ConfigManager) -> Result<()> {
+        Self::paste_text(text, config)
+    }
+
+    /// 重新粘贴上一条识别结果（托盘菜单调用）
+    pub fn repaste(text: String, config: &ConfigManager) -> Result<()> {
+        Self::paste_text(text, config)
+    }
+
+    fn paste_text(text: String, config: &ConfigManager) -> Result<()> {
         match config.output_mode().as_str() {
-            "clipboard" => self.output_by_clipboard(text).await,
-            "inject" => self.output_by_keyboard(text),
+            "clipboard" => Self::output_by_clipboard_sync(text),
+            "inject" => Self::output_by_keyboard(text),
             mode => anyhow::bail!("Unknown output mode: {}", mode),
         }
     }
 
-    async fn output_by_clipboard(&self, text: String) -> Result<()> {
+    fn output_by_clipboard_sync(text: String) -> Result<()> {
         #[cfg(target_os = "windows")]
         unsafe {
             let backup = crate::win_utils::get_clipboard_text();
@@ -27,8 +45,8 @@ impl OutputHandler {
             crate::win_utils::set_clipboard_text(&text, true);
             crate::win_utils::paste_clipboard();
 
-            tokio::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(500));
                 if let Some(old_text) = backup {
                     crate::win_utils::set_clipboard_text(&old_text, true);
                 } else {
@@ -43,12 +61,12 @@ impl OutputHandler {
         }
 
         #[cfg(not(target_os = "windows"))]
-        self.output_by_keyboard(text)?;
+        Self::output_by_keyboard(text)?;
 
         Ok(())
     }
 
-    fn output_by_keyboard(&self, text: String) -> Result<()> {
+    fn output_by_keyboard(text: String) -> Result<()> {
         #[cfg(target_os = "windows")]
         unsafe {
             crate::win_utils::send_unicode_text(&text);
@@ -71,33 +89,30 @@ pub fn post_process(text: &str, config: &ConfigManager) -> String {
     let mut result = text.trim().to_string();
 
     if !config.allow_emoji() {
-        if let Ok(re) = regex::Regex::new(r"[\p{Emoji_Presentation}\p{Extended_Pictographic}]") {
-            result = re.replace_all(&result, "").to_string();
-        }
+        result = EMOJI_RE.replace_all(&result, "").to_string();
     }
 
     if !config.allow_punctuation() {
         result = strip_punctuation(&result);
     }
 
-    if let Ok(re) = regex::Regex::new(r"\s+") {
-        result = re.replace_all(&result, " ").to_string();
-    }
-
+    result = WHITESPACE_RE.replace_all(&result, " ").to_string();
     result.trim().to_string()
+}
+
+fn is_punctuation(c: char) -> bool {
+    let mut buf = [0u8; 4];
+    PUNCT_RE.is_match(c.encode_utf8(&mut buf))
 }
 
 fn strip_punctuation(text: &str) -> String {
     let is_numeric_separator = |c: char| matches!(c, '.' | ':' | ',' | '-');
-    let Ok(punct_re) = regex::Regex::new(r"[\p{P}]") else {
-        return text.to_string();
-    };
 
     let chars: Vec<char> = text.chars().collect();
     let mut cleaned = String::with_capacity(text.len());
 
     for (i, &c) in chars.iter().enumerate() {
-        if !punct_re.is_match(&c.to_string()) {
+        if !is_punctuation(c) {
             cleaned.push(c);
             continue;
         }

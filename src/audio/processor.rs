@@ -41,7 +41,8 @@ pub fn encode_wav_memory(samples: &[i16], sample_rate: u32) -> Result<Vec<u8>> {
         sample_format: SampleFormat::Int,
     };
 
-    let mut cursor = Cursor::new(Vec::new());
+    // 44 字节 WAV 头 + 16-bit 单声道样本
+    let mut cursor = Cursor::new(Vec::with_capacity(44 + samples.len() * 2));
     let mut writer = WavWriter::new(&mut cursor, spec).context("Failed to create WAV writer")?;
 
     for &sample in samples {
@@ -54,17 +55,10 @@ pub fn encode_wav_memory(samples: &[i16], sample_rate: u32) -> Result<Vec<u8>> {
     Ok(cursor.into_inner())
 }
 
-pub fn calculate_audio_energy(audio: &[f32]) -> f32 {
-    if audio.is_empty() {
-        return 0.0;
-    }
-
-    let sum_squared: f32 = audio.iter().map(|&x| x * x).sum();
-    sum_squared / audio.len() as f32
-}
-
 fn float_to_i16(input: &[f32]) -> Vec<i16> {
-    input.iter().map(|&sample| to_i16(sample)).collect()
+    let mut output = Vec::with_capacity(input.len());
+    output.extend(input.iter().map(|&sample| to_i16(sample)));
+    output
 }
 
 fn to_i16(sample: f32) -> i16 {

@@ -57,16 +57,6 @@ impl ApiClient {
         Ok(result.text.trim().to_string())
     }
 
-    /// 保留给后续真正的分段上传。现在整段上传，避免把 WAV 字节硬切成非法音频。
-    pub async fn process_audio_streaming(
-        &self,
-        audio_data: Vec<u8>,
-        config: &ConfigManager,
-    ) -> Result<Vec<String>> {
-        let text = self.process_audio(audio_data, config).await?;
-        Ok(vec![text])
-    }
-
     fn api_url(&self, config: &ConfigManager) -> String {
         if config.get_speech_service() == "groq" {
             "https://api.groq.com/openai/v1/audio/transcriptions".to_string()

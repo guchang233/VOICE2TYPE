@@ -24,13 +24,13 @@ pub struct StatusIndicator {
 }
 
 impl StatusIndicator {
-    pub fn new() -> Self {
+    pub fn new(fade_duration: u64, error_duration: u64, success_duration: u64) -> Self {
         let (tx, rx) = channel();
 
         thread::spawn(move || {
             #[cfg(target_os = "windows")]
             unsafe {
-                create_and_run_window(rx);
+                create_and_run_window(rx, fade_duration, error_duration, success_duration);
             }
         });
 
@@ -69,7 +69,12 @@ struct WindowState {
 }
 
 #[cfg(target_os = "windows")]
-unsafe fn create_and_run_window(rx: Receiver<IndicatorState>) {
+unsafe fn create_and_run_window(
+    rx: Receiver<IndicatorState>,
+    fade_duration: u64,
+    error_duration: u64,
+    success_duration: u64,
+) {
     let instance = GetModuleHandleW(None).unwrap();
     let class_name = w!("Voice2TypeIndicatorClass");
 
@@ -117,10 +122,9 @@ unsafe fn create_and_run_window(rx: Receiver<IndicatorState>) {
         width: initial_width,
         height: initial_height,
         state_start_time: std::time::Instant::now(),
-        // Default duration settings
-        fade_duration: 300,     // 默认 300 毫秒
-        error_duration: 5000,   // 默认 5000 毫秒
-        success_duration: 5000, // 默认 5000 毫秒
+        fade_duration,
+        error_duration,
+        success_duration,
     };
 
     // Store state pointer in window user data?

@@ -1,5 +1,9 @@
 use crate::config::ConfigManager;
+use crate::history;
+use crate::notify::PENDING_TRAY_MESSAGES;
+use crate::output::handler::OutputHandler;
 use crate::update;
+use cpal::traits::{DeviceTrait, HostTrait};
 use native_windows_derive::NwgUi;
 use native_windows_gui as nwg;
 use native_windows_gui::NativeUi;
@@ -71,6 +75,10 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_emoji])]
     pub allow_emoji_item: nwg::MenuItem,
 
+    #[nwg_control(parent: general_menu, text: "选择麦克风")]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_mic_window])]
+    pub mic_settings_item: nwg::MenuItem,
+
     // --- 设置 -> 输出模式 ---
     #[nwg_control(parent: settings_menu, text: "输出方式")]
     pub output_menu: nwg::Menu,
@@ -83,22 +91,8 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_output_clipboard])]
     pub output_clipboard_item: nwg::MenuItem,
 
-    // --- 设置 -> 语言 ---
-    #[nwg_control(parent: settings_menu, text: "语言")]
-    pub lang_menu: nwg::Menu,
-
-    #[nwg_control(parent: lang_menu, text: "界面语言")]
-    pub interface_lang_menu: nwg::Menu,
-
-    #[nwg_control(parent: interface_lang_menu, text: "中文", check: true)]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_lang_zh])]
-    pub lang_zh_item: nwg::MenuItem,
-
-    #[nwg_control(parent: interface_lang_menu, text: "English", check: true)]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_lang_en])]
-    pub lang_en_item: nwg::MenuItem,
-
-    #[nwg_control(parent: lang_menu, text: "识别语言")]
+    // --- 设置 -> 识别语言 ---
+    #[nwg_control(parent: settings_menu, text: "识别语言")]
     pub output_lang_menu: nwg::Menu,
 
     #[nwg_control(parent: output_lang_menu, text: "自动", check: true)]
@@ -132,28 +126,29 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::select_model_whisper])]
     pub model_whisper_item: nwg::MenuItem,
 
+    #[nwg_control(parent: model_menu, text: "本地 Whisper（离线）")]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::select_model_local_whisper])]
+    pub model_local_whisper_item: nwg::MenuItem,
+
+    #[nwg_control(parent: model_menu, text: "自定义 API 端点")]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_custom_api_window])]
+    pub model_custom_item: nwg::MenuItem,
+
     #[nwg_control(parent: config_menu, text: "API Key")]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_key_config_window])]
     pub key_config_item: nwg::MenuItem,
-
-    #[nwg_control(parent: config_menu, text: "长音频分段转写", check: true)]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_streaming])]
-    pub streaming_item: nwg::MenuItem,
 
     #[nwg_control(parent: config_menu, text: "热键绑定")]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_hotkey_window])]
     pub hotkey_settings_item: nwg::MenuItem,
 
-    #[nwg_control(parent: config_menu, text: "高级")]
-    pub advanced_menu: nwg::Menu,
-
-    #[nwg_control(parent: advanced_menu, text: "状态浮窗参数")]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_indicator_window])]
-    pub indicator_settings_item: nwg::MenuItem,
-
     #[nwg_control(parent: config_menu, text: "打开配置目录")]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::open_config_dir])]
     pub config_file_item: nwg::MenuItem,
+
+    #[nwg_control(parent: config_menu, text: "设置本地 Whisper 目录")]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_whisper_window])]
+    pub whisper_settings_item: nwg::MenuItem,
 
     // --- 设置 -> 调试 ---
     #[nwg_control(parent: settings_menu, text: "调试")]
@@ -168,6 +163,10 @@ pub struct Voice2TypeApp {
     pub log_dir_item: nwg::MenuItem,
 
     // --- Root Level Items ---
+    #[nwg_control(parent: tray_menu, text: "重新粘贴上一条")]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::repaste_last])]
+    pub repaste_item: nwg::MenuItem,
+
     #[nwg_control(parent: tray_menu)]
     pub sep_update: nwg::MenuSeparator,
 
@@ -299,42 +298,94 @@ pub struct Voice2TypeApp {
     #[nwg_layout_item(layout: update_layout, row: 7, col: 0, col_span: 3)]
     pub update_progress: nwg::ProgressBar,
 
-    // --- 指示器参数设置窗口 ---
-    #[nwg_control(size: (460, 240), position: (350, 350), title: "状态浮窗参数", flags: "WINDOW", icon: Some(&data.icon))]
-    #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_indicator_window])]
-    pub indicator_window: nwg::Window,
+    // --- 麦克风选择窗口 ---
+    #[nwg_control(size: (480, 140), position: (350, 350), title: "选择麦克风", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_mic_window])]
+    pub mic_window: nwg::Window,
 
-    #[nwg_layout(parent: indicator_window, spacing: 10, margin: [20, 20, 20, 20])]
-    pub indicator_layout: nwg::GridLayout,
+    #[nwg_layout(parent: mic_window, spacing: 10, margin: [20, 20, 20, 20])]
+    pub mic_layout: nwg::GridLayout,
 
-    #[nwg_control(parent: indicator_window, text: "淡出动画时间 (毫秒):")]
-    #[nwg_layout_item(layout: indicator_layout, row: 0, col: 0)]
-    pub indicator_fade_label: nwg::Label,
+    #[nwg_control(parent: mic_window, text: "输入设备:")]
+    #[nwg_layout_item(layout: mic_layout, row: 0, col: 0)]
+    pub mic_label: nwg::Label,
 
-    #[nwg_control(parent: indicator_window, text: "300")]
-    #[nwg_layout_item(layout: indicator_layout, row: 0, col: 1, col_span: 2)]
-    pub indicator_fade_input: nwg::TextInput,
+    #[nwg_control(parent: mic_window)]
+    #[nwg_layout_item(layout: mic_layout, row: 0, col: 1, col_span: 2)]
+    pub mic_combo: nwg::ComboBox<String>,
 
-    #[nwg_control(parent: indicator_window, text: "错误状态停留 (毫秒):")]
-    #[nwg_layout_item(layout: indicator_layout, row: 1, col: 0)]
-    pub indicator_error_label: nwg::Label,
+    #[nwg_control(parent: mic_window, text: "保存（重启后生效）")]
+    #[nwg_layout_item(layout: mic_layout, row: 1, col: 1)]
+    #[nwg_events(OnButtonClick: [Voice2TypeApp::save_mic_config])]
+    pub mic_save_btn: nwg::Button,
 
-    #[nwg_control(parent: indicator_window, text: "5000")]
-    #[nwg_layout_item(layout: indicator_layout, row: 1, col: 1, col_span: 2)]
-    pub indicator_error_input: nwg::TextInput,
+    // --- 本地 Whisper 目录设置 ---
+    #[nwg_control(size: (560, 200), position: (320, 320), title: "本地 Whisper 目录", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_whisper_window])]
+    pub whisper_window: nwg::Window,
 
-    #[nwg_control(parent: indicator_window, text: "成功状态停留 (毫秒):")]
-    #[nwg_layout_item(layout: indicator_layout, row: 2, col: 0)]
-    pub indicator_success_label: nwg::Label,
+    #[nwg_layout(parent: whisper_window, spacing: 10, margin: [20, 20, 20, 20])]
+    pub whisper_layout: nwg::GridLayout,
 
-    #[nwg_control(parent: indicator_window, text: "5000")]
-    #[nwg_layout_item(layout: indicator_layout, row: 2, col: 1, col_span: 2)]
-    pub indicator_success_input: nwg::TextInput,
+    #[nwg_control(parent: whisper_window, text: "Whisper 根目录（其下需有 bin\\、models\\）:")]
+    #[nwg_layout_item(layout: whisper_layout, row: 0, col: 0, col_span: 3)]
+    pub whisper_hint_label: nwg::Label,
 
-    #[nwg_control(parent: indicator_window, text: "保存")]
-    #[nwg_layout_item(layout: indicator_layout, row: 3, col: 1)]
-    #[nwg_events(OnButtonClick: [Voice2TypeApp::save_indicator_config])]
-    pub indicator_save_btn: nwg::Button,
+    #[nwg_control(parent: whisper_window, text: "")]
+    #[nwg_layout_item(layout: whisper_layout, row: 1, col: 0, col_span: 2)]
+    pub whisper_path_input: nwg::TextInput,
+
+    #[nwg_control(parent: whisper_window, text: "浏览…")]
+    #[nwg_layout_item(layout: whisper_layout, row: 1, col: 2)]
+    #[nwg_events(OnButtonClick: [Voice2TypeApp::browse_whisper_dir])]
+    pub whisper_browse_btn: nwg::Button,
+
+    #[nwg_control(parent: whisper_window, text: "打开目录")]
+    #[nwg_layout_item(layout: whisper_layout, row: 2, col: 0)]
+    #[nwg_events(OnButtonClick: [Voice2TypeApp::open_whisper_dir])]
+    pub whisper_open_btn: nwg::Button,
+
+    #[nwg_control(parent: whisper_window, text: "保存")]
+    #[nwg_layout_item(layout: whisper_layout, row: 2, col: 2)]
+    #[nwg_events(OnButtonClick: [Voice2TypeApp::save_whisper_dir_config])]
+    pub whisper_save_btn: nwg::Button,
+
+    // --- 自定义 API 窗口 ---
+    #[nwg_control(size: (520, 260), position: (300, 300), title: "自定义 API", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_custom_api_window])]
+    pub custom_api_window: nwg::Window,
+
+    #[nwg_layout(parent: custom_api_window, spacing: 10, margin: [20, 20, 20, 20])]
+    pub custom_api_layout: nwg::GridLayout,
+
+    #[nwg_control(parent: custom_api_window, text: "API 地址:")]
+    #[nwg_layout_item(layout: custom_api_layout, row: 0, col: 0)]
+    pub custom_url_label: nwg::Label,
+
+    #[nwg_control(parent: custom_api_window, text: "")]
+    #[nwg_layout_item(layout: custom_api_layout, row: 0, col: 1, col_span: 2)]
+    pub custom_url_input: nwg::TextInput,
+
+    #[nwg_control(parent: custom_api_window, text: "模型名称:")]
+    #[nwg_layout_item(layout: custom_api_layout, row: 1, col: 0)]
+    pub custom_model_label: nwg::Label,
+
+    #[nwg_control(parent: custom_api_window, text: "")]
+    #[nwg_layout_item(layout: custom_api_layout, row: 1, col: 1, col_span: 2)]
+    pub custom_model_input: nwg::TextInput,
+
+    #[nwg_control(parent: custom_api_window, text: "API Key:")]
+    #[nwg_layout_item(layout: custom_api_layout, row: 2, col: 0)]
+    pub custom_key_label: nwg::Label,
+
+    #[nwg_control(parent: custom_api_window, text: "")]
+    #[nwg_layout_item(layout: custom_api_layout, row: 2, col: 1, col_span: 2)]
+    pub custom_key_input: nwg::TextInput,
+
+    #[nwg_control(parent: custom_api_window, text: "保存")]
+    #[nwg_layout_item(layout: custom_api_layout, row: 3, col: 1)]
+    #[nwg_events(OnButtonClick: [Voice2TypeApp::save_custom_api_config])]
+    pub custom_api_save_btn: nwg::Button,
 
     // --- 关于窗口 ---
     #[nwg_control(size: (360, 300), position: (400, 400), title: "关于 Voice2Type", flags: "WINDOW", icon: Some(&data.icon))]
@@ -418,16 +469,6 @@ impl Voice2TypeApp {
         let show_log = config_manager.show_log();
         app.log_item.set_checked(show_log);
 
-        let lang = config_manager.language();
-
-        if lang == "en" {
-            app.lang_en_item.set_checked(true);
-            app.lang_zh_item.set_checked(false);
-        } else {
-            app.lang_zh_item.set_checked(true);
-            app.lang_en_item.set_checked(false);
-        }
-
         // Output Language settings
         let out_lang = config_manager.output_language();
         match out_lang.as_str() {
@@ -465,7 +506,7 @@ impl Voice2TypeApp {
                 .set_checked(enabled || config_manager.autostart_enabled());
             if let Some(mgr) = &*app.config_manager.borrow() {
                 mgr.set_autostart_enabled(app.autostart_item.checked());
-                let _ = mgr.save();
+                mgr.save_or_notify();
             }
         }
 
@@ -488,6 +529,7 @@ impl Voice2TypeApp {
 
         // 初始隐藏窗口
         app.hotkey_window.set_visible(false);
+        app.whisper_window.set_visible(false);
         app.about_window.set_visible(false);
         app.update_window.set_visible(false);
         app.current_ver_val.set_text(CURRENT_VERSION);
@@ -564,35 +606,6 @@ impl Voice2TypeApp {
         app_ui
     }
 
-    fn set_lang_zh(&self) {
-        if !self.lang_zh_item.checked() {
-            self.lang_zh_item.set_checked(true);
-            self.lang_en_item.set_checked(false);
-            if let Some(mgr) = &*self.config_manager.borrow() {
-                mgr.set_language("zh".to_string());
-                let _ = mgr.save();
-            }
-            // self.update_ui_text("zh"); // nwg不支持动态修改Menu文本
-            nwg::simple_message("语言已切换", "已切换为中文，重启后完全生效。");
-        }
-    }
-
-    fn set_lang_en(&self) {
-        if !self.lang_en_item.checked() {
-            self.lang_en_item.set_checked(true);
-            self.lang_zh_item.set_checked(false);
-            if let Some(mgr) = &*self.config_manager.borrow() {
-                mgr.set_language("en".to_string());
-                let _ = mgr.save();
-            }
-            // self.update_ui_text("en"); // nwg不支持动态修改Menu文本
-            nwg::simple_message(
-                "Language Changed",
-                "Language changed to English (Please restart the app)",
-            );
-        }
-    }
-
     fn show_menu(&self) {
         let (x, y) = nwg::GlobalCursor::position();
         self.tray_menu.popup(x, y);
@@ -603,7 +616,7 @@ impl Voice2TypeApp {
         self.allow_emoji_item.set_checked(new_state);
         if let Some(mgr) = &*self.config_manager.borrow() {
             mgr.set_allow_emoji(new_state);
-            let _ = mgr.save();
+            mgr.save_or_notify();
         }
     }
 
@@ -612,7 +625,7 @@ impl Voice2TypeApp {
         self.allow_punct_item.set_checked(new_state);
         if let Some(mgr) = &*self.config_manager.borrow() {
             mgr.set_allow_punctuation(new_state);
-            let _ = mgr.save();
+            mgr.save_or_notify();
         }
     }
 
@@ -621,7 +634,7 @@ impl Voice2TypeApp {
         self.output_clipboard_item.set_checked(false);
         if let Some(mgr) = &*self.config_manager.borrow() {
             mgr.set_output_mode("inject".to_string());
-            let _ = mgr.save();
+            mgr.save_or_notify();
         }
     }
 
@@ -630,7 +643,7 @@ impl Voice2TypeApp {
         self.output_clipboard_item.set_checked(true);
         if let Some(mgr) = &*self.config_manager.borrow() {
             mgr.set_output_mode("clipboard".to_string());
-            let _ = mgr.save();
+            mgr.save_or_notify();
         }
     }
 
@@ -639,7 +652,7 @@ impl Voice2TypeApp {
         self.log_item.set_checked(new_state);
         if let Some(mgr) = &*self.config_manager.borrow() {
             mgr.set_show_log(new_state);
-            let _ = mgr.save();
+            mgr.save_or_notify();
         }
 
         #[cfg(target_os = "windows")]
@@ -656,7 +669,7 @@ impl Voice2TypeApp {
         self.autostart_item.set_checked(new_state);
         if let Some(mgr) = &*self.config_manager.borrow() {
             mgr.set_autostart_enabled(new_state);
-            let _ = mgr.save();
+            mgr.save_or_notify();
         }
         #[cfg(target_os = "windows")]
         unsafe {
@@ -666,7 +679,7 @@ impl Voice2TypeApp {
                     self.autostart_item.set_checked(false);
                     if let Some(mgr) = &*self.config_manager.borrow() {
                         mgr.set_autostart_enabled(false);
-                        let _ = mgr.save();
+                        mgr.save_or_notify();
                     }
                     nwg::simple_message("设置失败", "开机自动启动设置失败，请检查权限。");
                 } else {
@@ -678,7 +691,7 @@ impl Voice2TypeApp {
                     self.autostart_item.set_checked(true);
                     if let Some(mgr) = &*self.config_manager.borrow() {
                         mgr.set_autostart_enabled(true);
-                        let _ = mgr.save();
+                        mgr.save_or_notify();
                     }
                     nwg::simple_message("设置失败", "取消开机自动启动失败，请检查权限。");
                 } else {
@@ -693,14 +706,20 @@ impl Voice2TypeApp {
         self.indicator_item.set_checked(new_state);
         if let Some(mgr) = &*self.config_manager.borrow() {
             mgr.set_enable_indicator(new_state);
-            let _ = mgr.save();
+            mgr.save_or_notify();
         }
 
         #[cfg(target_os = "windows")]
         {
             if new_state {
                 if crate::INDICATOR.get().is_none() {
-                    let _ = crate::INDICATOR.set(crate::indicator::StatusIndicator::new());
+                    if let Some(mgr) = &*self.config_manager.borrow() {
+                        let _ = crate::INDICATOR.set(crate::indicator::StatusIndicator::new(
+                            mgr.indicator_fade_duration(),
+                            mgr.indicator_error_duration(),
+                            mgr.indicator_success_duration(),
+                        ));
+                    }
                 }
             } else {
                 if let Some(ind) = crate::INDICATOR.get() {
@@ -715,7 +734,7 @@ impl Voice2TypeApp {
         self.trigger_toggle_item.set_checked(false);
         if let Some(mgr) = &*self.config_manager.borrow() {
             mgr.set_trigger_mode("hold".to_string());
-            let _ = mgr.save();
+            mgr.save_or_notify();
         }
     }
 
@@ -724,7 +743,7 @@ impl Voice2TypeApp {
         self.trigger_toggle_item.set_checked(true);
         if let Some(mgr) = &*self.config_manager.borrow() {
             mgr.set_trigger_mode("toggle".to_string());
-            let _ = mgr.save();
+            mgr.save_or_notify();
         }
     }
 
@@ -759,7 +778,7 @@ impl Voice2TypeApp {
     fn select_model_teleai(&self) {
         if let Some(mgr) = &*self.config_manager.borrow() {
             mgr.set_model_name("TeleAI/TeleSpeechASR".to_string());
-            let _ = mgr.save();
+            mgr.save_or_notify();
             nwg::simple_message("已选择模型", "TeleAI/TeleSpeechASR");
         }
     }
@@ -767,7 +786,7 @@ impl Voice2TypeApp {
     fn select_model_sensevoice(&self) {
         if let Some(mgr) = &*self.config_manager.borrow() {
             mgr.set_model_name("FunAudioLLM/SenseVoiceSmall".to_string());
-            let _ = mgr.save();
+            mgr.save_or_notify();
             nwg::simple_message("已选择模型", "FunAudioLLM/SenseVoiceSmall");
         }
     }
@@ -775,46 +794,198 @@ impl Voice2TypeApp {
     fn select_model_whisper(&self) {
         if let Some(mgr) = &*self.config_manager.borrow() {
             mgr.set_model_name("whisper-large-v3".to_string());
-            let _ = mgr.save();
+            mgr.save_or_notify();
             nwg::simple_message("已选择模型", "whisper-large-v3");
         }
     }
 
-    // 切换流式推理
-    fn toggle_streaming(&self) {
-        let new_state = !self.streaming_item.checked();
-
-        // 如果用户要启用流式推理，显示警告提示
-        if new_state {
-            #[cfg(target_os = "windows")]
-            unsafe {
-                use windows::core::PCWSTR;
-                use windows::Win32::UI::WindowsAndMessaging::{
-                    MessageBoxW, IDYES, MB_ICONWARNING, MB_YESNO,
-                };
-                let title = "提示\0".encode_utf16().collect::<Vec<u16>>();
-                let msg = "分段转写主要用于较长录音，可能增加 API 调用耗时。\n\n是否继续启用？\0"
-                    .encode_utf16()
-                    .collect::<Vec<u16>>();
-                let result = MessageBoxW(
-                    None,
-                    PCWSTR(msg.as_ptr()),
-                    PCWSTR(title.as_ptr()),
-                    MB_YESNO | MB_ICONWARNING,
+    fn select_model_local_whisper(&self) {
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            if !mgr.has_local_whisper_dir() {
+                nwg::simple_message(
+                    "本地 Whisper",
+                    "请先设置 Whisper 根目录（设置 → 配置 → 设置本地 Whisper 目录）。",
                 );
+                self.show_whisper_window();
+                return;
+            }
+            mgr.set_model_name(crate::config::MODEL_LOCAL_WHISPER.to_string());
+            mgr.save_or_notify();
+            let status = crate::whisper_local::LocalWhisper::status_message(mgr);
+            nwg::simple_message("本地 Whisper", &status);
+        }
+    }
 
-                // 如果用户选择取消，不启用流式推理
-                if result != IDYES {
-                    return;
+    fn show_whisper_window(&self) {
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            self.whisper_path_input.set_text(&mgr.local_whisper_dir());
+        }
+        self.whisper_window.set_visible(true);
+        self.whisper_window.set_focus();
+    }
+
+    fn hide_whisper_window(&self) {
+        self.whisper_window.set_visible(false);
+    }
+
+    fn browse_whisper_dir(&self) {
+        let mut dialog = nwg::FileDialog::default();
+        if let Err(e) = nwg::FileDialog::builder()
+            .action(nwg::FileDialogAction::OpenDirectory)
+            .title("选择本地 Whisper 根目录")
+            .build(&mut dialog)
+        {
+            nwg::simple_message("错误", &format!("无法创建文件夹选择对话框: {}", e));
+            return;
+        }
+
+        let current = self.whisper_path_input.text();
+        if !current.is_empty() && std::path::Path::new(&current).is_dir() {
+            let _ = dialog.set_default_folder(&current);
+        }
+
+        if dialog.run(Some(&self.window)) {
+            if let Ok(path) = dialog.get_selected_item() {
+                self.whisper_path_input
+                    .set_text(&path.to_string_lossy());
+            }
+        }
+    }
+
+    fn save_whisper_dir_config(&self) {
+        let Some(mgr) = &*self.config_manager.borrow() else {
+            return;
+        };
+        let path = self.whisper_path_input.text().trim().to_string();
+        if path.is_empty() {
+            nwg::simple_message("提示", "请先选择或输入 Whisper 根目录。");
+            return;
+        }
+        mgr.set_local_whisper_dir(path);
+        match crate::whisper_local::LocalWhisper::ensure_layout(mgr) {
+            Ok(()) => {
+                mgr.save_or_notify();
+                let status = crate::whisper_local::LocalWhisper::status_message(mgr);
+                nwg::simple_message("已保存", &status);
+                self.whisper_window.set_visible(false);
+            }
+            Err(e) => {
+                mgr.save_or_notify();
+                nwg::simple_message("目录已保存", &format!("{}\n\n{}", e, mgr.local_whisper_dir()));
+            }
+        }
+    }
+
+    fn open_whisper_dir(&self) {
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            let dir = mgr.local_whisper_dir();
+            if dir.is_empty() {
+                nwg::simple_message("提示", "尚未设置目录，请先保存路径。");
+                return;
+            }
+            let path = std::path::PathBuf::from(&dir);
+            if path.is_dir() {
+                let _ = open::that(path);
+            } else {
+                nwg::simple_message("提示", &format!("目录不存在:\n{}", dir));
+            }
+        }
+    }
+
+    fn repaste_last(&self) {
+        let Some(text) = history::last() else {
+            nwg::simple_message("提示", "还没有识别记录。");
+            return;
+        };
+        let Some(mgr) = self.config_manager.borrow().clone() else {
+            return;
+        };
+        let _ = match OutputHandler::repaste(text, &mgr) {
+            Ok(()) => nwg::simple_message("已粘贴", "上一条识别结果已重新输入。"),
+            Err(e) => nwg::simple_message("失败", &format!("粘贴失败: {}", e)),
+        };
+    }
+
+    fn show_mic_window(&self) {
+        let mut items = vec!["系统默认".to_string()];
+        let mut selected = 0usize;
+        let current = self
+            .config_manager
+            .borrow()
+            .as_ref()
+            .map(|m| m.input_device())
+            .unwrap_or_default();
+
+        let host = cpal::default_host();
+        if let Ok(devices) = host.input_devices() {
+            for device in devices {
+                if let Ok(name) = device.name() {
+                    if name == current {
+                        selected = items.len();
+                    }
+                    items.push(name);
                 }
             }
         }
 
-        self.streaming_item.set_checked(new_state);
+        self.mic_combo.set_collection(items);
+        self.mic_combo.set_selection(Some(selected));
+        self.mic_window.set_visible(true);
+        self.mic_window.set_focus();
+    }
+
+    fn hide_mic_window(&self) {
+        self.mic_window.set_visible(false);
+    }
+
+    fn save_mic_config(&self) {
+        let Some(mgr) = &*self.config_manager.borrow() else {
+            return;
+        };
+        let idx = self.mic_combo.selection().unwrap_or(0);
+        let name = if idx == 0 {
+            String::new()
+        } else {
+            let host = cpal::default_host();
+            host.input_devices()
+                .ok()
+                .into_iter()
+                .flatten()
+                .filter_map(|d| d.name().ok())
+                .nth(idx - 1)
+                .unwrap_or_default()
+        };
+        mgr.set_input_device(name);
+        mgr.save_or_notify();
+        nwg::simple_message("已保存", "麦克风设置已保存，请重启程序后生效。");
+        self.mic_window.set_visible(false);
+    }
+
+    fn show_custom_api_window(&self) {
         if let Some(mgr) = &*self.config_manager.borrow() {
-            mgr.set_enable_streaming(new_state);
-            let _ = mgr.save();
+            mgr.set_model_name("custom".to_string());
+            self.custom_url_input.set_text(&mgr.get_api_url());
+            self.custom_model_input.set_text(&mgr.get_custom_model_name());
+            self.custom_key_input.set_text(&mgr.get_api_key());
         }
+        self.custom_api_window.set_visible(true);
+        self.custom_api_window.set_focus();
+    }
+
+    fn hide_custom_api_window(&self) {
+        self.custom_api_window.set_visible(false);
+    }
+
+    fn save_custom_api_config(&self) {
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            mgr.set_model_name("custom".to_string());
+            mgr.set_api_url(self.custom_url_input.text());
+            mgr.set_custom_model_name(self.custom_model_input.text());
+            mgr.set_api_key(self.custom_key_input.text());
+            mgr.save_or_notify();
+            nwg::simple_message("已保存", "自定义 API 已保存并设为当前模型。");
+        }
+        self.custom_api_window.set_visible(false);
     }
 
     // API Key 配置窗口方法
@@ -870,7 +1041,7 @@ impl Voice2TypeApp {
             // 恢复原始模型
             mgr.set_model_name(current_model);
 
-            let _ = mgr.save();
+            mgr.save_or_notify();
             nwg::simple_message("已保存", "API Key 已保存。");
         }
         self.key_config_window.set_visible(false);
@@ -885,7 +1056,7 @@ impl Voice2TypeApp {
             if let Some(idx) = self.hotkey_win_combo.selection() {
                 if idx < hotkeys_vks.len() {
                     mgr.set_hotkey(hotkeys_vks[idx]);
-                    let _ = mgr.save();
+                    mgr.save_or_notify();
                 }
             }
         }
@@ -900,7 +1071,7 @@ impl Voice2TypeApp {
             self.output_lang_en_item.set_checked(false);
             if let Some(mgr) = &*self.config_manager.borrow() {
                 mgr.set_output_language("auto".to_string());
-                let _ = mgr.save();
+                mgr.save_or_notify();
             }
         }
     }
@@ -912,7 +1083,7 @@ impl Voice2TypeApp {
             self.output_lang_en_item.set_checked(false);
             if let Some(mgr) = &*self.config_manager.borrow() {
                 mgr.set_output_language("zh".to_string());
-                let _ = mgr.save();
+                mgr.save_or_notify();
             }
         }
     }
@@ -924,7 +1095,7 @@ impl Voice2TypeApp {
             self.output_lang_zh_item.set_checked(false);
             if let Some(mgr) = &*self.config_manager.borrow() {
                 mgr.set_output_language("en".to_string());
-                let _ = mgr.save();
+                mgr.save_or_notify();
             }
         }
     }
@@ -1007,7 +1178,7 @@ impl Voice2TypeApp {
                                 // 记录提示时间
                                 if let Some(mgr) = &*self.config_manager.borrow() {
                                     mgr.set_last_check_time(now);
-                                    let _ = mgr.save();
+                                    mgr.save_or_notify();
                                 }
 
                                 if ret == IDYES {
@@ -1036,7 +1207,7 @@ impl Voice2TypeApp {
         if let Some(info) = self.update_info.borrow().as_ref() {
             if let Some(mgr) = &*self.config_manager.borrow() {
                 mgr.set_ignored_version(info.version.clone());
-                let _ = mgr.save();
+                mgr.save_or_notify();
             }
             self.hide_update_window();
             nwg::simple_message("已忽略", "将不再提示此版本的更新。");
@@ -1181,68 +1352,6 @@ impl Voice2TypeApp {
         nwg::stop_thread_dispatch();
     }
 
-    fn show_indicator_window(&self) {
-        if let Some(mgr) = &*self.config_manager.borrow() {
-            self.indicator_fade_input
-                .set_text(&mgr.indicator_fade_duration().to_string());
-            self.indicator_error_input
-                .set_text(&mgr.indicator_error_duration().to_string());
-            self.indicator_success_input
-                .set_text(&mgr.indicator_success_duration().to_string());
-        }
-        self.indicator_window.set_visible(true);
-        self.indicator_window.set_focus();
-    }
-
-    fn hide_indicator_window(&self) {
-        self.indicator_window.set_visible(false);
-    }
-
-    fn save_indicator_config(&self) {
-        if let Some(mgr) = &*self.config_manager.borrow() {
-            // 验证并保存淡出动画时间
-            if let Ok(fade_duration) = self.indicator_fade_input.text().parse::<u64>() {
-                if fade_duration >= 100 && fade_duration <= 2000 {
-                    // 验证并保存错误状态持续时间
-                    if let Ok(error_duration) = self.indicator_error_input.text().parse::<u64>() {
-                        if error_duration >= 1000 && error_duration <= 10000 {
-                            // 验证并保存成功状态持续时间
-                            if let Ok(success_duration) =
-                                self.indicator_success_input.text().parse::<u64>()
-                            {
-                                if success_duration >= 1000 && success_duration <= 10000 {
-                                    mgr.set_indicator_fade_duration(fade_duration);
-                                    mgr.set_indicator_error_duration(error_duration);
-                                    mgr.set_indicator_success_duration(success_duration);
-                                    let _ = mgr.save();
-                                    nwg::simple_message("已保存", "状态浮窗参数已保存。");
-                                } else {
-                                    nwg::simple_message(
-                                        "错误",
-                                        "成功状态持续时间必须在 1000-10000 毫秒之间",
-                                    );
-                                }
-                            } else {
-                                nwg::simple_message("错误", "请输入有效的成功状态持续时间");
-                            }
-                        } else {
-                            nwg::simple_message(
-                                "错误",
-                                "错误状态持续时间必须在 1000-10000 毫秒之间",
-                            );
-                        }
-                    } else {
-                        nwg::simple_message("错误", "请输入有效的错误状态持续时间");
-                    }
-                } else {
-                    nwg::simple_message("错误", "淡出动画时间必须在 100-2000 毫秒之间");
-                }
-            } else {
-                nwg::simple_message("错误", "请输入有效的淡出动画时间");
-            }
-        }
-        self.indicator_window.set_visible(false);
-    }
 }
 
 impl Voice2TypeApp {
@@ -1253,7 +1362,20 @@ impl Voice2TypeApp {
                 self.log_item.set_checked(false);
                 if let Some(mgr) = &*self.config_manager.borrow() {
                     mgr.set_show_log(false);
-                    let _ = mgr.save();
+                    mgr.save_or_notify();
+                }
+            }
+
+            let messages: Vec<(String, String)> = PENDING_TRAY_MESSAGES
+                .lock()
+                .map(|mut q| std::mem::take(&mut *q))
+                .unwrap_or_default();
+            if let Some(hwnd) = self.window.handle.hwnd() {
+                let hwnd = windows::Win32::Foundation::HWND(hwnd as _);
+                for (title, body) in messages {
+                    unsafe {
+                        crate::win_utils::show_tray_balloon(hwnd, &title, &body);
+                    }
                 }
             }
         }

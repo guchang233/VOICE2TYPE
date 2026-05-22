@@ -4,7 +4,12 @@ fn main() {
     if cfg!(target_os = "windows") {
         let mut res = winres::WindowsResource::new();
         res.set_icon("icon.ico");
-        let level = "requireAdministrator";
+        // debug 默认 asInvoker，便于 `cargo run`；release 或 `--features admin` 请求管理员
+        let level = if cfg!(feature = "admin") || cfg!(not(debug_assertions)) {
+            "requireAdministrator"
+        } else {
+            "asInvoker"
+        };
         let manifest = format!(
             r#"
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">

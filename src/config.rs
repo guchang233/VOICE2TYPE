@@ -3,10 +3,11 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-const MODEL_TELEAI: &str = "TeleAI/TeleSpeechASR";
-const MODEL_SENSEVOICE: &str = "FunAudioLLM/SenseVoiceSmall";
-const MODEL_WHISPER: &str = "whisper-large-v3";
-const MODEL_CUSTOM: &str = "custom";
+pub const MODEL_TELEAI: &str = "TeleAI/TeleSpeechASR";
+pub const MODEL_SENSEVOICE: &str = "FunAudioLLM/SenseVoiceSmall";
+pub const MODEL_WHISPER: &str = "whisper-large-v3";
+pub const MODEL_LOCAL_WHISPER: &str = "local-whisper";
+pub const MODEL_CUSTOM: &str = "custom";
 
 const SILICONFLOW_TRANSCRIPTIONS_URL: &str = "https://api.siliconflow.cn/v1/audio/transcriptions";
 const GROQ_TRANSCRIPTIONS_URL: &str = "https://api.groq.com/openai/v1/audio/transcriptions";
@@ -21,24 +22,25 @@ pub struct ConfigManager {
 #[serde(default)]
 pub struct BasicConfig {
     pub model_name: String,
-    pub language: String,
     pub output_language: String,
     pub output_mode: String,
     pub autostart: bool,
     pub hotkey: u32,
     pub show_log: bool,
+    /// 空字符串表示系统默认麦克风
+    pub input_device: String,
 }
 
 impl Default for BasicConfig {
     fn default() -> Self {
         Self {
             model_name: MODEL_SENSEVOICE.to_string(),
-            language: "zh".to_string(),
             output_language: "auto".to_string(),
             output_mode: "clipboard".to_string(),
             autostart: false,
             hotkey: 0x71, // F2
             show_log: false,
+            input_device: String::new(),
         }
     }
 }
@@ -49,7 +51,6 @@ pub struct FeatureConfig {
     pub allow_emoji: bool,
     pub allow_punctuation: bool,
     pub enable_indicator: bool,
-    pub enable_streaming: bool,
 }
 
 impl Default for FeatureConfig {
@@ -58,7 +59,6 @@ impl Default for FeatureConfig {
             allow_emoji: true,
             allow_punctuation: true,
             enable_indicator: true,
-            enable_streaming: false,
         }
     }
 }
@@ -67,14 +67,12 @@ impl Default for FeatureConfig {
 #[serde(default)]
 pub struct AdvancedConfig {
     pub trigger_mode: String,
-    pub streaming_interval: u64,
 }
 
 impl Default for AdvancedConfig {
     fn default() -> Self {
         Self {
             trigger_mode: "hold".to_string(),
-            streaming_interval: 500,
         }
     }
 }
@@ -103,6 +101,10 @@ pub struct ModelConfig {
     pub custom_api_key: String,
     pub custom_api_url: String,
     pub custom_model_name: String,
+    /// `models/` 下的 ggml 模型文件名，例如 ggml-base.bin
+    pub local_whisper_model: String,
+    /// 用户自选的 Whisper 根目录（其下应有 bin/、models/）
+    pub local_whisper_dir: String,
 }
 
 impl Default for ModelConfig {
@@ -113,6 +115,8 @@ impl Default for ModelConfig {
             custom_api_key: String::new(),
             custom_api_url: SILICONFLOW_TRANSCRIPTIONS_URL.to_string(),
             custom_model_name: "自定义模型".to_string(),
+            local_whisper_model: "ggml-base.bin".to_string(),
+            local_whisper_dir: String::new(),
         }
     }
 }
@@ -148,8 +152,6 @@ pub struct AppConfig {
     // 旧版平铺字段，读取后会迁移到上面的分组结构。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub language: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_language: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -200,7 +202,6 @@ impl Default for AppConfig {
             model: ModelConfig::default(),
             indicator: IndicatorConfig::default(),
             model_name: None,
-            language: None,
             output_language: None,
             output_mode: None,
             autostart: None,
@@ -228,9 +229,6 @@ impl AppConfig {
     pub fn initialize(&mut self) {
         if let Some(value) = self.model_name.take() {
             self.basic.model_name = value;
-        }
-        if let Some(value) = self.language.take() {
-            self.basic.language = value;
         }
         if let Some(value) = self.output_language.take() {
             self.basic.output_language = value;
@@ -313,9 +311,20 @@ impl ConfigManager {
             }
         }
 
-        Self {
+        let manager = Self {
             config: Arc::new(Mutex::new(config)),
             config_path: path,
+        };
+        manager.migrate_legacy_whisper_dir();
+        manager
+    }
+
+    /// 若用户尚未配置目录，但旧版默认路径 `{config_dir}/whisper` 已存在，则自动迁移。
+    fn migrate_legacy_whisper_dir(&self) {
+        let legacy = self.config_dir().join("whisper");
+        let mut cfg = self.config.lock().unwrap();
+        if cfg.model.local_whisper_dir.is_empty() && legacy.is_dir() {
+            cfg.model.local_whisper_dir = legacy.to_string_lossy().into_owned();
         }
     }
 
@@ -352,11 +361,16 @@ impl ConfigManager {
         Some(config)
     }
 
+    pub fn is_local_whisper(&self) -> bool {
+        self.config.lock().unwrap().basic.model_name == MODEL_LOCAL_WHISPER
+    }
+
     pub fn get_api_key(&self) -> String {
         let cfg = self.config.lock().unwrap();
         match cfg.basic.model_name.as_str() {
             MODEL_TELEAI | MODEL_SENSEVOICE => cfg.model.siliconflow_api_key.clone(),
             MODEL_WHISPER => cfg.model.groq_api_key.clone(),
+            MODEL_LOCAL_WHISPER => String::new(),
             _ => cfg.model.custom_api_key.clone(),
         }
     }
@@ -390,6 +404,15 @@ impl ConfigManager {
         let cfg = self.config.lock().unwrap();
         if cfg.basic.model_name == MODEL_CUSTOM {
             cfg.model.custom_model_name.clone()
+        } else if cfg.basic.model_name == MODEL_LOCAL_WHISPER {
+            format!(
+                "本地 Whisper ({})",
+                if cfg.model.local_whisper_model.is_empty() {
+                    "ggml-base.bin"
+                } else {
+                    &cfg.model.local_whisper_model
+                }
+            )
         } else {
             cfg.basic.model_name.clone()
         }
@@ -398,12 +421,34 @@ impl ConfigManager {
     pub fn set_model_name(&self, model: String) {
         let mut cfg = self.config.lock().unwrap();
         match model.as_str() {
-            MODEL_TELEAI | MODEL_SENSEVOICE | MODEL_WHISPER => cfg.basic.model_name = model,
+            MODEL_TELEAI | MODEL_SENSEVOICE | MODEL_WHISPER | MODEL_LOCAL_WHISPER => {
+                cfg.basic.model_name = model
+            }
             _ => {
                 cfg.basic.model_name = MODEL_CUSTOM.to_string();
                 cfg.model.custom_model_name = model;
             }
         }
+    }
+
+    pub fn local_whisper_model(&self) -> String {
+        self.config.lock().unwrap().model.local_whisper_model.clone()
+    }
+
+    pub fn set_local_whisper_model(&self, name: String) {
+        self.config.lock().unwrap().model.local_whisper_model = name;
+    }
+
+    pub fn local_whisper_dir(&self) -> String {
+        self.config.lock().unwrap().model.local_whisper_dir.clone()
+    }
+
+    pub fn set_local_whisper_dir(&self, path: String) {
+        self.config.lock().unwrap().model.local_whisper_dir = path;
+    }
+
+    pub fn has_local_whisper_dir(&self) -> bool {
+        !self.local_whisper_dir().is_empty()
     }
 
     pub fn allow_emoji(&self) -> bool {
@@ -430,12 +475,12 @@ impl ConfigManager {
         self.config.lock().unwrap().basic.show_log = show;
     }
 
-    pub fn language(&self) -> String {
-        self.config.lock().unwrap().basic.language.clone()
+    pub fn input_device(&self) -> String {
+        self.config.lock().unwrap().basic.input_device.clone()
     }
 
-    pub fn set_language(&self, lang: String) {
-        self.config.lock().unwrap().basic.language = lang;
+    pub fn set_input_device(&self, name: String) {
+        self.config.lock().unwrap().basic.input_device = name;
     }
 
     pub fn output_mode(&self) -> String {
@@ -494,22 +539,6 @@ impl ConfigManager {
         self.config.lock().unwrap().basic.output_language = lang;
     }
 
-    pub fn enable_streaming(&self) -> bool {
-        self.config.lock().unwrap().features.enable_streaming
-    }
-
-    pub fn set_enable_streaming(&self, enable: bool) {
-        self.config.lock().unwrap().features.enable_streaming = enable;
-    }
-
-    pub fn streaming_interval(&self) -> u64 {
-        self.config.lock().unwrap().advanced.streaming_interval
-    }
-
-    pub fn set_streaming_interval(&self, interval: u64) {
-        self.config.lock().unwrap().advanced.streaming_interval = interval;
-    }
-
     pub fn trigger_mode(&self) -> String {
         self.config.lock().unwrap().advanced.trigger_mode.clone()
     }
@@ -523,12 +552,9 @@ impl ConfigManager {
         match cfg.basic.model_name.as_str() {
             MODEL_TELEAI | MODEL_SENSEVOICE => "siliconflow".to_string(),
             MODEL_WHISPER => "groq".to_string(),
+            MODEL_LOCAL_WHISPER => "local".to_string(),
             _ => "custom".to_string(),
         }
-    }
-
-    pub fn set_speech_service(&self, _service: String) {
-        // 服务由所选模型决定。保留这个方法是为了兼容旧 UI 调用。
     }
 
     pub fn indicator_fade_duration(&self) -> u64 {
@@ -559,8 +585,6 @@ impl ConfigManager {
         let mut cfg = self.config.lock().unwrap();
         cfg.basic.model_name = MODEL_SENSEVOICE.to_string();
         cfg.model = ModelConfig::default();
-        cfg.features.enable_streaming = FeatureConfig::default().enable_streaming;
-        cfg.advanced.streaming_interval = AdvancedConfig::default().streaming_interval;
         cfg.advanced.trigger_mode = AdvancedConfig::default().trigger_mode;
         cfg.indicator = IndicatorConfig::default();
     }
@@ -572,8 +596,35 @@ impl ConfigManager {
         Ok(())
     }
 
+    /// 保存配置；失败时通过托盘通知用户。
+    pub fn save_or_notify(&self) -> bool {
+        match self.save() {
+            Ok(()) => true,
+            Err(e) => {
+                crate::notify::queue_tray_message("配置保存失败", &e.to_string());
+                false
+            }
+        }
+    }
+
     pub fn config_path(&self) -> PathBuf {
         self.config_path.clone()
+    }
+
+    pub fn config_dir(&self) -> PathBuf {
+        self.config_path
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."))
+    }
+
+    pub fn get_custom_model_name(&self) -> String {
+        self.config.lock().unwrap().model.custom_model_name.clone()
+    }
+
+    pub fn set_custom_model_name(&self, name: String) {
+        let mut cfg = self.config.lock().unwrap();
+        cfg.model.custom_model_name = name;
     }
 
     pub fn log_dir(&self) -> PathBuf {
