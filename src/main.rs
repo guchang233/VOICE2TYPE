@@ -336,6 +336,9 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
     let audio_buffer_writer = audio_buffer.clone();
     let channels_usize = channels as usize;
 
+    let processing_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>> =
+        Arc::new(Mutex::new(None));
+
     // 创建输入流
     let config_clone = config.clone();
     let input_stream = device.build_input_stream(
@@ -388,15 +391,38 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
             Some(msg) = rx.recv() => {
                 match msg {
                     InputMessage::StartRecording => {
+                        let current_state = {
+                            let st = app_state.lock().unwrap();
+                            *st
+                        };
+
+                        if current_state == AppState::Processing {
+                            if let Some(handle) = processing_handle.lock().unwrap().take() {
+                                handle.abort();
+                            }
+                            *app_state.lock().unwrap() = AppState::Idle;
+                            write_log_line("--> [取消] 已取消正在进行的转写", Some(&config));
+                            notify::queue_tray_message("Voice2Type", "已取消正在进行的转写");
+                            #[cfg(target_os = "windows")]
+                            if config.enable_indicator() {
+                                if let Some(ind) = INDICATOR.get() {
+                                    ind.set_state(IndicatorState::Cancelled);
+                                    let ind = ind.clone();
+                                    tokio::spawn(async move {
+                                        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                                        if !IS_RECORDING.load(Ordering::Relaxed) {
+                                             ind.set_state(IndicatorState::Hidden);
+                                        }
+                                    });
+                                }
+                            }
+                        }
+
                         let can_start = {
                             let st = app_state.lock().unwrap();
                             matches!(*st, AppState::Idle | AppState::Cancelled)
                         };
                         if !can_start {
-                            notify::queue_tray_message(
-                                "Voice2Type",
-                                "正在转写上一段录音，请稍候再录。",
-                            );
                             continue;
                         }
                         {
@@ -449,6 +475,7 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
                                 sample_rate,
                                 config.clone(),
                                 None,
+                                &processing_handle,
                             );
                         } else if state_now == AppState::Cancelled {
                             *app_state.lock().unwrap() = AppState::Idle;
@@ -487,6 +514,7 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
                             "录音已达 {} 秒上限，正在转写…",
                             MAX_RECORDING_SECS
                         )),
+                        &processing_handle,
                     );
                 }
             }
@@ -500,6 +528,7 @@ fn begin_audio_processing(
     sample_rate: u32,
     config: Arc<ConfigManager>,
     limit_notice: Option<String>,
+    processing_handle: &Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
 ) {
     IS_RECORDING.store(false, Ordering::Relaxed);
     *app_state.lock().unwrap() = AppState::Processing;
@@ -521,7 +550,7 @@ fn begin_audio_processing(
     };
 
     let state_clone = app_state.clone();
-    tokio::spawn(async move {
+    let handle = tokio::spawn(async move {
         let result = process_audio_and_type(audio_data, sample_rate, config.clone()).await;
         if let Err(e) = &result {
             write_log(
@@ -531,8 +560,12 @@ fn begin_audio_processing(
             );
             notify::queue_tray_message("转写失败", &e.to_string());
         }
-        *state_clone.lock().unwrap() = AppState::Idle;
+        let mut st = state_clone.lock().unwrap();
+        if *st == AppState::Processing {
+            *st = AppState::Idle;
+        }
     });
+    *processing_handle.lock().unwrap() = Some(handle);
 }
 
 async fn process_audio_and_type(

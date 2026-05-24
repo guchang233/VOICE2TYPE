@@ -1,4 +1,4 @@
-use crate::config::ConfigManager;
+use crate::config::{self, ConfigManager};
 use crate::history;
 use crate::notify::PENDING_TRAY_MESSAGES;
 use crate::output::handler::OutputHandler;
@@ -114,23 +114,23 @@ pub struct Voice2TypeApp {
     #[nwg_control(parent: config_menu, text: "模型选择")]
     pub model_menu: nwg::Menu,
 
-    #[nwg_control(parent: model_menu, text: "TeleAI/TeleSpeechASR")]
+    #[nwg_control(parent: model_menu, text: "TeleAI/TeleSpeechASR", check: true)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::select_model_teleai])]
     pub model_teleai_item: nwg::MenuItem,
 
-    #[nwg_control(parent: model_menu, text: "FunAudioLLM/SenseVoiceSmall")]
+    #[nwg_control(parent: model_menu, text: "FunAudioLLM/SenseVoiceSmall", check: true)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::select_model_sensevoice])]
     pub model_sensevoice_item: nwg::MenuItem,
 
-    #[nwg_control(parent: model_menu, text: "whisper-large-v3")]
+    #[nwg_control(parent: model_menu, text: "whisper-large-v3", check: true)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::select_model_whisper])]
     pub model_whisper_item: nwg::MenuItem,
 
-    #[nwg_control(parent: model_menu, text: "本地 Whisper（离线）")]
+    #[nwg_control(parent: model_menu, text: "本地 Whisper（离线）", check: true)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::select_model_local_whisper])]
     pub model_local_whisper_item: nwg::MenuItem,
 
-    #[nwg_control(parent: model_menu, text: "自定义 API 端点")]
+    #[nwg_control(parent: model_menu, text: "自定义 API 端点", check: true)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_custom_api_window])]
     pub model_custom_item: nwg::MenuItem,
 
@@ -530,6 +530,9 @@ impl Voice2TypeApp {
             app.trigger_toggle_item.set_checked(false);
         }
 
+        // 设置模型选择初始状态
+        app.update_model_checks();
+
         // 初始隐藏窗口
         app.hotkey_window.set_visible(false);
         app.whisper_window.set_visible(false);
@@ -778,12 +781,26 @@ impl Voice2TypeApp {
     }
 
     // 模型选择方法
+    fn update_model_checks(&self) {
+        let model = if let Some(mgr) = &*self.config_manager.borrow() {
+            mgr.raw_model_name()
+        } else {
+            return;
+        };
+        self.model_teleai_item.set_checked(model == config::MODEL_TELEAI);
+        self.model_sensevoice_item.set_checked(model == config::MODEL_SENSEVOICE);
+        self.model_whisper_item.set_checked(model == config::MODEL_WHISPER);
+        self.model_local_whisper_item.set_checked(model == config::MODEL_LOCAL_WHISPER);
+        self.model_custom_item.set_checked(model == config::MODEL_CUSTOM);
+    }
+
     fn select_model_teleai(&self) {
         if let Some(mgr) = &*self.config_manager.borrow() {
             mgr.set_model_name("TeleAI/TeleSpeechASR".to_string());
             mgr.save_or_notify();
             nwg::simple_message("已选择模型", "TeleAI/TeleSpeechASR");
         }
+        self.update_model_checks();
     }
 
     fn select_model_sensevoice(&self) {
@@ -792,6 +809,7 @@ impl Voice2TypeApp {
             mgr.save_or_notify();
             nwg::simple_message("已选择模型", "FunAudioLLM/SenseVoiceSmall");
         }
+        self.update_model_checks();
     }
 
     fn select_model_whisper(&self) {
@@ -800,11 +818,13 @@ impl Voice2TypeApp {
             mgr.save_or_notify();
             nwg::simple_message("已选择模型", "whisper-large-v3");
         }
+        self.update_model_checks();
     }
 
     fn select_model_local_whisper(&self) {
         if let Some(mgr) = &*self.config_manager.borrow() {
             if !mgr.has_local_whisper_dir() {
+                self.update_model_checks();
                 nwg::simple_message(
                     "本地 Whisper",
                     "请先设置 Whisper 根目录（设置 → 配置 → 设置本地 Whisper 目录）。",
@@ -817,6 +837,7 @@ impl Voice2TypeApp {
             let status = crate::whisper_local::LocalWhisper::status_message(mgr);
             nwg::simple_message("本地 Whisper", &status);
         }
+        self.update_model_checks();
     }
 
     fn show_whisper_window(&self) {
@@ -971,6 +992,7 @@ impl Voice2TypeApp {
             self.custom_model_input.set_text(&mgr.get_custom_model_name());
             self.custom_key_input.set_text(&mgr.get_api_key());
         }
+        self.update_model_checks();
         self.custom_api_window.set_visible(true);
         self.custom_api_window.set_focus();
     }
@@ -988,6 +1010,7 @@ impl Voice2TypeApp {
             mgr.save_or_notify();
             nwg::simple_message("已保存", "自定义 API 已保存并设为当前模型。");
         }
+        self.update_model_checks();
         self.custom_api_window.set_visible(false);
     }
 
