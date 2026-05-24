@@ -190,14 +190,14 @@ pub struct Voice2TypeApp {
     pub quit_item: nwg::MenuItem,
 
     // --- API Key 配置窗口 ---
-    #[nwg_control(size: (520, 220), position: (300, 300), title: "API Key", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_control(size: (580, 240), position: (300, 300), title: "API Key 密钥配置 (Telemetry & Speech API)", flags: "WINDOW", icon: Some(&data.icon))]
     #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_key_config_window])]
     pub key_config_window: nwg::Window,
 
     #[nwg_layout(parent: key_config_window, spacing: 10, margin: [20, 20, 20, 20])]
     pub key_config_layout: nwg::GridLayout,
 
-    #[nwg_control(parent: key_config_window, text: "TeleAI/TeleSpeechASR:")]
+    #[nwg_control(parent: key_config_window, text: "TeleSpeechASR Key:")]
     #[nwg_layout_item(layout: key_config_layout, row: 0, col: 0)]
     pub key_teleai_label: nwg::Label,
 
@@ -205,7 +205,7 @@ pub struct Voice2TypeApp {
     #[nwg_layout_item(layout: key_config_layout, row: 0, col: 1)]
     pub key_teleai_input: nwg::TextInput,
 
-    #[nwg_control(parent: key_config_window, text: "FunAudioLLM/SenseVoiceSmall:")]
+    #[nwg_control(parent: key_config_window, text: "SenseVoiceSmall Key (推荐):")]
     #[nwg_layout_item(layout: key_config_layout, row: 1, col: 0)]
     pub key_sensevoice_label: nwg::Label,
 
@@ -213,7 +213,7 @@ pub struct Voice2TypeApp {
     #[nwg_layout_item(layout: key_config_layout, row: 1, col: 1)]
     pub key_sensevoice_input: nwg::TextInput,
 
-    #[nwg_control(parent: key_config_window, text: "whisper-large-v3:")]
+    #[nwg_control(parent: key_config_window, text: "whisper-large-v3 Key:")]
     #[nwg_layout_item(layout: key_config_layout, row: 2, col: 0)]
     pub key_whisper_label: nwg::Label,
 
@@ -221,20 +221,20 @@ pub struct Voice2TypeApp {
     #[nwg_layout_item(layout: key_config_layout, row: 2, col: 1)]
     pub key_whisper_input: nwg::TextInput,
 
-    #[nwg_control(parent: key_config_window, text: "保存")]
+    #[nwg_control(parent: key_config_window, text: "确认保存设置")]
     #[nwg_layout_item(layout: key_config_layout, row: 3, col: 1)]
     #[nwg_events(OnButtonClick: [Voice2TypeApp::save_key_config])]
     pub key_save_btn: nwg::Button,
 
     // --- 热键设置窗口 ---
-    #[nwg_control(size: (360, 160), position: (350, 350), title: "热键绑定", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_control(size: (400, 175), position: (350, 350), title: "全局录音热键绑定", flags: "WINDOW", icon: Some(&data.icon))]
     #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_hotkey_window])]
     pub hotkey_window: nwg::Window,
 
     #[nwg_layout(parent: hotkey_window, spacing: 10, margin: [20, 20, 20, 20])]
     pub hotkey_layout: nwg::GridLayout,
 
-    #[nwg_control(parent: hotkey_window, text: "选择热键:")]
+    #[nwg_control(parent: hotkey_window, text: "录音热键 (按住说话):")]
     #[nwg_layout_item(layout: hotkey_layout, row: 0, col: 0)]
     pub hotkey_win_label: nwg::Label,
 
