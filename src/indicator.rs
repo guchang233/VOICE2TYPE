@@ -424,21 +424,28 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
     let bb2 = (b2 + blend_b * 0.04).min(255.0) as u32;
 
     // Phase 1: Draw Capsule Background & Specular Glass Outlines + Soft Drop Shadows
+    let cx = w as f32 / 2.0;
+    let cy = h as f32 / 2.0;
+    let qw = (capsule_w / 2.0) - radius;
+    let qh = (capsule_h / 2.0) - radius;
+
     for y in 0..h {
+        let py = (y as f32 - cy).abs();
+        let dy = (py - qh).max(0.0);
+        let dy2 = dy * dy;
+
         for x in 0..w {
             let idx = (y * w + x) as usize;
 
-            let cx = w as f32 / 2.0;
-            let cy = h as f32 / 2.0;
             let px = (x as f32 - cx).abs();
-            let py = (y as f32 - cy).abs();
-
-            let qw = (capsule_w / 2.0) - radius;
-            let qh = (capsule_h / 2.0) - radius;
-
-            let dx = (px - qw).max(0.0);
-            let dy = (py - qh).max(0.0);
-            let dist = (dx * dx + dy * dy).sqrt();
+            let dist = if px <= qw {
+                dy
+            } else if py <= qh {
+                px - qw
+            } else {
+                let dx = px - qw;
+                (dx * dx + dy2).sqrt()
+            };
 
             if dist <= radius {
                 // Inside the core pill shape: Render premium glass acrylic backdrop
@@ -513,7 +520,7 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
             let amplitude = 4.5f32;
             let t_damp = elapsed_ms as f32 / 300.0;
             let damp = (1.0 - t_damp).powi(2);
-            ((elapsed_ms as f32 * freq).sin() * amplitude * damp)
+            (elapsed_ms as f32 * freq).sin() * amplitude * damp
         } else {
             0.0
         }
@@ -549,11 +556,7 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
     };
 
     // Unified procedural shape vectors
-    let get_icon_alpha = |x: f32, y: f32| -> f32 {
-        let dx = x - icon_cx;
-        let dy = y - icon_cy;
-        let dist = (dx * dx + dy * dy).sqrt();
-
+    let get_icon_alpha = |dx: f32, dy: f32, dist: f32, x: f32, y: f32| -> f32 {
         match &state.target_state {
             IndicatorState::Hidden => 0.0,
             IndicatorState::Recording => {
@@ -755,22 +758,28 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
 
     // Paint dynamic icon pixels with color drills
     for y in 0..h {
+        let dy = y as f32 - icon_cy;
+        let dy2 = dy * dy;
         for x in 0..w {
             let dx = x as f32 - icon_cx;
-            let dy = y as f32 - icon_cy;
-            let dist = (dx * dx + dy * dy).sqrt();
+            let d2 = dx * dx + dy2;
 
-            let icon_alpha_f = if dist <= 24.0 {
-                get_icon_alpha(x as f32, y as f32)
+            let (icon_alpha_f, halo_alpha_f) = if d2 <= 576.0 {
+                let dist = d2.sqrt();
+                let icon_a = if dist <= 24.0 {
+                    get_icon_alpha(dx, dy, dist, x as f32, y as f32)
+                } else {
+                    0.0
+                };
+                let halo_a = if is_pulsing && dist > 5.0 && dist <= halo_r {
+                    let d_factor = (halo_r - dist) / (halo_r - 5.0);
+                    d_factor.clamp(0.0, 1.0) * (halo_alpha_base as f32 / 255.0)
+                } else {
+                    0.0
+                };
+                (icon_a, halo_a)
             } else {
-                0.0
-            };
-
-            let halo_alpha_f = if is_pulsing && dist > 5.0 && dist <= halo_r {
-                let d_factor = (halo_r - dist) / (halo_r - 5.0);
-                d_factor.clamp(0.0, 1.0) * (halo_alpha_base as f32 / 255.0)
-            } else {
-                0.0
+                (0.0, 0.0)
             };
 
             if icon_alpha_f > 0.0 || halo_alpha_f > 0.0 {
@@ -866,21 +875,22 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
 
     // Dynamic Alpha Channel Fix for GDI Subpixel Font anti-aliasing details
     for y in text_rect.top..text_rect.bottom {
-        for x in text_rect.left..text_rect.right {
-            if x >= 0 && x < w && y >= 0 && y < h {
-                let idx = (y * w + x as i32) as usize;
-                let val = pixels[idx];
-                let r = (val >> 16) & 0xFF;
-                let g = (val >> 8) & 0xFF;
-                let b = val & 0xFF;
+        if y >= 0 && y < h {
+            let row_offset = y * w;
+            for x in text_rect.left..text_rect.right {
+                if x >= 0 && x < w {
+                    let idx = (row_offset + x) as usize;
+                    let val = pixels[idx];
+                    let r = (val >> 16) & 0xFF;
+                    let g = (val >> 8) & 0xFF;
+                    let b = val & 0xFF;
 
-                let max_c = r.max(g).max(b);
-                if max_c > 0 {
-                    let existing_bg_pixel = pixels[idx];
-                    let current_a = (existing_bg_pixel >> 24) & 0xFF;
-                    let font_alpha = max_c;
-                    let target_a = current_a.max(font_alpha);
-                    pixels[idx] = (target_a << 24) | (val & 0x00FFFFFF);
+                    let max_c = r.max(g).max(b);
+                    if max_c > 0 {
+                        let current_a = (val >> 24) & 0xFF;
+                        let target_a = current_a.max(max_c);
+                        pixels[idx] = (target_a << 24) | (val & 0x00FFFFFF);
+                    }
                 }
             }
         }

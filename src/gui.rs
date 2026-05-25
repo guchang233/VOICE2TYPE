@@ -32,8 +32,9 @@ pub struct Voice2TypeApp {
     #[nwg_resource(source_bin: Some(include_bytes!("../icon.ico")))]
     pub icon: nwg::Icon,
 
-    // 托盘菜单 (Root)
-    #[nwg_control(parent: window, popup: true)]
+    // 托�    // 设置 (Top Level)
+    // 托盘菜单
+    #[nwg_control(popup: true)]
     pub tray_menu: nwg::Menu,
 
     // 设置 (Top Level)
@@ -79,7 +80,7 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_mic_window])]
     pub mic_settings_item: nwg::MenuItem,
 
-    // --- 设置 -> 输出模式 ---
+    // --- 设置 -> 输出方式 ---
     #[nwg_control(parent: settings_menu, text: "输出方式")]
     pub output_menu: nwg::Menu,
 
@@ -103,7 +104,7 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_out_lang_zh])]
     pub output_lang_zh_item: nwg::MenuItem,
 
-    #[nwg_control(parent: output_lang_menu, text: "English (En)", check: true)]
+    #[nwg_control(parent: output_lang_menu, text: "English", check: true)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_out_lang_en])]
     pub output_lang_en_item: nwg::MenuItem,
 
@@ -114,7 +115,7 @@ pub struct Voice2TypeApp {
     #[nwg_control(parent: config_menu, text: "模型选择")]
     pub model_menu: nwg::Menu,
 
-    #[nwg_control(parent: model_menu, text: "TeleAI/TeleSpeechASR", check: false)]
+    #[nwg_control(parent: model_menu, text: "TeleAI", check: false)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::select_model_teleai])]
     pub model_teleai_item: nwg::MenuItem,
 
@@ -130,7 +131,7 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::select_model_local_whisper])]
     pub model_local_whisper_item: nwg::MenuItem,
 
-    #[nwg_control(parent: model_menu, text: "自定义 API 端点", check: false)]
+    #[nwg_control(parent: model_menu, text: "自定义 API", check: false)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_custom_api_window])]
     pub model_custom_item: nwg::MenuItem,
 
@@ -190,111 +191,111 @@ pub struct Voice2TypeApp {
     pub quit_item: nwg::MenuItem,
 
     // --- API Key 配置窗口 ---
-    #[nwg_control(size: (580, 240), position: (300, 300), title: "API Key 密钥配置 (Telemetry & Speech API)", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_control(size: (580, 240), position: (300, 300), title: "API Key 密钥配置", flags: "WINDOW", icon: Some(&data.icon))]
     #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_key_config_window])]
     pub key_config_window: nwg::Window,
 
     #[nwg_layout(parent: key_config_window, spacing: 10, margin: [20, 20, 20, 20])]
     pub key_config_layout: nwg::GridLayout,
 
-    #[nwg_control(parent: key_config_window, text: "TeleSpeechASR Key:")]
+    #[nwg_control(parent: key_config_window, text: "TeleSpeechASR Key:", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: key_config_layout, row: 0, col: 0)]
     pub key_teleai_label: nwg::Label,
 
-    #[nwg_control(parent: key_config_window, text: "")]
+    #[nwg_control(parent: key_config_window, text: "", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: key_config_layout, row: 0, col: 1)]
     pub key_teleai_input: nwg::TextInput,
 
-    #[nwg_control(parent: key_config_window, text: "SenseVoiceSmall Key (推荐):")]
+    #[nwg_control(parent: key_config_window, text: "SenseVoiceSmall Key (推荐):", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: key_config_layout, row: 1, col: 0)]
     pub key_sensevoice_label: nwg::Label,
 
-    #[nwg_control(parent: key_config_window, text: "")]
+    #[nwg_control(parent: key_config_window, text: "", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: key_config_layout, row: 1, col: 1)]
     pub key_sensevoice_input: nwg::TextInput,
 
-    #[nwg_control(parent: key_config_window, text: "whisper-large-v3 Key:")]
+    #[nwg_control(parent: key_config_window, text: "whisper-large-v3 Key:", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: key_config_layout, row: 2, col: 0)]
     pub key_whisper_label: nwg::Label,
 
-    #[nwg_control(parent: key_config_window, text: "")]
+    #[nwg_control(parent: key_config_window, text: "", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: key_config_layout, row: 2, col: 1)]
     pub key_whisper_input: nwg::TextInput,
 
-    #[nwg_control(parent: key_config_window, text: "确认保存设置")]
+    #[nwg_control(parent: key_config_window, text: "确认保存设置", font: Some(&data.font_medium))]
     #[nwg_layout_item(layout: key_config_layout, row: 3, col: 1)]
     #[nwg_events(OnButtonClick: [Voice2TypeApp::save_key_config])]
     pub key_save_btn: nwg::Button,
 
     // --- 热键设置窗口 ---
-    #[nwg_control(size: (400, 175), position: (350, 350), title: "全局录音热键绑定", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_control(size: (420, 160), position: (350, 350), title: "全局录音热键绑定", flags: "WINDOW", icon: Some(&data.icon))]
     #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_hotkey_window])]
     pub hotkey_window: nwg::Window,
 
     #[nwg_layout(parent: hotkey_window, spacing: 10, margin: [20, 20, 20, 20])]
     pub hotkey_layout: nwg::GridLayout,
 
-    #[nwg_control(parent: hotkey_window, text: "录音热键 (按住说话):")]
+    #[nwg_control(parent: hotkey_window, text: "录音热键 (按住说话):", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: hotkey_layout, row: 0, col: 0)]
     pub hotkey_win_label: nwg::Label,
 
-    #[nwg_control(parent: hotkey_window)]
+    #[nwg_control(parent: hotkey_window, font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: hotkey_layout, row: 0, col: 1, col_span: 2)]
     pub hotkey_win_combo: nwg::ComboBox<String>,
 
-    #[nwg_control(parent: hotkey_window, text: "保存")]
+    #[nwg_control(parent: hotkey_window, text: "保存", font: Some(&data.font_medium))]
     #[nwg_layout_item(layout: hotkey_layout, row: 1, col: 1)]
     #[nwg_events(OnButtonClick: [Voice2TypeApp::save_hotkey_config])]
     pub hotkey_save_btn: nwg::Button,
 
     // --- 麦克风选择窗口 ---
-    #[nwg_control(size: (480, 140), position: (350, 350), title: "选择麦克风", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_control(size: (480, 150), position: (350, 350), title: "选择麦克风", flags: "WINDOW", icon: Some(&data.icon))]
     #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_mic_window])]
     pub mic_window: nwg::Window,
 
     #[nwg_layout(parent: mic_window, spacing: 10, margin: [20, 20, 20, 20])]
     pub mic_layout: nwg::GridLayout,
 
-    #[nwg_control(parent: mic_window, text: "输入设备:")]
+    #[nwg_control(parent: mic_window, text: "输入设备:", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: mic_layout, row: 0, col: 0)]
     pub mic_label: nwg::Label,
 
-    #[nwg_control(parent: mic_window)]
+    #[nwg_control(parent: mic_window, font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: mic_layout, row: 0, col: 1, col_span: 2)]
     pub mic_combo: nwg::ComboBox<String>,
 
-    #[nwg_control(parent: mic_window, text: "保存（重启后生效）")]
+    #[nwg_control(parent: mic_window, text: "保存（重启后生效）", font: Some(&data.font_medium))]
     #[nwg_layout_item(layout: mic_layout, row: 1, col: 1)]
     #[nwg_events(OnButtonClick: [Voice2TypeApp::save_mic_config])]
     pub mic_save_btn: nwg::Button,
 
     // --- 本地 Whisper 目录设置 ---
-    #[nwg_control(size: (560, 200), position: (320, 320), title: "本地 Whisper 目录", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_control(size: (580, 210), position: (320, 320), title: "本地 Whisper 目录", flags: "WINDOW", icon: Some(&data.icon))]
     #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_whisper_window])]
     pub whisper_window: nwg::Window,
 
     #[nwg_layout(parent: whisper_window, spacing: 10, margin: [20, 20, 20, 20])]
     pub whisper_layout: nwg::GridLayout,
 
-    #[nwg_control(parent: whisper_window, text: "Whisper 根目录（其下需有 bin\\、models\\）:")]
+    #[nwg_control(parent: whisper_window, text: "Whisper 根目录（其下需有 bin\\、models\\）:", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: whisper_layout, row: 0, col: 0, col_span: 3)]
     pub whisper_hint_label: nwg::Label,
 
-    #[nwg_control(parent: whisper_window, text: "")]
+    #[nwg_control(parent: whisper_window, text: "", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: whisper_layout, row: 1, col: 0, col_span: 2)]
     pub whisper_path_input: nwg::TextInput,
 
-    #[nwg_control(parent: whisper_window, text: "浏览…")]
+    #[nwg_control(parent: whisper_window, text: "浏览...", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: whisper_layout, row: 1, col: 2)]
     #[nwg_events(OnButtonClick: [Voice2TypeApp::browse_whisper_dir])]
     pub whisper_browse_btn: nwg::Button,
 
-    #[nwg_control(parent: whisper_window, text: "打开目录")]
+    #[nwg_control(parent: whisper_window, text: "打开目录", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: whisper_layout, row: 2, col: 0)]
     #[nwg_events(OnButtonClick: [Voice2TypeApp::open_whisper_dir])]
     pub whisper_open_btn: nwg::Button,
 
-    #[nwg_control(parent: whisper_window, text: "保存")]
+    #[nwg_control(parent: whisper_window, text: "保存", font: Some(&data.font_medium))]
     #[nwg_layout_item(layout: whisper_layout, row: 2, col: 2)]
     #[nwg_events(OnButtonClick: [Voice2TypeApp::save_whisper_dir_config])]
     pub whisper_save_btn: nwg::Button,
@@ -307,37 +308,37 @@ pub struct Voice2TypeApp {
     #[nwg_layout(parent: custom_api_window, spacing: 10, margin: [20, 20, 20, 20])]
     pub custom_api_layout: nwg::GridLayout,
 
-    #[nwg_control(parent: custom_api_window, text: "API 地址:")]
+    #[nwg_control(parent: custom_api_window, text: "API 地址:", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: custom_api_layout, row: 0, col: 0)]
     pub custom_url_label: nwg::Label,
 
-    #[nwg_control(parent: custom_api_window, text: "")]
+    #[nwg_control(parent: custom_api_window, text: "", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: custom_api_layout, row: 0, col: 1, col_span: 2)]
     pub custom_url_input: nwg::TextInput,
 
-    #[nwg_control(parent: custom_api_window, text: "模型名称:")]
+    #[nwg_control(parent: custom_api_window, text: "模型名称:", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: custom_api_layout, row: 1, col: 0)]
     pub custom_model_label: nwg::Label,
 
-    #[nwg_control(parent: custom_api_window, text: "")]
+    #[nwg_control(parent: custom_api_window, text: "", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: custom_api_layout, row: 1, col: 1, col_span: 2)]
     pub custom_model_input: nwg::TextInput,
 
-    #[nwg_control(parent: custom_api_window, text: "API Key:")]
+    #[nwg_control(parent: custom_api_window, text: "API Key:", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: custom_api_layout, row: 2, col: 0)]
     pub custom_key_label: nwg::Label,
 
-    #[nwg_control(parent: custom_api_window, text: "")]
+    #[nwg_control(parent: custom_api_window, text: "", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: custom_api_layout, row: 2, col: 1, col_span: 2)]
     pub custom_key_input: nwg::TextInput,
 
-    #[nwg_control(parent: custom_api_window, text: "保存")]
+    #[nwg_control(parent: custom_api_window, text: "保存", font: Some(&data.font_medium))]
     #[nwg_layout_item(layout: custom_api_layout, row: 3, col: 1)]
     #[nwg_events(OnButtonClick: [Voice2TypeApp::save_custom_api_config])]
     pub custom_api_save_btn: nwg::Button,
 
     // --- 关于与更新窗口 ---
-    #[nwg_control(size: (540, 480), position: (400, 400), title: "关于 & 检查更新", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_control(size: (560, 500), position: (400, 400), title: "关于 & 检查更新", flags: "WINDOW", icon: Some(&data.icon))]
     #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_about_window])]
     pub about_window: nwg::Window,
 
@@ -348,50 +349,50 @@ pub struct Voice2TypeApp {
     #[nwg_layout_item(layout: about_layout, row: 0, col: 0, col_span: 2)]
     pub app_name_label: nwg::Label,
 
-    #[nwg_control(parent: about_window, text: "作者：guchang233")]
+    #[nwg_control(parent: about_window, text: "作者：guchang233", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: about_layout, row: 0, col: 2, col_span: 1)]
     pub author_label: nwg::Label,
 
-    #[nwg_control(parent: about_window, text: "当前版本:")]
+    #[nwg_control(parent: about_window, text: "当前版本:", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: about_layout, row: 1, col: 0, col_span: 1)]
     pub current_ver_label: nwg::Label,
 
-    #[nwg_control(parent: about_window, text: "")]
+    #[nwg_control(parent: about_window, text: "", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: about_layout, row: 1, col: 1, col_span: 1)]
     pub current_ver_val: nwg::Label,
 
-    #[nwg_control(parent: about_window, text: "访问 GitHub 仓库")]
+    #[nwg_control(parent: about_window, text: "访问 GitHub 仓库", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: about_layout, row: 1, col: 2, col_span: 1)]
     #[nwg_events(OnButtonClick: [Voice2TypeApp::open_github])]
     pub github_btn: nwg::Button,
 
-    #[nwg_control(parent: about_window, text: "最新版本:")]
+    #[nwg_control(parent: about_window, text: "最新版本:", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: about_layout, row: 2, col: 0, col_span: 1)]
     pub latest_ver_label: nwg::Label,
 
-    #[nwg_control(parent: about_window, text: "未检测")]
+    #[nwg_control(parent: about_window, text: "未检测", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: about_layout, row: 2, col: 1, col_span: 2)]
     pub latest_ver_val: nwg::Label,
 
-    #[nwg_control(parent: about_window, text: "更新日志与项目说明:")]
+    #[nwg_control(parent: about_window, text: "更新日志与项目说明:", font: Some(&data.font_medium))]
     #[nwg_layout_item(layout: about_layout, row: 3, col: 0, col_span: 3)]
     pub changelog_label: nwg::Label,
 
-    #[nwg_control(parent: about_window, text: "", flags: "VISIBLE", readonly: true)]
+    #[nwg_control(parent: about_window, text: "", flags: "VISIBLE", readonly: true, font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: about_layout, row: 4, col: 0, col_span: 3, row_span: 3)]
     pub changelog_text: nwg::TextBox,
 
-    #[nwg_control(parent: about_window, text: "检测新版本")]
+    #[nwg_control(parent: about_window, text: "检测新版本", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: about_layout, row: 7, col: 0, col_span: 1)]
     #[nwg_events(OnButtonClick: [Voice2TypeApp::do_check_update])]
     pub check_update_btn: nwg::Button,
 
-    #[nwg_control(parent: about_window, text: "忽略此版本", enabled: false)]
+    #[nwg_control(parent: about_window, text: "忽略此版本", enabled: false, font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: about_layout, row: 7, col: 1, col_span: 1)]
     #[nwg_events(OnButtonClick: [Voice2TypeApp::ignore_update])]
     pub ignore_btn: nwg::Button,
 
-    #[nwg_control(parent: about_window, text: "立即更新", enabled: false)]
+    #[nwg_control(parent: about_window, text: "立即更新", enabled: false, font: Some(&data.font_medium))]
     #[nwg_layout_item(layout: about_layout, row: 7, col: 2, col_span: 1)]
     #[nwg_events(OnButtonClick: [Voice2TypeApp::start_update])]
     pub start_update_btn: nwg::Button,
@@ -400,7 +401,13 @@ pub struct Voice2TypeApp {
     #[nwg_layout_item(layout: about_layout, row: 8, col: 0, col_span: 3)]
     pub update_progress: nwg::ProgressBar,
 
-    #[nwg_resource(family: "Segoe UI", size: 24, weight: 700)]
+    #[nwg_resource(family: "DengXian", size: 16, weight: 400)]
+    pub font_normal: nwg::Font,
+
+    #[nwg_resource(family: "DengXian", size: 16, weight: 600)]
+    pub font_medium: nwg::Font,
+
+    #[nwg_resource(family: "DengXian", size: 26, weight: 700)]
     pub font_bold: nwg::Font,
 
     pub update_info: RefCell<Option<update::UpdateInfo>>,

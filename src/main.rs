@@ -1,4 +1,4 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![windows_subsystem = "windows"]
 
 mod api;
 mod audio;
@@ -190,7 +190,7 @@ fn main() -> Result<()> {
 
     // 2. 初始化 NWG
     nwg::init().expect("Failed to init Native Windows GUI");
-    nwg::Font::set_global_family("Segoe UI").expect("Failed to set default font");
+    nwg::Font::set_global_family("DengXian").expect("Failed to set default font");
 
     // 3. 初始化配置
     let config_manager = Arc::new(ConfigManager::new());
