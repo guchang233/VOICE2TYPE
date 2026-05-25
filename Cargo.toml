@@ -1,6 +1,6 @@
 [package]
 name = "voice2type"
-version = "0.0.44"
+version = "0.0.46"
 edition = "2021"
 authors = ["guchang233"]
 
