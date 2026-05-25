@@ -365,10 +365,6 @@ impl ConfigManager {
         self.config.lock().unwrap().basic.model_name == MODEL_LOCAL_WHISPER
     }
 
-    pub fn raw_model_name(&self) -> String {
-        self.config.lock().unwrap().basic.model_name.clone()
-    }
-
     pub fn needs_api_key(&self) -> bool {
         self.config.lock().unwrap().basic.model_name != MODEL_LOCAL_WHISPER
     }
@@ -422,6 +418,10 @@ impl ConfigManager {
         if cfg.basic.model_name == MODEL_CUSTOM {
             cfg.model.custom_api_url = url;
         }
+    }
+
+    pub fn get_model_id(&self) -> String {
+        self.config.lock().unwrap().basic.model_name.clone()
     }
 
     pub fn get_model_name(&self) -> String {

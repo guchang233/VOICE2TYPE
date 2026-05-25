@@ -1,5 +1,4 @@
 use anyhow::Result;
-use self_update::backends::github::Update;
 use self_update::cargo_crate_version;
 use std::fs;
 use std::io::{Read, Write};
@@ -66,7 +65,13 @@ pub fn get_latest_release_info() -> Result<UpdateInfo> {
     })
 }
 
-pub fn check_update() -> Result<Option<UpdateInfo>> {
+#[derive(Clone, Debug)]
+pub struct UpdateCheckResult {
+    pub has_update: bool,
+    pub info: UpdateInfo,
+}
+
+pub fn check_update() -> Result<UpdateCheckResult> {
     let release = fetch_latest_release()?;
 
     // semver parsing
@@ -79,30 +84,28 @@ pub fn check_update() -> Result<Option<UpdateInfo>> {
     let target =
         semver::Version::parse(clean_latest).unwrap_or_else(|_| semver::Version::new(0, 0, 0));
 
-    if target > current {
-        // Find the asset for Windows
-        // Strictly require .exe extension to avoid downloading source code zips
-        let asset = release
-            .assets
-            .iter()
-            .find(|a| a.name.to_lowercase().ends_with(".exe"))
-            .cloned();
+    let has_update = target > current;
 
-        if let Some(asset) = asset {
-            Ok(Some(UpdateInfo {
-                version: release.tag_name,
-                body: release.body.unwrap_or_default(),
-                download_url: asset.browser_download_url,
-                filename: asset.name,
-                date: release.published_at.unwrap_or_default(),
-            }))
-        } else {
-            // No exe asset found, probably a source-only release
-            Ok(None)
-        }
-    } else {
-        Ok(None)
-    }
+    // Find the asset for Windows
+    // Strictly require .exe extension to avoid downloading source code zips
+    let asset = release
+        .assets
+        .iter()
+        .find(|a| a.name.to_lowercase().ends_with(".exe"))
+        .cloned();
+
+    let info = UpdateInfo {
+        version: release.tag_name,
+        body: release.body.unwrap_or_default(),
+        download_url: asset
+            .as_ref()
+            .map(|a| a.browser_download_url.clone())
+            .unwrap_or_default(),
+        filename: asset.as_ref().map(|a| a.name.clone()).unwrap_or_default(),
+        date: release.published_at.unwrap_or_default(),
+    };
+
+    Ok(UpdateCheckResult { has_update, info })
 }
 
 // Progress callback: (current_bytes, total_bytes)

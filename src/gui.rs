@@ -415,7 +415,7 @@ pub struct Voice2TypeApp {
 
     // Thread communication state
     pub check_result:
-        RefCell<Option<Arc<Mutex<Option<anyhow::Result<Option<update::UpdateInfo>>>>>>>,
+        RefCell<Option<Arc<Mutex<Option<anyhow::Result<update::UpdateCheckResult>>>>>>,
     pub progress_data: RefCell<Option<Arc<Mutex<(u64, u64)>>>>,
 
     // 状态
@@ -1109,64 +1109,68 @@ impl Voice2TypeApp {
 
         if let Some(res) = guard.take() {
             match res {
-                Ok(Some(info)) => {
+                Ok(result) => {
+                    let info = result.info;
                     // 保存 info 到 RefCell
                     *self.update_info.borrow_mut() = Some(info.clone());
 
-                    self.latest_ver_val.set_text(&info.version);
                     self.changelog_text.set_text(&info.body);
-                    self.start_update_btn.set_enabled(true);
-                    self.ignore_btn.set_enabled(true);
 
-                    // 如果窗口不可见（后台检测），且未忽略，则提示
-                    if !self.about_window.visible() {
-                        let (ignored, last_check) =
-                            if let Some(mgr) = &*self.config_manager.borrow() {
-                                (mgr.ignored_version(), mgr.last_check_time())
-                            } else {
-                                (String::new(), 0)
-                            };
+                    if result.has_update {
+                         self.latest_ver_val.set_text(&info.version);
+                         self.start_update_btn.set_enabled(true);
+                         self.ignore_btn.set_enabled(true);
 
-                        let now = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
-                            .as_secs();
+                         // 如果窗口不可见（后台检测），且未忽略，则提示
+                         if !self.about_window.visible() {
+                             let (ignored, last_check) =
+                                 if let Some(mgr) = &*self.config_manager.borrow() {
+                                     (mgr.ignored_version(), mgr.last_check_time())
+                                 } else {
+                                     (String::new(), 0)
+                                 };
 
-                        if info.version != ignored && (now > last_check + 86400) {
-                            #[cfg(target_os = "windows")]
-                            unsafe {
-                                use windows::core::PCWSTR;
-                                use windows::Win32::UI::WindowsAndMessaging::{
-                                    MessageBoxW, IDYES, MB_ICONINFORMATION, MB_YESNO,
-                                };
-                                let title = "发现新版本\0".encode_utf16().collect::<Vec<u16>>();
-                                let msg =
-                                    format!("新版本 {} 已发布！\n是否查看详情？\0", info.version)
-                                        .encode_utf16()
-                                        .collect::<Vec<u16>>();
-                                let ret = MessageBoxW(
-                                    None,
-                                    PCWSTR(msg.as_ptr()),
-                                    PCWSTR(title.as_ptr()),
-                                    MB_YESNO | MB_ICONINFORMATION,
-                                );
+                             let now = std::time::SystemTime::now()
+                                 .duration_since(std::time::UNIX_EPOCH)
+                                 .unwrap()
+                                 .as_secs();
 
-                                // 记录提示时间
-                                if let Some(mgr) = &*self.config_manager.borrow() {
-                                    mgr.set_last_check_time(now);
-                                    mgr.save_or_notify();
-                                }
+                             if info.version != ignored && (now > last_check + 86400) {
+                                 #[cfg(target_os = "windows")]
+                                 unsafe {
+                                     use windows::core::PCWSTR;
+                                     use windows::Win32::UI::WindowsAndMessaging::{
+                                         MessageBoxW, IDYES, MB_ICONINFORMATION, MB_YESNO,
+                                     };
+                                     let title = "发现新版本\0".encode_utf16().collect::<Vec<u16>>();
+                                     let msg =
+                                         format!("新版本 {} 已发布！\n是否查看详情？\0", info.version)
+                                             .encode_utf16()
+                                             .collect::<Vec<u16>>();
+                                     let ret = MessageBoxW(
+                                         None,
+                                         PCWSTR(msg.as_ptr()),
+                                         PCWSTR(title.as_ptr()),
+                                         MB_YESNO | MB_ICONINFORMATION,
+                                     );
 
-                                if ret == IDYES {
-                                    self.show_update_window();
-                                }
-                            }
-                        }
+                                     // 记录提示时间
+                                     if let Some(mgr) = &*self.config_manager.borrow() {
+                                         mgr.set_last_check_time(now);
+                                         mgr.save_or_notify();
+                                     }
+
+                                     if ret == IDYES {
+                                         self.show_update_window();
+                                     }
+                                 }
+                             }
+                         }
+                    } else {
+                        self.latest_ver_val.set_text(&format!("{} (当前已是最新)", info.version));
+                        self.start_update_btn.set_enabled(false);
+                        self.ignore_btn.set_enabled(false);
                     }
-                }
-                Ok(None) => {
-                    self.latest_ver_val.set_text("当前已是最新");
-                    self.ignore_btn.set_enabled(false);
                 }
                 Err(e) => {
                     self.latest_ver_val.set_text("检测失败");

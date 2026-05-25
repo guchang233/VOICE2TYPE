@@ -155,7 +155,7 @@ pub fn write_log_line(s: &str, config: Option<&crate::config::ConfigManager>) {
 
 /// 设置日志启用状态
 #[cfg(target_os = "windows")]
-pub fn log_set_enabled(enabled: bool, config: Option<&crate::config::ConfigManager>) {
+pub fn log_set_enabled(enabled: bool, _config: Option<&crate::config::ConfigManager>) {
     if enabled {
         crate::LOG_MENU_NEEDS_UNCHECK.store(false, std::sync::atomic::Ordering::SeqCst);
         if LOG_PIPE_HANDLE.lock().unwrap().is_none() {

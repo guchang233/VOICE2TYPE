@@ -169,6 +169,7 @@ impl LocalWhisper {
         fs::write(&wav_path, wav_data).context("写入临时 WAV 失败")?;
 
         let mut cmd = Command::new(&exe);
+        cmd.stdin(std::process::Stdio::null());
         #[cfg(target_os = "windows")]
         {
             use std::os::windows::process::CommandExt;
