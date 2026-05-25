@@ -104,16 +104,19 @@ pub fn release_app_mutex() {
 pub fn start_interpreter(config: Arc<ConfigManager>) {
     let config_clone = config.clone();
     std::thread::spawn(move || {
+        crate::utils::logger::write_log_line("[字幕] start_interpreter 线程已启动", None);
         match interpreter::InterpreterEngine::start(config_clone.clone()) {
             Ok(engine) => {
                 let mut guard = INTERPRETER.lock().unwrap();
                 *guard = Some(engine);
                 notify::queue_tray_message("实时字幕", "实时字幕已启动");
+                crate::utils::logger::write_log_line("[字幕] 实时字幕引擎启动成功", None);
                 config_clone.set_interpreter_enabled(true);
                 config_clone.save_or_notify();
             }
             Err(e) => {
                 notify::queue_tray_message("启动失败", &format!("实时字幕启动失败: {}", e));
+                crate::utils::logger::write_log(crate::utils::logger::LogLevel::ERROR, &format!("[字幕] 实时字幕引擎启动失败: {}", e), None);
             }
         }
     });

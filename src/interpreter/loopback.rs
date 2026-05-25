@@ -12,6 +12,9 @@ use windows::{
     Win32::System::Com::*,
 };
 
+#[cfg(target_os = "windows")]
+use crate::utils::logger::{write_log, LogLevel};
+
 const AUDCLNT_STREAMFLAGS_LOOPBACK: u32 = 0x00010000;
 
 pub struct LoopbackCapture {
@@ -30,6 +33,7 @@ pub fn start_loopback_capture(
     thread::spawn(move || {
         if let Err(e) = capture_loop(stop_flag, audio_tx, sample_rate_tx) {
             let _ = error_tx.send(format!("{}", e));
+            write_log(LogLevel::ERROR, &format!("[字幕] 音频捕获失败: {}", e), None);
         }
     })
 }
@@ -59,6 +63,7 @@ fn capture_loop(
         let _block_align = (*format).nBlockAlign;
 
         let _ = sample_rate_tx.send(sample_rate);
+        write_log(LogLevel::INFO, &format!("[字幕] WASAPI 初始化成功: 采样率={}, 声道={}, 位深={}", sample_rate, channels, bits_per_sample), None);
 
         let buffer_duration = 10000000;
         audio_client.Initialize(
@@ -74,6 +79,7 @@ fn capture_loop(
         let capture_client: IAudioCaptureClient = audio_client.GetService()?;
 
         audio_client.Start()?;
+        write_log(LogLevel::INFO, "[字幕] 音频捕获已启动", None);
 
         while !stop_flag.load(Ordering::Relaxed) {
             let packet_size = match capture_client.GetNextPacketSize() {

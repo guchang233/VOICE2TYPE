@@ -1,7 +1,9 @@
 use crate::config::ConfigManager;
+use crate::utils::logger::{write_log, LogLevel};
 
 pub async fn process_chunk(wav_data: Vec<u8>, config: &ConfigManager) -> Option<String> {
     let raw_text = transcribe(&wav_data, config).await?;
+    write_log(LogLevel::INFO, &format!("[字幕] 转写结果: {}", raw_text.trim()), None);
     if raw_text.trim().is_empty() {
         return None;
     }
@@ -22,11 +24,12 @@ pub async fn process_chunk(wav_data: Vec<u8>, config: &ConfigManager) -> Option<
             if translated.trim().is_empty() {
                 Some(raw_text)
             } else {
+                write_log(LogLevel::INFO, &format!("[字幕] 翻译结果: {}", translated.trim()), None);
                 Some(translated)
             }
         }
         Err(e) => {
-            log::warn!("翻译失败，回退显示原文: {}", e);
+            write_log(LogLevel::WARN, &format!("[字幕] 翻译失败，回退显示原文: {}", e), None);
             Some(raw_text)
         }
     }
@@ -43,11 +46,11 @@ async fn transcribe(wav_data: &[u8], config: &ConfigManager) -> Option<String> {
         {
             Ok(Ok(text)) => Some(text),
             Ok(Err(e)) => {
-                log::error!("本地 Whisper 转写失败: {}", e);
+                write_log(LogLevel::ERROR, &format!("[字幕] 本地 Whisper 转写失败: {}", e), None);
                 None
             }
             Err(e) => {
-                log::error!("本地 Whisper 任务异常: {}", e);
+                write_log(LogLevel::ERROR, &format!("[字幕] 本地 Whisper 任务异常: {}", e), None);
                 None
             }
         }
@@ -56,7 +59,7 @@ async fn transcribe(wav_data: &[u8], config: &ConfigManager) -> Option<String> {
         match api_client.process_audio(wav_data.to_vec(), config).await {
             Ok(text) => Some(text),
             Err(e) => {
-                log::error!("API 转写失败: {}", e);
+                write_log(LogLevel::ERROR, &format!("[字幕] API 转写失败: {}", e), None);
                 None
             }
         }

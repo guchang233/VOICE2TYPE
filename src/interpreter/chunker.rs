@@ -1,6 +1,7 @@
 use std::sync::mpsc::Sender;
 
 use crate::audio::processor::{encode_wav_memory, resample_and_convert};
+use crate::utils::logger::{write_log, LogLevel};
 
 const SILENCE_RMS_THRESHOLD: f32 = 0.01;
 const SILENCE_DURATION_MS: u64 = 400;
@@ -83,5 +84,6 @@ fn send_wav_chunk(samples: Vec<f32>, sample_rate: u32, chunk_tx: &Sender<Vec<u8>
     let (processed, new_rate) = resample_and_convert(&samples, sample_rate);
     if let Ok(wav_data) = encode_wav_memory(&processed, new_rate) {
         let _ = chunk_tx.send(wav_data);
+        write_log(LogLevel::DEBUG, &format!("[字幕] 产出音频块: {} 样本, {}Hz", samples.len(), sample_rate), None);
     }
 }

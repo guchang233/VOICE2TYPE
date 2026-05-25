@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::config::ConfigManager;
+use crate::utils::logger::{write_log, write_log_line, LogLevel};
 use chunker::AudioChunker;
 use subtitle_window::SubtitleWindow;
 
@@ -29,6 +30,8 @@ impl InterpreterEngine {
             config.interpreter_subtitle_font_size(),
         );
 
+        write_log_line("[字幕] 正在初始化实时字幕引擎...", None);
+
         let (audio_tx, audio_rx): (std::sync::mpsc::Sender<f32>, std::sync::mpsc::Receiver<f32>) =
             std::sync::mpsc::channel();
 
@@ -48,13 +51,17 @@ impl InterpreterEngine {
             Err(_) => {
                 stop_flag.store(true, Ordering::Relaxed);
                 let _ = capture_handle.join();
+                write_log(LogLevel::ERROR, "[字幕] 音频捕获初始化超时", None);
                 return Err("音频捕获初始化超时".to_string());
             }
         };
 
+        write_log(LogLevel::INFO, &format!("[字幕] 获取采样率: {}", sample_rate), None);
+
         if let Ok(err) = error_rx.try_recv() {
             stop_flag.store(true, Ordering::Relaxed);
             let _ = capture_handle.join();
+            write_log(LogLevel::ERROR, &format!("[字幕] 音频捕获错误: {}", err), None);
             return Err(format!("音频捕获失败: {}", err));
         }
 
@@ -87,6 +94,8 @@ impl InterpreterEngine {
                 }
             }
         });
+
+        write_log_line("[字幕] 音频分块线程已启动", None);
 
         let pipeline_stop = stop_flag.clone();
         let pipeline_config = config.clone();
@@ -121,6 +130,8 @@ impl InterpreterEngine {
             });
         });
 
+        write_log_line("[字幕] 翻译管道线程已启动", None);
+
         Ok(Self {
             stop_flag,
             subtitle_window,
@@ -131,6 +142,7 @@ impl InterpreterEngine {
     }
 
     pub fn stop(&mut self) {
+        write_log_line("[字幕] 正在停止实时字幕引擎...", None);
         self.stop_flag.store(true, Ordering::Relaxed);
         self.subtitle_window.hide();
 
