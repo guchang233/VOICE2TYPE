@@ -57,25 +57,52 @@ fn capture_loop(
         let format_ptr = audio_client.GetMixFormat()?;
         let format = &*format_ptr;
 
+        let format_tag = (*format).wFormatTag;
         let sample_rate = (*format).nSamplesPerSec;
         let channels = (*format).nChannels as u32;
         let bits_per_sample = (*format).wBitsPerSample;
-        let _block_align = (*format).nBlockAlign;
 
         let _ = sample_rate_tx.send(sample_rate);
-        write_log(LogLevel::INFO, &format!("[字幕] WASAPI 初始化成功: 采样率={}, 声道={}, 位深={}", sample_rate, channels, bits_per_sample), None);
+        write_log(LogLevel::INFO, &format!("[字幕] WASAPI mix format: 采样率={}, 声道={}, 位深={}, wFormatTag={}", sample_rate, channels, bits_per_sample, format_tag), None);
 
-        let buffer_duration = 10000000;
-        audio_client.Initialize(
+        let simple_format = WAVEFORMATEX {
+            wFormatTag: if bits_per_sample == 32 { 3 } else { 1 },
+            nChannels: channels as u16,
+            nSamplesPerSec: sample_rate,
+            nAvgBytesPerSec: sample_rate * (channels * bits_per_sample as u32 / 8),
+            nBlockAlign: (channels * bits_per_sample as u32 / 8) as u16,
+            wBitsPerSample: bits_per_sample,
+            cbSize: 0,
+        };
+
+        let sf_tag = simple_format.wFormatTag;
+        let sf_ch = simple_format.nChannels;
+        let sf_sr = simple_format.nSamplesPerSec;
+        let sf_bps = simple_format.wBitsPerSample;
+        write_log(LogLevel::INFO, &format!("[字幕] 使用简化格式: wFormatTag={}, nChannels={}, nSamplesPerSec={}, wBitsPerSample={}", sf_tag, sf_ch, sf_sr, sf_bps), None);
+
+        let buffer_duration = 10000000i64;
+        let init_result = audio_client.Initialize(
             AUDCLNT_SHAREMODE_SHARED,
             AUDCLNT_STREAMFLAGS_LOOPBACK,
             buffer_duration,
             0,
-            format_ptr,
+            &simple_format as *const WAVEFORMATEX,
             None,
-        )?;
+        );
 
-        let _render_client: IAudioRenderClient = audio_client.GetService()?;
+        if let Err(e) = init_result {
+            write_log(LogLevel::WARN, &format!("[字幕] 简化格式初始化失败: {}, 尝试使用原始 mix format...", e), None);
+            audio_client.Initialize(
+                AUDCLNT_SHAREMODE_SHARED,
+                AUDCLNT_STREAMFLAGS_LOOPBACK,
+                buffer_duration,
+                0,
+                format_ptr,
+                None,
+            )?;
+        }
+
         let capture_client: IAudioCaptureClient = audio_client.GetService()?;
 
         audio_client.Start()?;
