@@ -331,17 +331,25 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
         return;
     }
 
-    let w = state.current_width as i32;
-    let h = state.height;
+    // Modern Fluent UI / macOS design: Beautiful physical ambient drop shadow
+    let padding_shadow = 16.0f32;
+    let capsule_w = state.current_width;
+    let capsule_h = state.height as f32; // 40.0
 
-    // Center the layered window dynamically horizontally on the screen as it stretches (Apple Dynamic Island style)
+    // Define the expanded window width and height to draw soft elegant shadows
+    let w = (capsule_w + padding_shadow * 2.0) as i32;
+    let h = (capsule_h + padding_shadow * 2.0) as i32;
+
+    // Center the custom capsule dynamically on the screen, accounts for the outer shadow margin
     let screen_width = GetSystemMetrics(SM_CXSCREEN);
-    let x_pos = (screen_width - w) / 2;
+    let x_pos = ((screen_width as f32 - capsule_w) / 2.0 - padding_shadow) as i32;
+    let y_pos = (60.0 - padding_shadow) as i32; // Floating dynamic-island offset
+
     let _ = SetWindowPos(
         hwnd,
         HWND(0),
         x_pos,
-        60, // Elegant top offset
+        y_pos,
         w,
         h,
         SWP_NOZORDER | SWP_NOACTIVATE,
@@ -350,12 +358,12 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
     let hdc_screen = GetDC(None);
     let hdc_mem = CreateCompatibleDC(hdc_screen);
 
-    // Create 32-bit DIB
+    // Create 32-bit DIB for ultra-smooth rendering with individual pixel alpha support
     let bmi = BITMAPINFO {
         bmiHeader: BITMAPINFOHEADER {
             biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
             biWidth: w,
-            biHeight: -h, // Top-down
+            biHeight: -h, // Top-down coordinate space
             biPlanes: 1,
             biBitCount: 32,
             biCompression: BI_RGB.0,
@@ -368,35 +376,27 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
     let hbitmap = CreateDIBSection(hdc_mem, &bmi, DIB_RGB_COLORS, &mut p_bits, None, 0).unwrap();
     let old_bitmap = SelectObject(hdc_mem, hbitmap);
 
-    // Cast bits to slice
+    // Cast raw bits to a mutable Rust slice
     let pixels = std::slice::from_raw_parts_mut(p_bits as *mut u32, (w * h) as usize);
 
-    // Clear to transparent
+    // Set all initial pixels to zero (fully transparent canvas)
     for p in pixels.iter_mut() {
         *p = 0;
     }
 
-    // Constants (Strict Apple Design Guidelines: Full Pill Capsule shape)
-    let radius = h as f32 / 2.0; // 20px - perfectly rounded pill capsule rounded corners
-    let padding = 18.0; // Compact elegant interior margins
-    let dot_radius = 4.0; // 8px diameter precise micro dot
-    let dot_x = padding + dot_radius;
-    let dot_y = h as f32 / 2.0;
-
-    // Background Color: Apple high-contrast deep black with subtle opacity
-    let bg_alpha = 232u32; // 91% opacity for ultra premium frosted presence
-
-    // Compute dynamic dark color wave components outside the double loop for high-speed performance
+    // Core layout calculations
+    let radius = capsule_h / 2.0; // Perfect pill-shape capsule radius (20px)
     let c_t = state.pulse_time;
-    
+
+    // Compute fluid background mesh colors mimicking modern Windows 11/macOS dark translucent materials
     let sin_1 = (c_t * 1.2).sin();
     let cos_1 = (c_t * 0.5).cos();
     let r1 = 10.0 + sin_1 * 12.0 + cos_1 * 6.0;
-    
+
     let cos_2 = (c_t * 0.8).cos();
     let sin_2 = (c_t * 1.5).sin();
     let g1 = 10.0 + cos_2 * 8.0 + sin_2 * 4.0;
-    
+
     let sin_3 = (c_t * 0.9).sin();
     let cos_3 = (c_t * 1.1).cos();
     let b1 = 11.0 + sin_3 * 16.0 + cos_3 * 8.0;
@@ -406,7 +406,7 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
     let r2 = 10.0 + sin_4 * 8.0 + cos_4 * 8.0;
 
     let cos_5 = (c_t * 1.1 + 1.0).cos();
-    let g2 = 12.0 + cos_5 * 105.0 * 0.1;
+    let g2 = 12.0 + cos_5 * 10.5;
 
     let sin_5 = (c_t * 0.5 + 3.0).sin();
     let b2 = 14.0 + sin_5 * 18.0;
@@ -423,7 +423,7 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
     let bg2 = (g2 + blend_g * 0.04).min(255.0) as u32;
     let bb2 = (b2 + blend_b * 0.04).min(255.0) as u32;
 
-    // Draw Background (Rounded Rect with Fine macOS Metal Border definition)
+    // Phase 1: Draw Capsule Background & Specular Glass Outlines + Soft Drop Shadows
     for y in 0..h {
         for x in 0..w {
             let idx = (y * w + x) as usize;
@@ -433,51 +433,86 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
             let px = (x as f32 - cx).abs();
             let py = (y as f32 - cy).abs();
 
-            let qw = cx - radius;
-            let qh = cy - radius;
+            let qw = (capsule_w / 2.0) - radius;
+            let qh = (capsule_h / 2.0) - radius;
 
             let dx = (px - qw).max(0.0);
             let dy = (py - qh).max(0.0);
             let dist = (dx * dx + dy * dy).sqrt();
 
-            let alpha_f = (radius - dist + 0.5).clamp(0.0, 1.0);
+            if dist <= radius {
+                // Inside the core pill shape: Render premium glass acrylic backdrop
+                let alpha_f = (radius - dist + 0.5).clamp(0.0, 1.0);
 
-            if alpha_f > 0.0 {
-                // Apply a hairline thin high-contrast border matching charcoal macOS windows
-                let is_inner_border = dist >= radius - 1.2 && dist <= radius;
-                
                 let u = x as f32 / w as f32;
-                let br = (br1 as f32 + u * (br2 as f32 - br1 as f32)) as u32;
-                let bg = (bg1 as f32 + u * (bg2 as f32 - bg1 as f32)) as u32;
-                let bb = (bb1 as f32 + u * (bb2 as f32 - bb1 as f32)) as u32;
+                let mut br = (br1 as f32 + u * (br2 as f32 - br1 as f32)) as u32;
+                let mut bg = (bg1 as f32 + u * (bg2 as f32 - bg1 as f32)) as u32;
+                let mut bb = (bb1 as f32 + u * (bb2 as f32 - bb1 as f32)) as u32;
 
-                let (br, bg, bb) = if is_inner_border {
-                    ((br + 42).min(255), (bg + 42).min(255), (bb + 44).min(255))
+                // Ultra-dense high frequency integer noise grain for textured frosted glassmorphism material
+                let state_num = (x ^ (y * 57) ^ ((c_t * 22.0) as i32 * 101)) as u32;
+                let mut rand = state_num.wrapping_mul(1103515245).wrapping_add(12345);
+                rand = (rand / 65536) % 32768;
+                let grain_alpha = (rand as f32 / 32768.0 - 0.5) * 4.2; // subtle tactile texturing
+
+                br = (br as f32 + grain_alpha).clamp(0.0, 255.0) as u32;
+                bg = (bg as f32 + grain_alpha).clamp(0.0, 255.0) as u32;
+                bb = (bb as f32 + grain_alpha + 1.5).clamp(0.0, 255.0) as u32;
+
+                // Double-layered specular glass outline: brighter top-source highlights, darker shadow-source bottoms
+                let is_inner_border = dist >= radius - 1.2 && dist <= radius;
+                let (r_pixel, g_pixel, b_pixel) = if is_inner_border {
+                    let edge_highlight = (1.0 - (y as f32 / h as f32)) * 58.0 + 12.0; // top light specular reflection
+                    let r_border = (br as f32 + edge_highlight).clamp(0.0, 255.0) as u32;
+                    let g_border = (bg as f32 + edge_highlight).clamp(0.0, 255.0) as u32;
+                    let b_border = (bb as f32 + edge_highlight + 6.0).clamp(0.0, 255.0) as u32; // crisp cold light blue-tint highlight
+                    (r_border, g_border, b_border)
                 } else {
                     (br, bg, bb)
                 };
 
+                // Acrylic high-contrast deep black with premium opacity
+                let bg_alpha = 232u32; 
                 let pixel_alpha = (alpha_f * bg_alpha as f32) as u32;
-                
-                // Pre-multiplied alpha values
-                let premult_r = (br * pixel_alpha) / 255;
-                let premult_g = (bg * pixel_alpha) / 255;
-                let premult_b = (bb * pixel_alpha) / 255;
+
+                let premult_r = (r_pixel * pixel_alpha) / 255;
+                let premult_g = (g_pixel * pixel_alpha) / 255;
+                let premult_b = (b_pixel * pixel_alpha) / 255;
 
                 pixels[idx] = (pixel_alpha << 24) | (premult_r << 16) | (premult_g << 8) | premult_b;
+            } else {
+                // Soft physically-modeled Gaussian shadow falloff in outer padded area
+                let shadow_dist = dist - radius;
+                if shadow_dist < padding_shadow {
+                    let decay = (1.0 - shadow_dist / padding_shadow).powf(2.4);
+                    let shadow_opacity = 0.48 * decay * state.current_alpha;
+                    let final_shadow_alpha = (shadow_opacity * 255.0).clamp(0.0, 255.0) as u32;
+
+                    if final_shadow_alpha > 0 {
+                        // Jet black with a highly subtle deep indigo tint to absorb desktop lights
+                        let sr = 0u32;
+                        let sg = 0u32;
+                        let sb = 3u32;
+
+                        let premult_r = (sr * final_shadow_alpha) / 255;
+                        let premult_g = (sg * final_shadow_alpha) / 255;
+                        let premult_b = (sb * final_shadow_alpha) / 255;
+
+                        pixels[idx] = (final_shadow_alpha << 24) | (premult_r << 16) | (premult_g << 8) | premult_b;
+                    }
+                }
             }
         }
     }
 
-    // --- Procedural Dynamic Vector Icons with Subpixel Antialiasing ---
-    // Shake vibration to icon_cx for high-end mechanical feel under user feedback
+    // Phase 2: Procedural Vector Icons with Subpixel Antialiasing and State Color Drifts
     let shake_offset = if state.target_state == IndicatorState::Error {
         let elapsed_ms = state.state_start_time.elapsed().as_millis();
         if elapsed_ms < 300 {
-            let freq = 0.15f32; // Fast energetic frequency
-            let amplitude = 4.5f32; // 4.5px total maximum horizontal jitter
+            let freq = 0.15f32;
+            let amplitude = 4.5f32;
             let t_damp = elapsed_ms as f32 / 300.0;
-            let damp = (1.0 - t_damp).powi(2); // Dampen down quadratically
+            let damp = (1.0 - t_damp).powi(2);
             ((elapsed_ms as f32 * freq).sin() * amplitude * damp)
         } else {
             0.0
@@ -485,8 +520,10 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
     } else {
          0.0
     };
-    let icon_cx = 22.0f32 + shake_offset;
+
+    let icon_cx = padding_shadow + 22.0f32 + shake_offset;
     let icon_cy = h as f32 / 2.0;
+
     let dot_color = state.current_color;
     let dr = (dot_color >> 16) & 0xFF;
     let dg = (dot_color >> 8) & 0xFF;
@@ -496,14 +533,12 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
     let elapsed_ms = state.state_start_time.elapsed().as_millis();
     let is_pulsing = state.target_state == IndicatorState::Recording || state.target_state == IndicatorState::Processing;
 
-    // Pulse wave intensity matching the oscillator format
     let pulse_intensity = if is_pulsing {
         (pulse_time.sin() + 1.0) / 2.0
     } else {
         0.0
     };
 
-    // Soft surrounding glow halo matching active tasks
     let halo_max_r = 13.0f32;
     let halo_min_r = 7.0f32;
     let halo_r = halo_min_r + pulse_intensity * (halo_max_r - halo_min_r);
@@ -513,7 +548,7 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
         0
     };
 
-    // Unified Procedural Shape Evaluator
+    // Unified procedural shape vectors
     let get_icon_alpha = |x: f32, y: f32| -> f32 {
         let dx = x - icon_cx;
         let dy = y - icon_cy;
@@ -522,7 +557,6 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
         match &state.target_state {
             IndicatorState::Hidden => 0.0,
             IndicatorState::Recording => {
-                // Hyper-premium Siri/Copilot style 5-bar voice spectrum live equalizer visualizer
                 let t = pulse_time;
                 let h0 = 4.0 + 5.0 * (t * 3.0 + 0.5).sin().abs();
                 let h1 = 5.0 + 10.0 * (t * 4.2 + 1.2).sin().abs();
@@ -552,7 +586,6 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
                 a0.max(a1).max(a2).max(a3).max(a4)
             }
             IndicatorState::Processing => {
-                // Hyper-premium orbital double-swept swirling light trails (Apple Neural Engine style triple comet swirling loop)
                 let r_ring = 6.2;
                 let t_ring = 1.8;
                 let ring_dist = (dist - r_ring).abs();
@@ -562,22 +595,19 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
                 }
 
                 let angle = dy.atan2(dx);
-                // Map to 0..2PI
                 let angle = if angle < 0.0 { angle + 2.0 * std::f32::consts::PI } else { angle };
 
-                // Swirling speed
                 let rot = pulse_time * 3.5;
 
-                // Helper to compute tail intensity for a comet head angle moving clockwise
                 let get_comet_intensity = |head_angle: f32| -> f32 {
                     let mut tail_dist = head_angle - angle;
                     while tail_dist < 0.0 { tail_dist += 2.0 * std::f32::consts::PI; }
                     let tail_dist = tail_dist % (2.0 * std::f32::consts::PI);
 
-                    let max_tail = 1.6; // approx 90 degrees trail length
+                    let max_tail = 1.6;
                     if tail_dist < max_tail {
                         let f = tail_dist / max_tail;
-                        (1.0 - f).powf(1.8) // Exponential fade
+                        (1.0 - f).powf(1.8)
                     } else {
                         0.0
                     }
@@ -594,7 +624,6 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
                 ring_alpha * i1.max(i2).max(i3)
             }
             IndicatorState::Success => {
-                // Elegant checkmark rendering with an animated writing effect + expanding sonic ripple
                 let t_prog = (elapsed_ms as f32 / 300.0).clamp(0.0, 1.0);
 
                 let p0 = (icon_cx - 5.0, icon_cy + 0.5);
@@ -633,14 +662,12 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
                     a1.max(a2)
                 };
 
-                // Add an expanding shockwave ripple (Apple Pay style feedback)
                 let ripple_alpha = {
                     let ripple_duration = 500.0f32;
                     let t_ripple = (elapsed_ms as f32 / ripple_duration).clamp(0.0, 1.0);
                     let ripple_max_r = 18.0f32;
                     let ripple_r = 4.0 + t_ripple * ripple_max_r;
                     let dist_to_ripple = (dist - ripple_r).abs();
-                    // Sharp micro-edge boundary wave
                     let thickness = 1.0f32;
                     let alpha_profile = (thickness / 2.0 - dist_to_ripple + 0.5).clamp(0.0, 1.0);
                     let fade = (1.0 - t_ripple).powi(2);
@@ -650,7 +677,6 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
                 check_alpha.max(ripple_alpha)
             }
             IndicatorState::Error => {
-                // Cross mark with sequential branch drawing animations + explosive feedback ripple
                 let t_prog = (elapsed_ms as f32 / 250.0).clamp(0.0, 1.0);
 
                 let p1a = (icon_cx - 4.5, icon_cy - 4.5);
@@ -690,7 +716,6 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
                     a1.max(a2)
                 };
 
-                // Add an explosive warning shockwave ripple
                 let ripple_alpha = {
                     let t_ripple = (elapsed_ms as f32 / 550.0).clamp(0.0, 1.0);
                     let ripple_max_r = 20.0f32;
@@ -705,7 +730,6 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
                 cross_alpha.max(ripple_alpha)
             }
             IndicatorState::Cancelled => {
-                // Cancelled minus dash drawing animation with elastic slow-down rotation (spins 270 degrees into horizontal focus)
                 let t_prog = (elapsed_ms as f32 / 350.0).clamp(0.0, 1.0);
                 
                 let t_inv = 1.0 - t_prog;
@@ -714,7 +738,7 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
                 let dx_rot = dx * angle.cos() + dy * angle.sin();
                 let dy_rot = -dx * angle.sin() + dy * angle.cos();
 
-                let cur_len = -5.0 + t_prog * 10.0; // Line writes horizontally while spinning for liquid flow effect
+                let cur_len = -5.0 + t_prog * 10.0;
                 let segment_dist = if dx_rot <= -5.0 {
                     ((dx_rot + 5.0).powi(2) + dy_rot.powi(2)).sqrt()
                 } else if dx_rot >= cur_len {
@@ -729,20 +753,19 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
         }
     };
 
+    // Paint dynamic icon pixels with color drills
     for y in 0..h {
         for x in 0..w {
             let dx = x as f32 - icon_cx;
             let dy = y as f32 - icon_cy;
             let dist = (dx * dx + dy * dy).sqrt();
 
-            // Evaluate procedural custom icon body alpha (expanded range to allow shockwave display up to 24.0px radius)
             let icon_alpha_f = if dist <= 24.0 {
                 get_icon_alpha(x as f32, y as f32)
             } else {
                 0.0
             };
 
-            // Evaluate soft atmospheric halo glow around active state icons
             let halo_alpha_f = if is_pulsing && dist > 5.0 && dist <= halo_r {
                 let d_factor = (halo_r - dist) / (halo_r - 5.0);
                 d_factor.clamp(0.0, 1.0) * (halo_alpha_base as f32 / 255.0)
@@ -755,14 +778,40 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
                 let bg_val = pixels[idx];
                 let bg_a = (bg_val >> 24) & 0xFF;
 
-                let dot_alpha = 235u32; // Crisp vivid foreground icon body opacity
+                let dot_alpha = 235u32;
                 let effective_alpha = (icon_alpha_f * (dot_alpha as f32 / 255.0)) + (1.0 - icon_alpha_f) * halo_alpha_f;
                 let final_a = (effective_alpha * 255.0).clamp(0.0, 255.0) as u32;
 
                 if final_a > 0 {
-                    let r = (dr * final_a) / 255;
-                    let g = (dg * final_a) / 255;
-                    let b = (db * final_a) / 255;
+                    // Modern design color drift: Siri emerald to cyan wave, processes rotating fire-gold or success deep blue-purple gradient
+                    let (cur_dr, cur_dg, cur_db) = match &state.target_state {
+                        IndicatorState::Recording => {
+                            let color_shift = (x as f32 - icon_cx) / 10.0;
+                            let r_shift = (dr as f32 - color_shift * 35.0).clamp(0.0, 255.0) as u32;
+                            let g_shift = (dg as f32 + 10.0).clamp(0.0, 255.0) as u32;
+                            let b_shift = (db as f32 + (1.0 - color_shift.abs()) * 60.0 + (if color_shift < 0.0 { -color_shift * 120.0 } else { 0.0 })).clamp(0.0, 255.0) as u32;
+                            (r_shift, g_shift, b_shift)
+                        }
+                        IndicatorState::Processing => {
+                            let shift = (dy.atan2(dx) + pulse_time * 2.0).sin();
+                            let r_shift = 255u32;
+                            let g_shift = (130.0 + shift * 35.0).clamp(0.0, 255.0) as u32;
+                            let b_shift = (shift * 20.0 + 20.0).clamp(0.0, 255.0) as u32;
+                            (r_shift, g_shift, b_shift)
+                        }
+                        IndicatorState::Success => {
+                            let shift = (dx + dy) / 12.0;
+                            let r_shift = (40.0 + shift * 40.0).clamp(0.0, 255.0) as u32;
+                            let g_shift = (110.0 - shift * 20.0).clamp(0.0, 255.0) as u32;
+                            let b_shift = 255u32;
+                            (r_shift, g_shift, b_shift)
+                        }
+                        _ => (dr, dg, db),
+                    };
+
+                    let r = (cur_dr * final_a) / 255;
+                    let g = (cur_dg * final_a) / 255;
+                    let b = (cur_db * final_a) / 255;
 
                     let src_a_f = final_a as f32 / 255.0;
                     let blend_r = r + (((bg_val >> 16) & 0xFF) as f32 * (1.0 - src_a_f)) as u32;
@@ -776,17 +825,17 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
         }
     }
 
-    // Draw Smooth Text using Windows Cleartype GDI
+    // Phase 3: Text Alignment and CleatType Rendering
     SetBkMode(hdc_mem, TRANSPARENT);
-    SetTextColor(hdc_mem, COLORREF(0x00FFFFFF)); // Bright white text
+    SetTextColor(hdc_mem, COLORREF(0x00FFFFFF)); // absolute white typography
 
-    let font_height = 16; // Perfectly sized SF-Pro style display font height
+    let font_height = 16;
     let font = CreateFontW(
         -font_height,
         0,
         0,
         0,
-        FW_SEMIBOLD.0 as i32, // Elegant Apple Typography (Medium/SemiBold weight)
+        FW_SEMIBOLD.0 as i32, // elegant medium-semibold weight
         0,
         0,
         0,
@@ -795,15 +844,16 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
         CLIP_DEFAULT_PRECIS.0 as u32,
         CLEARTYPE_QUALITY.0 as u32,
         DEFAULT_PITCH.0 as u32,
-        w!("Microsoft YaHei UI"), // Adaptable fallback with best clear-type GDI rendering in China UI Windows environments
+        w!("Segoe UI Variable Text"), // Fluent Windows 11 system font
     );
     let old_font = SelectObject(hdc_mem, font);
 
+    let padding_shadow_i = padding_shadow as i32;
     let mut text_rect = RECT {
-        left: 40,
-        top: 0,
-        right: w,
-        bottom: h,
+        left: padding_shadow_i + 40,
+        top: padding_shadow_i,
+        right: w - padding_shadow_i,
+        bottom: h - padding_shadow_i,
     };
 
     let mut text_wide: Vec<u16> = state.text.encode_utf16().chain(Some(0)).collect();
@@ -814,7 +864,7 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
         DT_VCENTER | DT_SINGLELINE,
     );
 
-    // Alpha channel fix for smooth font rendering
+    // Dynamic Alpha Channel Fix for GDI Subpixel Font anti-aliasing details
     for y in text_rect.top..text_rect.bottom {
         for x in text_rect.left..text_rect.right {
             if x >= 0 && x < w && y >= 0 && y < h {
@@ -839,11 +889,10 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
     SelectObject(hdc_mem, old_font);
     DeleteObject(font);
 
-    // Final Update
+    // Phase 4: Sync rendering update of Layered Window
     let pt_src = POINT { x: 0, y: 0 };
     let size = SIZE { cx: w, cy: h };
 
-    // Global alpha for fade-in/out animation
     let global_alpha = (state.current_alpha * 255.0) as u8;
 
     let blend = BLENDFUNCTION {
