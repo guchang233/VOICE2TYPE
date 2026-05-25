@@ -141,6 +141,36 @@ impl Default for IndicatorConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+pub struct InterpreterConfig {
+    pub enabled: bool,
+    pub target_language: String,
+    pub source_language: String,
+    pub subtitle_font_size: u32,
+    pub subtitle_opacity: f32,
+    pub subtitle_position: String,
+    pub subtitle_click_through: bool,
+    pub use_translation: bool,
+    pub chunk_ms: u64,
+}
+
+impl Default for InterpreterConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            target_language: "zh".to_string(),
+            source_language: "auto".to_string(),
+            subtitle_font_size: 22,
+            subtitle_opacity: 0.85,
+            subtitle_position: "bottom".to_string(),
+            subtitle_click_through: true,
+            use_translation: true,
+            chunk_ms: 3000,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AppConfig {
     pub basic: BasicConfig,
     pub features: FeatureConfig,
@@ -148,6 +178,7 @@ pub struct AppConfig {
     pub update: UpdateConfig,
     pub model: ModelConfig,
     pub indicator: IndicatorConfig,
+    pub interpreter: InterpreterConfig,
 
     // 旧版平铺字段，读取后会迁移到上面的分组结构。
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -201,6 +232,7 @@ impl Default for AppConfig {
             update: UpdateConfig::default(),
             model: ModelConfig::default(),
             indicator: IndicatorConfig::default(),
+            interpreter: InterpreterConfig::default(),
             model_name: None,
             output_language: None,
             output_mode: None,
@@ -605,12 +637,85 @@ impl ConfigManager {
         self.config.lock().unwrap().indicator.success_duration = duration;
     }
 
+    pub fn interpreter_enabled(&self) -> bool {
+        self.config.lock().unwrap().interpreter.enabled
+    }
+
+    pub fn set_interpreter_enabled(&self, enabled: bool) {
+        self.config.lock().unwrap().interpreter.enabled = enabled;
+    }
+
+    pub fn interpreter_target_language(&self) -> String {
+        self.config.lock().unwrap().interpreter.target_language.clone()
+    }
+
+    pub fn set_interpreter_target_language(&self, lang: String) {
+        self.config.lock().unwrap().interpreter.target_language = lang;
+    }
+
+    pub fn interpreter_source_language(&self) -> String {
+        self.config.lock().unwrap().interpreter.source_language.clone()
+    }
+
+    pub fn set_interpreter_source_language(&self, lang: String) {
+        self.config.lock().unwrap().interpreter.source_language = lang;
+    }
+
+    pub fn interpreter_subtitle_font_size(&self) -> u32 {
+        self.config.lock().unwrap().interpreter.subtitle_font_size
+    }
+
+    pub fn set_interpreter_subtitle_font_size(&self, size: u32) {
+        self.config.lock().unwrap().interpreter.subtitle_font_size = size;
+    }
+
+    pub fn interpreter_subtitle_opacity(&self) -> f32 {
+        self.config.lock().unwrap().interpreter.subtitle_opacity
+    }
+
+    pub fn set_interpreter_subtitle_opacity(&self, opacity: f32) {
+        self.config.lock().unwrap().interpreter.subtitle_opacity = opacity;
+    }
+
+    pub fn interpreter_subtitle_position(&self) -> String {
+        self.config.lock().unwrap().interpreter.subtitle_position.clone()
+    }
+
+    pub fn set_interpreter_subtitle_position(&self, pos: String) {
+        self.config.lock().unwrap().interpreter.subtitle_position = pos;
+    }
+
+    pub fn interpreter_subtitle_click_through(&self) -> bool {
+        self.config.lock().unwrap().interpreter.subtitle_click_through
+    }
+
+    pub fn set_interpreter_subtitle_click_through(&self, click_through: bool) {
+        self.config.lock().unwrap().interpreter.subtitle_click_through = click_through;
+    }
+
+    pub fn interpreter_use_translation(&self) -> bool {
+        self.config.lock().unwrap().interpreter.use_translation
+    }
+
+    pub fn set_interpreter_use_translation(&self, use_translation: bool) {
+        self.config.lock().unwrap().interpreter.use_translation = use_translation;
+    }
+
+    pub fn interpreter_chunk_ms(&self) -> u64 {
+        self.config.lock().unwrap().interpreter.chunk_ms
+    }
+
+    pub fn set_interpreter_chunk_ms(&self, ms: u64) {
+        self.config.lock().unwrap().interpreter.chunk_ms = ms;
+    }
+
     pub fn reset_ai_config(&self) {
         let mut cfg = self.config.lock().unwrap();
         cfg.basic.model_name = MODEL_SENSEVOICE.to_string();
         cfg.model = ModelConfig::default();
         cfg.advanced.trigger_mode = AdvancedConfig::default().trigger_mode;
         cfg.indicator = IndicatorConfig::default();
+        cfg.interpreter = InterpreterConfig::default();
     }
 
     pub fn save(&self) -> anyhow::Result<()> {

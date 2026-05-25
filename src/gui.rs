@@ -65,6 +65,10 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_indicator])]
     pub indicator_item: nwg::MenuItem,
 
+    #[nwg_control(parent: general_menu, text: "实时字幕", check: true)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_subtitle])]
+    pub subtitle_item: nwg::MenuItem,
+
     #[nwg_control(parent: general_menu)]
     pub sep_general: nwg::MenuSeparator,
 
@@ -503,6 +507,9 @@ impl Voice2TypeApp {
         app.indicator_item
             .set_checked(config_manager.enable_indicator());
 
+        app.subtitle_item
+            .set_checked(config_manager.interpreter_enabled());
+
         // 设置触发模式初始状态
         let trigger_mode = config_manager.trigger_mode();
         if trigger_mode == "hold" {
@@ -726,6 +733,26 @@ impl Voice2TypeApp {
                 if let Some(ind) = crate::INDICATOR.get() {
                     ind.set_state(crate::indicator::IndicatorState::Hidden);
                 }
+            }
+        }
+    }
+
+    fn toggle_subtitle(&self) {
+        let new_state = !self.subtitle_item.checked();
+        self.subtitle_item.set_checked(new_state);
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            mgr.set_interpreter_enabled(new_state);
+            mgr.save_or_notify();
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            if new_state {
+                if let Some(mgr) = &*self.config_manager.borrow() {
+                    crate::start_interpreter(mgr.clone());
+                }
+            } else {
+                crate::stop_interpreter();
             }
         }
     }

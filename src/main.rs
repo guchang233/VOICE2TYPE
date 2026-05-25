@@ -12,6 +12,7 @@ mod update;
 mod utils;
 mod whisper_local;
 mod win_utils;
+mod interpreter;
 
 /// 单次录音最长秒数，超出后自动结束并转写。
 const MAX_RECORDING_SECS: u32 = 90;
@@ -63,6 +64,10 @@ static IS_RECORDING: AtomicBool = AtomicBool::new(false);
 static CONFIG_GLOBAL: OnceCell<Arc<ConfigManager>> = OnceCell::new();
 
 #[cfg(target_os = "windows")]
+static INTERPRETER: once_cell::sync::Lazy<std::sync::Mutex<Option<interpreter::InterpreterEngine>>> =
+    once_cell::sync::Lazy::new(|| std::sync::Mutex::new(None));
+
+#[cfg(target_os = "windows")]
 static LOG_MENU_NEEDS_UNCHECK: AtomicBool = AtomicBool::new(false);
 
 #[cfg(target_os = "windows")]
@@ -93,6 +98,38 @@ pub fn release_app_mutex() {
             }
         }
     }
+}
+
+#[cfg(target_os = "windows")]
+pub fn start_interpreter(config: Arc<ConfigManager>) {
+    let config_clone = config.clone();
+    std::thread::spawn(move || {
+        match interpreter::InterpreterEngine::start(config_clone.clone()) {
+            Ok(engine) => {
+                let mut guard = INTERPRETER.lock().unwrap();
+                *guard = Some(engine);
+                notify::queue_tray_message("实时字幕", "实时字幕已启动");
+                config_clone.set_interpreter_enabled(true);
+                config_clone.save_or_notify();
+            }
+            Err(e) => {
+                notify::queue_tray_message("启动失败", &format!("实时字幕启动失败: {}", e));
+            }
+        }
+    });
+}
+
+#[cfg(target_os = "windows")]
+pub fn stop_interpreter() {
+    let mut guard = INTERPRETER.lock().unwrap();
+    if let Some(mut engine) = guard.take() {
+        engine.stop();
+    }
+    if let Some(cfg) = CONFIG_GLOBAL.get() {
+        cfg.set_interpreter_enabled(false);
+        cfg.save_or_notify();
+    }
+    notify::queue_tray_message("实时字幕", "实时字幕已停止");
 }
 
 fn main() -> Result<()> {
