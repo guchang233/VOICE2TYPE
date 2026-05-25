@@ -55,9 +55,13 @@ struct WindowState {
 
     text: String,
 
-    // Layout
+    // Layout (Fluid Dynamic Island Width Transition)
     width: i32,
     height: i32,
+    current_width: f32,
+
+    // Breathing pulse variable for active recording state
+    pulse_time: f32,
 
     // State timing
     state_start_time: std::time::Instant, // 当前状态的开始时间
@@ -121,6 +125,8 @@ unsafe fn create_and_run_window(
         text: String::new(),
         width: initial_width,
         height: initial_height,
+        current_width: initial_width as f32,
+        pulse_time: 0.0,
         state_start_time: std::time::Instant::now(),
         fade_duration,
         error_duration,
@@ -192,38 +198,39 @@ fn update_targets(state: &mut WindowState, new_state: &IndicatorState) {
     match new_state {
         IndicatorState::Hidden => {
             state.target_alpha = 0.0;
-            // Keep color/text same for fade out
+            // Keep color/text and width same for safe fade out
         }
         IndicatorState::Recording => {
             state.target_alpha = 1.0;
-            state.target_color = 0x00FF00; // Green
+            state.target_color = 0x34C759; // Premium iOS Emerald Green
             state.text = "聆听中".to_string();
+            state.width = 170;
         }
         IndicatorState::Processing => {
             state.target_alpha = 1.0;
-            state.target_color = 0xFFD600; // Yellow
+            state.target_color = 0xFF9500; // Premium iOS Vivid Orange
             state.text = "处理中".to_string();
+            state.width = 170;
         }
         IndicatorState::Success => {
             state.target_alpha = 1.0;
-            state.target_color = 0x2196F3; // Blue
+            state.target_color = 0x007AFF; // Premium iOS Royal Blue
             state.text = "已输出".to_string();
+            state.width = 195;
         }
         IndicatorState::Error => {
             state.target_alpha = 1.0;
-            state.target_color = 0xFF0000; // Red
+            state.target_color = 0xFF3B30; // Premium iOS Coral Red
             state.text = "错误".to_string();
+            state.width = 155;
         }
         IndicatorState::Cancelled => {
             state.target_alpha = 1.0;
-            state.target_color = 0xFFD700; // Gold/Yellow
+            state.target_color = 0x8E8E93; // Premium iOS Muted Neutral Gray
             state.text = "已取消".to_string();
+            state.width = 170;
         }
     }
-
-    // Recalculate width based on text
-    // Fixed width for now for stability, or dynamic:
-    // state.width = 160;
 }
 
 #[cfg(target_os = "windows")]
@@ -235,10 +242,32 @@ fn update_animation(state: &mut WindowState) -> bool {
     if alpha_diff.abs() > 0.01 {
         // 基于fade_duration计算平滑因子，确保动画时间符合配置
         let smooth_factor = 16.0 / state.fade_duration as f32 * 10.0;
-        state.current_alpha += alpha_diff * smooth_factor;
+        state.current_alpha += alpha_diff * smooth_factor.min(1.0);
         changed = true;
     } else {
         state.current_alpha = state.target_alpha;
+    }
+
+    // Lerp width (Elastic stretching for Dynamic Island morphing effect)
+    let w_diff = state.width as f32 - state.current_width;
+    if w_diff.abs() > 0.5 {
+        let smooth_factor = 16.0 / state.fade_duration as f32 * 10.0;
+        state.current_width += w_diff * smooth_factor.min(1.0);
+        changed = true;
+    } else {
+        state.current_width = state.width as f32;
+    }
+
+    // Advance breathing oscillator (For glowing indicator dot waves)
+    state.pulse_time += 0.08;
+    if state.pulse_time > 2.0 * std::f32::consts::PI {
+        state.pulse_time -= 2.0 * std::f32::consts::PI;
+    }
+
+    // Force animation frame updates while active recording/processing states are pulsing
+    let is_pulsing = state.target_state == IndicatorState::Recording || state.target_state == IndicatorState::Processing;
+    if is_pulsing && state.current_alpha > 0.01 {
+        changed = true;
     }
 
     // Lerp color
@@ -299,8 +328,21 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
         return;
     }
 
-    let w = state.width;
+    let w = state.current_width as i32;
     let h = state.height;
+
+    // Center the layered window dynamically horizontally on the screen as it stretches (Apple Dynamic Island style)
+    let screen_width = GetSystemMetrics(SM_CXSCREEN);
+    let x_pos = (screen_width - w) / 2;
+    let _ = SetWindowPos(
+        hwnd,
+        HWND(0),
+        x_pos,
+        60, // Elegant top offset
+        w,
+        h,
+        SWP_NOZORDER | SWP_NOACTIVATE,
+    );
 
     let hdc_screen = GetDC(None);
     let hdc_mem = CreateCompatibleDC(hdc_screen);
@@ -327,67 +369,89 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
     let pixels = std::slice::from_raw_parts_mut(p_bits as *mut u32, (w * h) as usize);
 
     // Clear to transparent
-    // pixels.fill(0); // Already zero initialized? Usually yes but safer to fill.
     for p in pixels.iter_mut() {
         *p = 0;
     }
 
-    // Constants
-    let radius = 16.0; // Corner radius
-    let padding = 20.0;
-    let dot_radius = 5.0; // 10px diameter
+    // Constants (Strict Apple Design Guidelines: Full Pill Capsule shape)
+    let radius = h as f32 / 2.0; // 20px - perfectly rounded pill capsule rounded corners
+    let padding = 18.0; // Compact elegant interior margins
+    let dot_radius = 4.0; // 8px diameter precise micro dot
     let dot_x = padding + dot_radius;
     let dot_y = h as f32 / 2.0;
 
-    // Background Color (Black #000000 with some opacity)
-    // User asked for black background. Opacity is not strictly defined for bg, but "semi-transparent" implied?
-    // User: "悬浮窗整体背景色设置为黑色... 指示灯...透明度70-80%... 窗口...淡入淡出"
-    // Let's make the background opaque black for high contrast as requested, but the whole window fades.
-    // Wait, "半透明效果" in technical requirements implies the window itself might be semi-transparent.
-    // Let's use 220 alpha for background to look "modern".
-    let bg_alpha = 220u32;
+    // Background Color: Apple high-contrast deep black with subtle opacity
+    let bg_alpha = 232u32; // 91% opacity for ultra premium frosted presence
 
-    // Draw Background (Rounded Rect)
+    // Draw Background (Rounded Rect with Fine macOS Metal Border definition)
     for y in 0..h {
         for x in 0..w {
             let idx = (y * w + x) as usize;
 
-            // Signed distance to rounded rect
-            // Rect: 0,0, w, h. Radius r.
-            // Symmetry: map x,y to top-left quadrant relative to center
             let cx = w as f32 / 2.0;
             let cy = h as f32 / 2.0;
             let px = (x as f32 - cx).abs();
             let py = (y as f32 - cy).abs();
 
-            let qw = w as f32 / 2.0 - radius;
-            let qh = h as f32 / 2.0 - radius;
+            let qw = cx - radius;
+            let qh = cy - radius;
 
             let dx = (px - qw).max(0.0);
             let dy = (py - qh).max(0.0);
             let dist = (dx * dx + dy * dy).sqrt();
 
-            // Alpha based on distance (Anti-aliasing)
-            // if dist > radius -> outside.
-            // alpha = clamp(radius - dist + 0.5, 0, 1)
             let alpha_f = (radius - dist + 0.5).clamp(0.0, 1.0);
 
             if alpha_f > 0.0 {
+                // Apply a hairline thin high-contrast border matching charcoal macOS windows
+                let is_inner_border = dist >= radius - 1.2 && dist <= radius;
+                
+                let (br, bg, bb) = if is_inner_border {
+                    (52u32, 52u32, 55u32) // Soft silver-metallic edge highlight
+                } else {
+                    (10u32, 10u32, 11u32) // Pure deep charcoal velvet obsidian black
+                };
+
                 let pixel_alpha = (alpha_f * bg_alpha as f32) as u32;
-                // Pre-multiplied alpha (Black is 0,0,0 so just Alpha channel matters)
-                pixels[idx] = pixel_alpha << 24;
+                
+                // Pre-multiplied alpha values
+                let premult_r = (br * pixel_alpha) / 255;
+                let premult_g = (bg * pixel_alpha) / 255;
+                let premult_b = (bb * pixel_alpha) / 255;
+
+                pixels[idx] = (pixel_alpha << 24) | (premult_r << 16) | (premult_g << 8) | premult_b;
             }
         }
     }
 
-    // Draw Indicator Dot
-    // Color: state.current_color
-    // Alpha: 70-80% -> ~190
+    // Dynamic Pulsing Breathing Glow for Indicator Dot (Active state fluid loops)
     let dot_color = state.current_color;
-    let dot_alpha = 190u32;
+    let dot_alpha = 220u32; // Bright vibrant indicator core
     let dr = (dot_color >> 16) & 0xFF;
     let dg = (dot_color >> 8) & 0xFF;
     let db = dot_color & 0xFF;
+
+    let pulse_time = state.pulse_time;
+    let is_pulsing = state.target_state == IndicatorState::Recording || state.target_state == IndicatorState::Processing;
+    
+    // Wave intensity between 0.0 and 1.0 in a standard sine wave format
+    let pulse_intensity = if is_pulsing {
+        (pulse_time.sin() + 1.0) / 2.0
+    } else {
+        0.0
+    };
+
+    // Rescale dot slightly as it pulses
+    let core_r = if is_pulsing {
+        dot_radius - 0.5 + (pulse_intensity * 0.5)
+    } else {
+        dot_radius
+    };
+
+    // Create a larger floating halo glow around the dot (soft ambient lighting)
+    let halo_max_r = dot_radius * 2.2;
+    let halo_r = core_r + (pulse_intensity * (halo_max_r - core_r));
+    let halo_alpha_base = (70.0 * (1.0 - pulse_intensity * 0.45)) as u32; // Naturally fades as it expands
 
     for y in 0..h {
         for x in 0..w {
@@ -395,43 +459,51 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
             let dy = y as f32 - dot_y;
             let dist = (dx * dx + dy * dy).sqrt();
 
-            let alpha_f = (dot_radius - dist + 0.5).clamp(0.0, 1.0);
-            if alpha_f > 0.0 {
+            let core_alpha_f = (core_r - dist + 0.5).clamp(0.0, 1.0);
+            
+            let halo_alpha_f = if is_pulsing && dist > core_r {
+                let d_factor = (halo_r - dist) / (halo_r - core_r);
+                d_factor.clamp(0.0, 1.0) * (halo_alpha_base as f32 / 255.0)
+            } else {
+                0.0
+            };
+
+            if core_alpha_f > 0.0 || halo_alpha_f > 0.0 {
                 let idx = (y * w + x) as usize;
                 let bg_val = pixels[idx];
-                let _bg_a = (bg_val >> 24) & 0xFF;
+                let bg_a = (bg_val >> 24) & 0xFF;
 
-                // Simple blend over black background
-                let final_a = (alpha_f * dot_alpha as f32) as u32;
+                let effective_alpha = (core_alpha_f * (dot_alpha as f32 / 255.0)) + (1.0 - core_alpha_f) * halo_alpha_f;
+                let final_a = (effective_alpha * 255.0).clamp(0.0, 255.0) as u32;
 
-                // Premultiply
-                let r = (dr * final_a) / 255;
-                let g = (dg * final_a) / 255;
-                let b = (db * final_a) / 255;
+                if final_a > 0 {
+                    let r = (dr * final_a) / 255;
+                    let g = (dg * final_a) / 255;
+                    let b = (db * final_a) / 255;
 
-                // Composite over existing background (Painter's algorithm)
-                // Src: (r,g,b, final_a), Dst: (0,0,0, bg_a)
-                // OutA = SrcA + DstA * (1 - SrcA)
-                // OutC = SrcC + DstC * (1 - SrcA)
+                    let src_a_f = final_a as f32 / 255.0;
+                    let blend_r = r + (((bg_val >> 16) & 0xFF) as f32 * (1.0 - src_a_f)) as u32;
+                    let blend_g = g + (((bg_val >> 8) & 0xFF) as f32 * (1.0 - src_a_f)) as u32;
+                    let blend_b = b + (((bg_val) & 0xFF) as f32 * (1.0 - src_a_f)) as u32;
+                    let blend_a = (final_a as f32 + bg_a as f32 * (1.0 - src_a_f)) as u32;
 
-                // Simplified: just set it since dot is on top and opaque-ish
-                pixels[idx] = (final_a << 24) | (r << 16) | (g << 8) | b;
+                    pixels[idx] = (blend_a << 24) | (blend_r << 16) | (blend_g << 8) | blend_b;
+                }
             }
         }
     }
 
-    // Draw Text using GDI
-    // We draw to the DC, then fix up alpha
+    // Draw Smooth Text using Windows Cleartype GDI
     SetBkMode(hdc_mem, TRANSPARENT);
-    SetTextColor(hdc_mem, COLORREF(0x00FFFFFF)); // White
+    SetTextColor(hdc_mem, COLORREF(0x00FFFFFF)); // Bright white text
 
-    let font_height = 18; // 14pt approx
+    let font_height = 16; // Perfectly sized SF-Pro style display font height
     let font = CreateFontW(
         -font_height,
         0,
         0,
         0,
-        FW_BOLD.0 as i32,
+        FW_SEMIBOLD.0 as i32, // Elegant Apple Typography (Medium/SemiBold weight)
         0,
         0,
         0,
@@ -440,12 +512,12 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
         CLIP_DEFAULT_PRECIS.0 as u32,
         CLEARTYPE_QUALITY.0 as u32,
         DEFAULT_PITCH.0 as u32,
-        w!("Microsoft YaHei UI"),
+        w!("Microsoft YaHei UI"), // Adaptable fallback with best clear-type GDI rendering in China UI Windows environments
     );
     let old_font = SelectObject(hdc_mem, font);
 
     let mut text_rect = RECT {
-        left: (dot_x + dot_radius + 15.0) as i32,
+        left: (dot_x + dot_radius + 14.0) as i32,
         top: 0,
         right: w,
         bottom: h,
@@ -459,12 +531,7 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
         DT_VCENTER | DT_SINGLELINE,
     );
 
-    // Fix up alpha for text
-    // GDI draws RGB but often leaves Alpha=0 for text.
-    // We assume white text. If pixel is White (or gray for AA), we bump Alpha.
-    // Since background is Black (0,0,0), any non-zero channel implies text or dot.
-    // Dot region is known, we can skip it or just process everything.
-    // Text area: text_rect.
+    // Alpha channel fix for smooth font rendering
     for y in text_rect.top..text_rect.bottom {
         for x in text_rect.left..text_rect.right {
             if x >= 0 && x < w && y >= 0 && y < h {
@@ -474,39 +541,13 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
                 let g = (val >> 8) & 0xFF;
                 let b = val & 0xFF;
 
-                // If it has color (white text), ensure it's visible
-                // Simple heuristic: max(r,g,b) > 0 -> it's text (or background/dot)
-                // Background is black (0,0,0) with Alpha.
-                // Wait, background pixels are (0,0,0) with Alpha=bg_alpha.
-                // Text pixels drawn by GDI will be (255,255,255) with Alpha=0 (usually).
-                // So if we see R/G/B > 0, it is text (since background is black).
-                // (Dot is also colored, but we already drew it with alpha).
-
-                if r > 0 || g > 0 || b > 0 {
-                    // Check if it's the dot (we know dot area) or just trust the loop order?
-                    // Text is drawn AFTER dot.
-                    // GDI overwrites buffer.
-                    // If GDI wrote White (255,255,255), we need to set Alpha=255.
-                    // AA pixels will be Gray (v,v,v). We set Alpha=v?
-                    // Yes, for white text on transparent, Alpha should roughly equal Luma.
-                    // But we want it on top of the black background we already drew?
-                    // Actually GDI drawing blends with the *existing* buffer if we didn't clear it?
-                    // No, standard GDI operations on DIBSection are read-modify-write.
-                    // But Text drawing might ignore alpha.
-
-                    // Let's assume text pixels are meant to be opaque white.
-                    // We just take the max channel as the alpha for the text part.
-                    let max_c = r.max(g).max(b);
-                    if max_c > 0 {
-                        // This is text.
-                        // Set Alpha to max_c (so full white = 255 alpha, gray = partial)
-                        // And keep the RGB (pre-multiplied logic holds since R=G=B for white/gray)
-                        pixels[idx] = (max_c << 24) | (val & 0x00FFFFFF);
-                    }
-                } else {
-                    // It's black. Could be background.
-                    // If it was background, we already set alpha.
-                    // If GDI drew black text... we use white text.
+                let max_c = r.max(g).max(b);
+                if max_c > 0 {
+                    let existing_bg_pixel = pixels[idx];
+                    let current_a = (existing_bg_pixel >> 24) & 0xFF;
+                    let font_alpha = max_c;
+                    let target_a = current_a.max(font_alpha);
+                    pixels[idx] = (target_a << 24) | (val & 0x00FFFFFF);
                 }
             }
         }
