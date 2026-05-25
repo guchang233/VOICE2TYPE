@@ -141,42 +141,6 @@ impl Default for IndicatorConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
-pub struct InterpreterConfig {
-    pub enabled: bool,
-    pub target_language: String,
-    pub source_language: String,
-    pub subtitle_font_size: i32,
-    pub subtitle_opacity: f32,
-    pub subtitle_position: String,
-    pub subtitle_click_through: bool,
-    pub use_translation: bool,
-    pub chunk_ms: usize,
-    pub overlap_ms: usize,
-    pub silence_thresh: f32,
-    pub min_silence_ms: usize,
-}
-
-impl Default for InterpreterConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            target_language: "zh".to_string(),
-            source_language: "auto".to_string(),
-            subtitle_font_size: 22,
-            subtitle_opacity: 0.85,
-            subtitle_position: "bottom".to_string(),
-            subtitle_click_through: true,
-            use_translation: true,
-            chunk_ms: 3000,
-            overlap_ms: 800,
-            silence_thresh: 0.01,
-            min_silence_ms: 400,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
 pub struct AppConfig {
     pub basic: BasicConfig,
     pub features: FeatureConfig,
@@ -184,7 +148,6 @@ pub struct AppConfig {
     pub update: UpdateConfig,
     pub model: ModelConfig,
     pub indicator: IndicatorConfig,
-    pub interpreter: InterpreterConfig,
 
     // 旧版平铺字段，读取后会迁移到上面的分组结构。
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -238,7 +201,6 @@ impl Default for AppConfig {
             update: UpdateConfig::default(),
             model: ModelConfig::default(),
             indicator: IndicatorConfig::default(),
-            interpreter: InterpreterConfig::default(),
             model_name: None,
             output_language: None,
             output_mode: None,
@@ -649,58 +611,6 @@ impl ConfigManager {
         cfg.model = ModelConfig::default();
         cfg.advanced.trigger_mode = AdvancedConfig::default().trigger_mode;
         cfg.indicator = IndicatorConfig::default();
-    }
-
-    pub fn interpreter_enabled(&self) -> bool {
-        self.config.lock().unwrap().interpreter.enabled
-    }
-
-    pub fn set_interpreter_enabled(&self, enabled: bool) {
-        self.config.lock().unwrap().interpreter.enabled = enabled;
-    }
-
-    pub fn interpreter_target_language(&self) -> String {
-        self.config.lock().unwrap().interpreter.target_language.clone()
-    }
-
-    pub fn interpreter_source_language(&self) -> String {
-        self.config.lock().unwrap().interpreter.source_language.clone()
-    }
-
-    pub fn interpreter_subtitle_font_size(&self) -> i32 {
-        self.config.lock().unwrap().interpreter.subtitle_font_size
-    }
-
-    pub fn interpreter_subtitle_opacity(&self) -> f32 {
-        self.config.lock().unwrap().interpreter.subtitle_opacity
-    }
-
-    pub fn interpreter_subtitle_position(&self) -> String {
-        self.config.lock().unwrap().interpreter.subtitle_position.clone()
-    }
-
-    pub fn interpreter_subtitle_click_through(&self) -> bool {
-        self.config.lock().unwrap().interpreter.subtitle_click_through
-    }
-
-    pub fn interpreter_use_translation(&self) -> bool {
-        self.config.lock().unwrap().interpreter.use_translation
-    }
-
-    pub fn interpreter_chunk_ms(&self) -> usize {
-        self.config.lock().unwrap().interpreter.chunk_ms
-    }
-
-    pub fn interpreter_overlap_ms(&self) -> usize {
-        self.config.lock().unwrap().interpreter.overlap_ms
-    }
-
-    pub fn interpreter_silence_thresh(&self) -> f32 {
-        self.config.lock().unwrap().interpreter.silence_thresh
-    }
-
-    pub fn interpreter_min_silence_ms(&self) -> usize {
-        self.config.lock().unwrap().interpreter.min_silence_ms
     }
 
     pub fn save(&self) -> anyhow::Result<()> {

@@ -6,7 +6,6 @@ mod config;
 mod gui;
 mod history;
 mod indicator;
-mod interpreter;
 mod notify;
 mod output;
 mod update;
@@ -37,7 +36,6 @@ use tokio::sync::mpsc;
 use api::client::ApiClient;
 use audio::processor::{encode_wav_memory, resample_and_convert};
 use config::ConfigManager;
-use interpreter::InterpreterEngine;
 
 use gui::Voice2TypeApp;
 use indicator::{IndicatorState, StatusIndicator};
@@ -379,10 +377,6 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
     let tx_clone = tx.clone();
     let config_for_hotkey = config.clone();
     utils::hotkey::start_hotkey_listener(tx_clone, config_for_hotkey);
-
-    // 初始化同声传译引擎
-    let interp_engine = InterpreterEngine::new(config.clone());
-    let interp_engine_clone = Arc::new(Mutex::new(interp_engine));
 
     // 异步事件循环
     let app_state = Arc::new(Mutex::new(AppState::Idle));
