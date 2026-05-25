@@ -1,10 +1,9 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 
 use tokio::sync::mpsc;
-use windows::Win32::Foundation::{HRESULT, S_OK};
 use windows::Win32::Media::Audio::*;
 use windows::Win32::System::Com::*;
 
@@ -50,14 +49,15 @@ impl LoopbackCapture {
 
             let audio_client: IAudioClient = device.Activate(CLSCTX_ALL, None)?;
 
-            let mut format = WAVEFORMATEX::default();
-            let _ = audio_client.GetMixFormat(&mut format);
+            let format_ptr = audio_client.GetMixFormat()?;
+            let format = &*format_ptr;
 
-            let format_ptr = &format as *const WAVEFORMATEX;
-            let mut latency = 0u64;
-            audio_client.GetDevicePeriod(&mut latency, None)?;
+            let sample_rate = format.nSamplesPerSec;
+            let channels = format.nChannels as usize;
+            let bits_per_sample = format.wBitsPerSample;
+            let block_align = format.nBlockAlign as usize;
 
-            let flags = AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
+            let flags = AUDCLNT_STREAMFLAGS_LOOPBACK;
             audio_client.Initialize(
                 AUDCLNT_SHAREMODE_SHARED,
                 flags,
@@ -69,41 +69,28 @@ impl LoopbackCapture {
 
             let capture_client: IAudioCaptureClient = audio_client.GetService()?;
 
-            let frame_size = format.nBlockAlign as usize;
-            let sample_rate = format.nSamplesPerSec;
-            let channels = format.nChannels as usize;
-
-            let buffer_frame_count = audio_client.GetBufferSize()?;
+            let _buffer_frame_count = audio_client.GetBufferSize()?;
 
             audio_client.Start()?;
 
             while running.load(Ordering::SeqCst) {
-                let mut buffer = Vec::with_capacity(buffer_frame_count as usize * frame_size);
                 let mut num_frames_available = 0u32;
                 let mut flags = 0u32;
-                let mut device_position = 0u64;
-                let mut qpc_position = 0u64;
 
-                let hr = capture_client.GetBuffer(
-                    Some(buffer.as_mut_ptr() as *mut _),
+                let mut buffer_ptr: *mut u8 = std::ptr::null_mut();
+                capture_client.GetBuffer(
+                    &mut buffer_ptr,
                     &mut num_frames_available,
                     &mut flags,
-                    &mut device_position,
-                    &mut qpc_position,
-                );
-
-                if hr != S_OK {
-                    if hr == HRESULT(0x8000000A) {
-                        thread::sleep(std::time::Duration::from_millis(10));
-                        continue;
-                    }
-                    anyhow::bail!("GetBuffer failed: {:?}", hr);
-                }
+                    None,
+                    None,
+                )?;
 
                 if num_frames_available > 0 {
-                    buffer.set_len(num_frames_available as usize * frame_size);
+                    let buffer_size = num_frames_available as usize * block_align;
+                    let buffer_slice = std::slice::from_raw_parts(buffer_ptr, buffer_size);
 
-                    let float_samples = Self::convert_to_f32(&buffer, channels, format.wBitsPerSample);
+                    let float_samples = Self::convert_to_f32(buffer_slice, channels, bits_per_sample);
                     let (converted, _) = resample_and_convert(&float_samples, sample_rate);
 
                     if let Err(e) = tx.try_send(converted) {
@@ -111,7 +98,7 @@ impl LoopbackCapture {
                     }
                 }
 
-                let _ = capture_client.ReleaseBuffer(num_frames_available);
+                capture_client.ReleaseBuffer(num_frames_available);
             }
 
             let _ = audio_client.Stop();

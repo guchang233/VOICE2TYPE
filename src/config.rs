@@ -238,6 +238,7 @@ impl Default for AppConfig {
             update: UpdateConfig::default(),
             model: ModelConfig::default(),
             indicator: IndicatorConfig::default(),
+            interpreter: InterpreterConfig::default(),
             model_name: None,
             output_language: None,
             output_mode: None,

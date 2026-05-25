@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use tokio::sync::mpsc;
 
 use crate::api::client::ApiClient;
 use crate::audio::processor::encode_wav_memory;
@@ -39,11 +38,7 @@ impl Pipeline {
         let wav_data = encode_wav_memory(&audio_data, 16000)?;
 
         let raw_text = if config_manager.is_local_whisper() {
-            tokio::task::spawn_blocking(move || {
-                LocalWhisper::transcribe_sync(&wav_data, config_manager)
-            })
-            .await
-            .context("Local Whisper task error")??
+            LocalWhisper::transcribe_sync(&wav_data, config_manager)?
         } else {
             self.api_client.process_audio(wav_data, config_manager).await?
         };

@@ -1,8 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use tokio::sync::mpsc;
-
 use crate::config::ConfigManager;
 
 mod chunker;
@@ -38,9 +36,9 @@ impl InterpreterEngine {
 
         self.running.store(true, Ordering::SeqCst);
 
-        let (audio_tx, mut audio_rx) = mpsc::channel(100);
-        let (chunk_tx, mut chunk_rx) = mpsc::channel(100);
-        let (result_tx, mut result_rx) = mpsc::channel(100);
+        let (audio_tx, mut audio_rx) = tokio::sync::mpsc::channel(100);
+        let (chunk_tx, mut chunk_rx) = tokio::sync::mpsc::channel(100);
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::channel(100);
 
         let loopback = loopback::LoopbackCapture::start(audio_tx)?;
 
@@ -54,14 +52,14 @@ impl InterpreterEngine {
 
         let mut chunker = chunker::Chunker::new(chunker_config);
 
-        let subtitle_config = SubtitleWindowConfig {
+        let subtitle_config = subtitle_window::SubtitleWindowConfig {
             font_size: self.config.interpreter_subtitle_font_size(),
             opacity: self.config.interpreter_subtitle_opacity(),
             position: self.config.interpreter_subtitle_position(),
             click_through: self.config.interpreter_subtitle_click_through(),
         };
 
-        let subtitle_window = subtitle_window::SubtitleWindow::new(subtitle_config);
+        let subtitle_window = Arc::new(subtitle_window::SubtitleWindow::new(subtitle_config));
 
         let pipeline_config = PipelineConfig {
             use_translation: self.config.interpreter_use_translation(),
@@ -69,37 +67,45 @@ impl InterpreterEngine {
             target_language: self.config.interpreter_target_language(),
         };
 
-        let pipeline = pipeline::Pipeline::new(pipeline_config);
+        let pipeline = Arc::new(pipeline::Pipeline::new(pipeline_config));
 
         let running_clone = self.running.clone();
         let config_clone = self.config.clone();
+        let chunk_tx_clone = chunk_tx.clone();
 
         tokio::spawn(async move {
             while running_clone.load(Ordering::SeqCst) {
                 tokio::select! {
                     Some(audio) = audio_rx.recv() => {
-                        chunker.process(&audio, &chunk_tx);
+                        chunker.process(&audio, &chunk_tx_clone);
                     }
                     _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {}
                 }
             }
-            chunker.flush(&chunk_tx);
+            chunker.flush(&chunk_tx_clone);
         });
 
         let running_clone2 = self.running.clone();
         let config_clone2 = self.config.clone();
+        let pipeline_clone = pipeline.clone();
+        let tx_clone = result_tx.clone();
 
         tokio::spawn(async move {
             while running_clone2.load(Ordering::SeqCst) {
                 tokio::select! {
                     Some(chunk) = chunk_rx.recv() => {
-                        let pipeline_clone = pipeline.clone();
-                        let cfg_clone = config_clone2.clone();
-                        let tx_clone = result_tx.clone();
+                        let pipeline_inner = pipeline_clone.clone();
+                        let cfg = config_clone2.clone();
+                        let result_sender = tx_clone.clone();
 
                         tokio::spawn(async move {
-                            if let Ok(text) = pipeline_clone.process_audio(chunk, &cfg_clone).await {
-                                let _ = tx_clone.send(text).await;
+                            match pipeline_inner.process_audio(chunk, &cfg).await {
+                                Ok(text) => {
+                                    let _ = result_sender.send(text).await;
+                                }
+                                Err(e) => {
+                                    log::warn!("Pipeline error: {}", e);
+                                }
                             }
                         });
                     }
@@ -109,18 +115,19 @@ impl InterpreterEngine {
         });
 
         let running_clone3 = self.running.clone();
+        let subtitle_clone = subtitle_window.clone();
 
         tokio::spawn(async move {
             while running_clone3.load(Ordering::SeqCst) {
                 tokio::select! {
                     Some(text) = result_rx.recv() => {
-                        subtitle_window.update_subtitle(&text);
-                        subtitle_window.show();
+                        subtitle_clone.update_subtitle(&text);
+                        subtitle_clone.show();
                     }
                     _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {}
                 }
             }
-            subtitle_window.hide();
+            subtitle_clone.hide();
         });
 
         let _ = loopback;
