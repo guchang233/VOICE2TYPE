@@ -265,8 +265,11 @@ fn update_animation(state: &mut WindowState) -> bool {
     }
 
     // Force animation frame updates while active recording/processing states are pulsing
+    // or when other state entry animations are running (up to 400ms after state starts)
+    let elapsed = state.state_start_time.elapsed().as_millis();
+    let is_animating = elapsed < 400;
     let is_pulsing = state.target_state == IndicatorState::Recording || state.target_state == IndicatorState::Processing;
-    if is_pulsing && state.current_alpha > 0.01 {
+    if (is_pulsing || is_animating) && state.current_alpha > 0.01 {
         changed = true;
     }
 
@@ -383,6 +386,43 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
     // Background Color: Apple high-contrast deep black with subtle opacity
     let bg_alpha = 232u32; // 91% opacity for ultra premium frosted presence
 
+    // Compute dynamic dark color wave components outside the double loop for high-speed performance
+    let c_t = state.pulse_time;
+    
+    let sin_1 = (c_t * 1.2).sin();
+    let cos_1 = (c_t * 0.5).cos();
+    let r1 = 10.0 + sin_1 * 12.0 + cos_1 * 6.0;
+    
+    let cos_2 = (c_t * 0.8).cos();
+    let sin_2 = (c_t * 1.5).sin();
+    let g1 = 10.0 + cos_2 * 8.0 + sin_2 * 4.0;
+    
+    let sin_3 = (c_t * 0.9).sin();
+    let cos_3 = (c_t * 1.1).cos();
+    let b1 = 11.0 + sin_3 * 16.0 + cos_3 * 8.0;
+
+    let sin_4 = (c_t * 0.7 + 2.0).sin();
+    let cos_4 = (c_t * 1.3).cos();
+    let r2 = 10.0 + sin_4 * 8.0 + cos_4 * 8.0;
+
+    let cos_5 = (c_t * 1.1 + 1.0).cos();
+    let g2 = 12.0 + cos_5 * 105.0 * 0.1;
+
+    let sin_5 = (c_t * 0.5 + 3.0).sin();
+    let b2 = 14.0 + sin_5 * 18.0;
+
+    let blend_r = ((state.current_color >> 16) & 0xFF) as f32;
+    let blend_g = ((state.current_color >> 8) & 0xFF) as f32;
+    let blend_b = (state.current_color & 0xFF) as f32;
+
+    let br1 = (r1 + blend_r * 0.08).min(255.0) as u32;
+    let bg1 = (g1 + blend_g * 0.08).min(255.0) as u32;
+    let bb1 = (b1 + blend_b * 0.08).min(255.0) as u32;
+
+    let br2 = (r2 + blend_r * 0.04).min(255.0) as u32;
+    let bg2 = (g2 + blend_g * 0.04).min(255.0) as u32;
+    let bb2 = (b2 + blend_b * 0.04).min(255.0) as u32;
+
     // Draw Background (Rounded Rect with Fine macOS Metal Border definition)
     for y in 0..h {
         for x in 0..w {
@@ -406,10 +446,15 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
                 // Apply a hairline thin high-contrast border matching charcoal macOS windows
                 let is_inner_border = dist >= radius - 1.2 && dist <= radius;
                 
+                let u = x as f32 / w as f32;
+                let br = (br1 as f32 + u * (br2 as f32 - br1 as f32)) as u32;
+                let bg = (bg1 as f32 + u * (bg2 as f32 - bg1 as f32)) as u32;
+                let bb = (bb1 as f32 + u * (bb2 as f32 - bb1 as f32)) as u32;
+
                 let (br, bg, bb) = if is_inner_border {
-                    (52u32, 52u32, 55u32) // Soft silver-metallic edge highlight
+                    ((br + 42).min(255), (bg + 42).min(255), (bb + 44).min(255))
                 } else {
-                    (10u32, 10u32, 11u32) // Pure deep charcoal velvet obsidian black
+                    (br, bg, bb)
                 };
 
                 let pixel_alpha = (alpha_f * bg_alpha as f32) as u32;
@@ -424,56 +469,294 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
         }
     }
 
-    // Dynamic Pulsing Breathing Glow for Indicator Dot (Active state fluid loops)
+    // --- Procedural Dynamic Vector Icons with Subpixel Antialiasing ---
+    // Shake vibration to icon_cx for high-end mechanical feel under user feedback
+    let shake_offset = if state.target_state == IndicatorState::Error {
+        let elapsed_ms = state.state_start_time.elapsed().as_millis();
+        if elapsed_ms < 300 {
+            let freq = 0.15f32; // Fast energetic frequency
+            let amplitude = 4.5f32; // 4.5px total maximum horizontal jitter
+            let t_damp = elapsed_ms as f32 / 300.0;
+            let damp = (1.0 - t_damp).powi(2); // Dampen down quadratically
+            ((elapsed_ms as f32 * freq).sin() * amplitude * damp)
+        } else {
+            0.0
+        }
+    } else {
+         0.0
+    };
+    let icon_cx = 22.0f32 + shake_offset;
+    let icon_cy = h as f32 / 2.0;
     let dot_color = state.current_color;
-    let dot_alpha = 220u32; // Bright vibrant indicator core
     let dr = (dot_color >> 16) & 0xFF;
     let dg = (dot_color >> 8) & 0xFF;
     let db = dot_color & 0xFF;
 
     let pulse_time = state.pulse_time;
+    let elapsed_ms = state.state_start_time.elapsed().as_millis();
     let is_pulsing = state.target_state == IndicatorState::Recording || state.target_state == IndicatorState::Processing;
-    
-    // Wave intensity between 0.0 and 1.0 in a standard sine wave format
+
+    // Pulse wave intensity matching the oscillator format
     let pulse_intensity = if is_pulsing {
         (pulse_time.sin() + 1.0) / 2.0
     } else {
         0.0
     };
 
-    // Rescale dot slightly as it pulses
-    let core_r = if is_pulsing {
-        dot_radius - 0.5 + (pulse_intensity * 0.5)
+    // Soft surrounding glow halo matching active tasks
+    let halo_max_r = 13.0f32;
+    let halo_min_r = 7.0f32;
+    let halo_r = halo_min_r + pulse_intensity * (halo_max_r - halo_min_r);
+    let halo_alpha_base = if is_pulsing {
+        (65.0 * (1.0 - pulse_intensity * 0.4)) as u32
     } else {
-        dot_radius
+        0
     };
 
-    // Create a larger floating halo glow around the dot (soft ambient lighting)
-    let halo_max_r = dot_radius * 2.2;
-    let halo_r = core_r + (pulse_intensity * (halo_max_r - core_r));
-    let halo_alpha_base = (70.0 * (1.0 - pulse_intensity * 0.45)) as u32; // Naturally fades as it expands
+    // Unified Procedural Shape Evaluator
+    let get_icon_alpha = |x: f32, y: f32| -> f32 {
+        let dx = x - icon_cx;
+        let dy = y - icon_cy;
+        let dist = (dx * dx + dy * dy).sqrt();
+
+        match &state.target_state {
+            IndicatorState::Hidden => 0.0,
+            IndicatorState::Recording => {
+                // Hyper-premium Siri/Copilot style 5-bar voice spectrum live equalizer visualizer
+                let t = pulse_time;
+                let h0 = 4.0 + 5.0 * (t * 3.0 + 0.5).sin().abs();
+                let h1 = 5.0 + 10.0 * (t * 4.2 + 1.2).sin().abs();
+                let h2 = 6.0 + 15.0 * (t * 2.5 + 2.1).sin().abs();
+                let h3 = 5.0 + 11.0 * (t * 3.8 + 0.3).sin().abs();
+                let h4 = 4.0 + 6.0 * (t * 2.9 + 1.8).sin().abs();
+
+                let draw_pill = |px: f32, py: f32, p_cx: f32, p_cy: f32, p_h: f32| -> f32 {
+                    let half_len = ((p_h - 2.0) / 2.0).max(0.0);
+                    let b_dx = px - p_cx;
+                    let b_dy = py - p_cy;
+                    let b_dist = if b_dy.abs() <= half_len {
+                        b_dx.abs()
+                    } else {
+                        let sign = if b_dy > 0.0 { 1.0 } else { -1.0 };
+                        (b_dx.powi(2) + (b_dy - sign * half_len).powi(2)).sqrt()
+                    };
+                    (1.0 - b_dist + 0.5).clamp(0.0, 1.0)
+                };
+
+                let a0 = draw_pill(x, y, icon_cx - 8.0, icon_cy, h0);
+                let a1 = draw_pill(x, y, icon_cx - 4.0, icon_cy, h1);
+                let a2 = draw_pill(x, y, icon_cx, icon_cy, h2);
+                let a3 = draw_pill(x, y, icon_cx + 4.0, icon_cy, h3);
+                let a4 = draw_pill(x, y, icon_cx + 8.0, icon_cy, h4);
+
+                a0.max(a1).max(a2).max(a3).max(a4)
+            }
+            IndicatorState::Processing => {
+                // Hyper-premium orbital double-swept swirling light trails (Apple Neural Engine style triple comet swirling loop)
+                let r_ring = 6.2;
+                let t_ring = 1.8;
+                let ring_dist = (dist - r_ring).abs();
+                let ring_alpha = (t_ring / 2.0 - ring_dist + 0.5).clamp(0.0, 1.0);
+                if ring_alpha <= 0.0 {
+                    return 0.0;
+                }
+
+                let angle = dy.atan2(dx);
+                // Map to 0..2PI
+                let angle = if angle < 0.0 { angle + 2.0 * std::f32::consts::PI } else { angle };
+
+                // Swirling speed
+                let rot = pulse_time * 3.5;
+
+                // Helper to compute tail intensity for a comet head angle moving clockwise
+                let get_comet_intensity = |head_angle: f32| -> f32 {
+                    let mut tail_dist = head_angle - angle;
+                    while tail_dist < 0.0 { tail_dist += 2.0 * std::f32::consts::PI; }
+                    let tail_dist = tail_dist % (2.0 * std::f32::consts::PI);
+
+                    let max_tail = 1.6; // approx 90 degrees trail length
+                    if tail_dist < max_tail {
+                        let f = tail_dist / max_tail;
+                        (1.0 - f).powf(1.8) // Exponential fade
+                    } else {
+                        0.0
+                    }
+                };
+
+                let head1 = rot;
+                let head2 = rot + 2.0 * std::f32::consts::PI / 3.0;
+                let head3 = rot + 4.0 * std::f32::consts::PI / 3.0;
+
+                let i1 = get_comet_intensity(head1);
+                let i2 = get_comet_intensity(head2);
+                let i3 = get_comet_intensity(head3);
+
+                ring_alpha * i1.max(i2).max(i3)
+            }
+            IndicatorState::Success => {
+                // Elegant checkmark rendering with an animated writing effect + expanding sonic ripple
+                let t_prog = (elapsed_ms as f32 / 300.0).clamp(0.0, 1.0);
+
+                let p0 = (icon_cx - 5.0, icon_cy + 0.5);
+                let p1 = (icon_cx - 1.5, icon_cy + 4.0);
+                let p2 = (icon_cx + 5.5, icon_cy - 4.0);
+
+                let dist_to_segment = |px: f32, py: f32, x1: f32, y1: f32, x2: f32, y2: f32| -> f32 {
+                    let l2 = (x2 - x1).powi(2) + (y2 - y1).powi(2);
+                    if l2 == 0.0 {
+                        return ((px - x1).powi(2) + (py - y1).powi(2)).sqrt();
+                    }
+                    let t_val = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+                    let t_val = t_val.clamp(0.0, 1.0);
+                    let proj_x = x1 + t_val * (x2 - x1);
+                    let proj_y = y1 + t_val * (y2 - y1);
+                    ((px - proj_x).powi(2) + (py - proj_y).powi(2)).sqrt()
+                };
+
+                let stroke_width = 1.8;
+                let check_alpha = if t_prog < 0.4 {
+                    let f = t_prog / 0.4;
+                    let cur_x = p0.0 + f * (p1.0 - p0.0);
+                    let cur_y = p0.1 + f * (p1.1 - p0.1);
+                    let d = dist_to_segment(x, y, p0.0, p0.1, cur_x, cur_y);
+                    (stroke_width / 2.0 - d + 0.5).clamp(0.0, 1.0)
+                } else {
+                    let d1 = dist_to_segment(x, y, p0.0, p0.1, p1.0, p1.1);
+                    let a1 = (stroke_width / 2.0 - d1 + 0.5).clamp(0.0, 1.0);
+
+                    let f2 = (t_prog - 0.4) / 0.6;
+                    let cur_x = p1.0 + f2 * (p2.0 - p1.0);
+                    let cur_y = p1.1 + f2 * (p2.1 - p1.1);
+                    let d2 = dist_to_segment(x, y, p1.0, p1.1, cur_x, cur_y);
+                    let a2 = (stroke_width / 2.0 - d2 + 0.5).clamp(0.0, 1.0);
+
+                    a1.max(a2)
+                };
+
+                // Add an expanding shockwave ripple (Apple Pay style feedback)
+                let ripple_alpha = {
+                    let ripple_duration = 500.0f32;
+                    let t_ripple = (elapsed_ms as f32 / ripple_duration).clamp(0.0, 1.0);
+                    let ripple_max_r = 18.0f32;
+                    let ripple_r = 4.0 + t_ripple * ripple_max_r;
+                    let dist_to_ripple = (dist - ripple_r).abs();
+                    // Sharp micro-edge boundary wave
+                    let thickness = 1.0f32;
+                    let alpha_profile = (thickness / 2.0 - dist_to_ripple + 0.5).clamp(0.0, 1.0);
+                    let fade = (1.0 - t_ripple).powi(2);
+                    alpha_profile * fade * 0.7
+                };
+
+                check_alpha.max(ripple_alpha)
+            }
+            IndicatorState::Error => {
+                // Cross mark with sequential branch drawing animations + explosive feedback ripple
+                let t_prog = (elapsed_ms as f32 / 250.0).clamp(0.0, 1.0);
+
+                let p1a = (icon_cx - 4.5, icon_cy - 4.5);
+                let p1b = (icon_cx + 4.5, icon_cy + 4.5);
+                let p2a = (icon_cx - 4.5, icon_cy + 4.5);
+                let p2b = (icon_cx + 4.5, icon_cy - 4.5);
+
+                let dist_to_segment = |px: f32, py: f32, x1: f32, y1: f32, x2: f32, y2: f32| -> f32 {
+                    let l2 = (x2 - x1).powi(2) + (y2 - y1).powi(2);
+                    if l2 == 0.0 {
+                        return ((px - x1).powi(2) + (py - y1).powi(2)).sqrt();
+                    }
+                    let t_val = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+                    let t_val = t_val.clamp(0.0, 1.0);
+                    let proj_x = x1 + t_val * (x2 - x1);
+                    let proj_y = y1 + t_val * (y2 - y1);
+                    ((px - proj_x).powi(2) + (py - proj_y).powi(2)).sqrt()
+                };
+
+                let stroke_width = 1.8;
+                let cross_alpha = if t_prog < 0.5 {
+                    let f = t_prog / 0.5;
+                    let cur_x = p1a.0 + f * (p1b.0 - p1a.0);
+                    let cur_y = p1a.1 + f * (p1b.1 - p1a.1);
+                    let d = dist_to_segment(x, y, p1a.0, p1a.1, cur_x, cur_y);
+                    (stroke_width / 2.0 - d + 0.5).clamp(0.0, 1.0)
+                } else {
+                    let d1 = dist_to_segment(x, y, p1a.0, p1a.1, p1b.0, p1b.1);
+                    let a1 = (stroke_width / 2.0 - d1 + 0.5).clamp(0.0, 1.0);
+
+                    let f2 = (t_prog - 0.5) / 0.5;
+                    let cur_x = p2a.0 + f2 * (p2b.0 - p2a.0);
+                    let cur_y = p2a.1 + f2 * (p2b.1 - p2a.1);
+                    let d2 = dist_to_segment(x, y, p2a.0, p2a.1, cur_x, cur_y);
+                    let a2 = (stroke_width / 2.0 - d2 + 0.5).clamp(0.0, 1.0);
+
+                    a1.max(a2)
+                };
+
+                // Add an explosive warning shockwave ripple
+                let ripple_alpha = {
+                    let t_ripple = (elapsed_ms as f32 / 550.0).clamp(0.0, 1.0);
+                    let ripple_max_r = 20.0f32;
+                    let ripple_r = 3.0 + t_ripple * ripple_max_r;
+                    let dist_to_ripple = (dist - ripple_r).abs();
+                    let thickness = 1.0f32;
+                    let alpha_profile = (thickness / 2.0 - dist_to_ripple + 0.5).clamp(0.0, 1.0);
+                    let fade = (1.0 - t_ripple).powf(1.8);
+                    alpha_profile * fade * 0.65
+                };
+
+                cross_alpha.max(ripple_alpha)
+            }
+            IndicatorState::Cancelled => {
+                // Cancelled minus dash drawing animation with elastic slow-down rotation (spins 270 degrees into horizontal focus)
+                let t_prog = (elapsed_ms as f32 / 350.0).clamp(0.0, 1.0);
+                
+                let t_inv = 1.0 - t_prog;
+                let angle = t_inv.powi(3) * (std::f32::consts::PI * 1.5); 
+
+                let dx_rot = dx * angle.cos() + dy * angle.sin();
+                let dy_rot = -dx * angle.sin() + dy * angle.cos();
+
+                let cur_len = -5.0 + t_prog * 10.0; // Line writes horizontally while spinning for liquid flow effect
+                let segment_dist = if dx_rot <= -5.0 {
+                    ((dx_rot + 5.0).powi(2) + dy_rot.powi(2)).sqrt()
+                } else if dx_rot >= cur_len {
+                    ((dx_rot - cur_len).powi(2) + dy_rot.powi(2)).sqrt()
+                } else {
+                    dy_rot.abs()
+                };
+
+                let stroke_width = 1.8;
+                (stroke_width / 2.0 - segment_dist + 0.5).clamp(0.0, 1.0)
+            }
+        }
+    };
 
     for y in 0..h {
         for x in 0..w {
-            let dx = x as f32 - dot_x;
-            let dy = y as f32 - dot_y;
+            let dx = x as f32 - icon_cx;
+            let dy = y as f32 - icon_cy;
             let dist = (dx * dx + dy * dy).sqrt();
 
-            let core_alpha_f = (core_r - dist + 0.5).clamp(0.0, 1.0);
-            
-            let halo_alpha_f = if is_pulsing && dist > core_r {
-                let d_factor = (halo_r - dist) / (halo_r - core_r);
+            // Evaluate procedural custom icon body alpha (expanded range to allow shockwave display up to 24.0px radius)
+            let icon_alpha_f = if dist <= 24.0 {
+                get_icon_alpha(x as f32, y as f32)
+            } else {
+                0.0
+            };
+
+            // Evaluate soft atmospheric halo glow around active state icons
+            let halo_alpha_f = if is_pulsing && dist > 5.0 && dist <= halo_r {
+                let d_factor = (halo_r - dist) / (halo_r - 5.0);
                 d_factor.clamp(0.0, 1.0) * (halo_alpha_base as f32 / 255.0)
             } else {
                 0.0
             };
 
-            if core_alpha_f > 0.0 || halo_alpha_f > 0.0 {
+            if icon_alpha_f > 0.0 || halo_alpha_f > 0.0 {
                 let idx = (y * w + x) as usize;
                 let bg_val = pixels[idx];
                 let bg_a = (bg_val >> 24) & 0xFF;
 
-                let effective_alpha = (core_alpha_f * (dot_alpha as f32 / 255.0)) + (1.0 - core_alpha_f) * halo_alpha_f;
+                let dot_alpha = 235u32; // Crisp vivid foreground icon body opacity
+                let effective_alpha = (icon_alpha_f * (dot_alpha as f32 / 255.0)) + (1.0 - icon_alpha_f) * halo_alpha_f;
                 let final_a = (effective_alpha * 255.0).clamp(0.0, 255.0) as u32;
 
                 if final_a > 0 {
@@ -517,7 +800,7 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
     let old_font = SelectObject(hdc_mem, font);
 
     let mut text_rect = RECT {
-        left: (dot_x + dot_radius + 14.0) as i32,
+        left: 40,
         top: 0,
         right: w,
         bottom: h,
