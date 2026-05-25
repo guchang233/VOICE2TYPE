@@ -168,6 +168,10 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::repaste_last])]
     pub repaste_item: nwg::MenuItem,
 
+    #[nwg_control(parent: tray_menu, text: "同声传译", check: false)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_interpreter])]
+    pub interpreter_item: nwg::MenuItem,
+
     #[nwg_control(parent: tray_menu)]
     pub sep_update: nwg::MenuSeparator,
 
@@ -728,6 +732,19 @@ impl Voice2TypeApp {
                 }
             }
         }
+    }
+
+    fn toggle_interpreter(&self) {
+        let new_state = !self.interpreter_item.checked();
+        self.interpreter_item.set_checked(new_state);
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            mgr.set_interpreter_enabled(new_state);
+            mgr.save_or_notify();
+        }
+        crate::notify::queue_tray_message(
+            "Voice2Type",
+            if new_state { "同声传译已开启" } else { "同声传译已关闭" },
+        );
     }
 
     fn set_trigger_hold(&self) {
