@@ -169,6 +169,11 @@ impl LocalWhisper {
         fs::write(&wav_path, wav_data).context("写入临时 WAV 失败")?;
 
         let mut cmd = Command::new(&exe);
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
         cmd.arg("-m").arg(&model_path);
         cmd.arg("-f").arg(&wav_path);
         cmd.arg("-otxt");

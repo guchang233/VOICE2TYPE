@@ -14,48 +14,65 @@ pub struct UpdateInfo {
     pub date: String,
 }
 
-pub fn get_latest_release_info() -> Result<UpdateInfo> {
-    let status = Update::configure()
-        .repo_owner("guchang233")
-        .repo_name("VOICE2TYPE")
-        .bin_name("voice2type")
-        .current_version(cargo_crate_version!())
+#[derive(serde::Deserialize, Debug, Clone)]
+struct GithubAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+#[derive(serde::Deserialize, Debug, Clone)]
+struct GithubRelease {
+    tag_name: String,
+    body: Option<String>,
+    published_at: Option<String>,
+    assets: Vec<GithubAsset>,
+}
+
+fn fetch_latest_release() -> Result<GithubRelease> {
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("Voice2Type-App")
+        .timeout(std::time::Duration::from_secs(10))
         .build()?;
 
-    let latest = status.get_latest_release()?;
+    let resp = client
+        .get("https://api.github.com/repos/guchang233/VOICE2TYPE/releases/latest")
+        .send()?;
 
-    let asset = latest
+    if !resp.status().is_success() {
+        anyhow::bail!("GitHub API returned error status: {}", resp.status());
+    }
+
+    let release: GithubRelease = resp.json()?;
+    Ok(release)
+}
+
+pub fn get_latest_release_info() -> Result<UpdateInfo> {
+    let release = fetch_latest_release()?;
+    let asset = release
         .assets
         .iter()
         .find(|a| a.name.to_lowercase().ends_with(".exe"))
         .cloned();
 
     Ok(UpdateInfo {
-        version: latest.version,
-        body: latest.body.unwrap_or_default(),
+        version: release.tag_name,
+        body: release.body.unwrap_or_default(),
         download_url: asset
             .as_ref()
-            .map(|a| a.download_url.clone())
+            .map(|a| a.browser_download_url.clone())
             .unwrap_or_default(),
         filename: asset.as_ref().map(|a| a.name.clone()).unwrap_or_default(),
-        date: latest.date,
+        date: release.published_at.unwrap_or_default(),
     })
 }
 
 pub fn check_update() -> Result<Option<UpdateInfo>> {
-    let status = Update::configure()
-        .repo_owner("guchang233")
-        .repo_name("VOICE2TYPE")
-        .bin_name("voice2type")
-        .current_version(cargo_crate_version!())
-        .build()?;
-
-    let latest = status.get_latest_release()?;
+    let release = fetch_latest_release()?;
 
     // semver parsing
     // Clean up version string (remove 'v' prefix if present)
     let clean_current = cargo_crate_version!().trim_start_matches('v');
-    let clean_latest = latest.version.trim_start_matches('v');
+    let clean_latest = release.tag_name.trim_start_matches('v');
 
     let current =
         semver::Version::parse(clean_current).unwrap_or_else(|_| semver::Version::new(0, 0, 0));
@@ -65,7 +82,7 @@ pub fn check_update() -> Result<Option<UpdateInfo>> {
     if target > current {
         // Find the asset for Windows
         // Strictly require .exe extension to avoid downloading source code zips
-        let asset = latest
+        let asset = release
             .assets
             .iter()
             .find(|a| a.name.to_lowercase().ends_with(".exe"))
@@ -73,11 +90,11 @@ pub fn check_update() -> Result<Option<UpdateInfo>> {
 
         if let Some(asset) = asset {
             Ok(Some(UpdateInfo {
-                version: latest.version,
-                body: latest.body.unwrap_or_default(),
-                download_url: asset.download_url,
+                version: release.tag_name,
+                body: release.body.unwrap_or_default(),
+                download_url: asset.browser_download_url,
                 filename: asset.name,
-                date: latest.date,
+                date: release.published_at.unwrap_or_default(),
             }))
         } else {
             // No exe asset found, probably a source-only release

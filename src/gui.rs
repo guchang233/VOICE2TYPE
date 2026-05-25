@@ -1,4 +1,4 @@
-use crate::config::{self, ConfigManager};
+use crate::config::ConfigManager;
 use crate::history;
 use crate::notify::PENDING_TRAY_MESSAGES;
 use crate::output::handler::OutputHandler;
@@ -114,23 +114,23 @@ pub struct Voice2TypeApp {
     #[nwg_control(parent: config_menu, text: "模型选择")]
     pub model_menu: nwg::Menu,
 
-    #[nwg_control(parent: model_menu, text: "TeleAI/TeleSpeechASR", check: true)]
+    #[nwg_control(parent: model_menu, text: "TeleAI/TeleSpeechASR", check: false)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::select_model_teleai])]
     pub model_teleai_item: nwg::MenuItem,
 
-    #[nwg_control(parent: model_menu, text: "FunAudioLLM/SenseVoiceSmall", check: true)]
+    #[nwg_control(parent: model_menu, text: "FunAudioLLM/SenseVoiceSmall", check: false)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::select_model_sensevoice])]
     pub model_sensevoice_item: nwg::MenuItem,
 
-    #[nwg_control(parent: model_menu, text: "whisper-large-v3", check: true)]
+    #[nwg_control(parent: model_menu, text: "whisper-large-v3", check: false)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::select_model_whisper])]
     pub model_whisper_item: nwg::MenuItem,
 
-    #[nwg_control(parent: model_menu, text: "本地 Whisper（离线）", check: true)]
+    #[nwg_control(parent: model_menu, text: "本地 Whisper（离线）", check: false)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::select_model_local_whisper])]
     pub model_local_whisper_item: nwg::MenuItem,
 
-    #[nwg_control(parent: model_menu, text: "自定义 API 端点", check: true)]
+    #[nwg_control(parent: model_menu, text: "自定义 API 端点", check: false)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_custom_api_window])]
     pub model_custom_item: nwg::MenuItem,
 
@@ -247,57 +247,6 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnButtonClick: [Voice2TypeApp::save_hotkey_config])]
     pub hotkey_save_btn: nwg::Button,
 
-    // --- 版本检测窗口 ---
-    #[nwg_control(size: (520, 420), position: (300, 300), title: "检查更新", flags: "WINDOW", icon: Some(&data.icon))]
-    #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_update_window])]
-    pub update_window: nwg::Window,
-
-    #[nwg_layout(parent: update_window, spacing: 10, margin: [20, 20, 20, 20])]
-    pub update_layout: nwg::GridLayout,
-
-    #[nwg_control(parent: update_window, text: "当前版本:")]
-    #[nwg_layout_item(layout: update_layout, row: 0, col: 0)]
-    pub current_ver_label: nwg::Label,
-
-    #[nwg_control(parent: update_window, text: "")]
-    #[nwg_layout_item(layout: update_layout, row: 0, col: 1, col_span: 2)]
-    pub current_ver_val: nwg::Label,
-
-    #[nwg_control(parent: update_window, text: "最新版本:")]
-    #[nwg_layout_item(layout: update_layout, row: 1, col: 0)]
-    pub latest_ver_label: nwg::Label,
-
-    #[nwg_control(parent: update_window, text: "未检测")]
-    #[nwg_layout_item(layout: update_layout, row: 1, col: 1, col_span: 2)]
-    pub latest_ver_val: nwg::Label,
-
-    #[nwg_control(parent: update_window, text: "更新日志:")]
-    #[nwg_layout_item(layout: update_layout, row: 2, col: 0, col_span: 3)]
-    pub changelog_label: nwg::Label,
-
-    #[nwg_control(parent: update_window, text: "", flags: "VISIBLE", readonly: true)]
-    #[nwg_layout_item(layout: update_layout, row: 3, col: 0, col_span: 3, row_span: 3)]
-    pub changelog_text: nwg::TextBox,
-
-    #[nwg_control(parent: update_window, text: "检测新版本")]
-    #[nwg_layout_item(layout: update_layout, row: 6, col: 0)]
-    #[nwg_events(OnButtonClick: [Voice2TypeApp::do_check_update])]
-    pub check_update_btn: nwg::Button,
-
-    #[nwg_control(parent: update_window, text: "忽略此版本", enabled: false)]
-    #[nwg_layout_item(layout: update_layout, row: 6, col: 1)]
-    #[nwg_events(OnButtonClick: [Voice2TypeApp::ignore_update])]
-    pub ignore_btn: nwg::Button,
-
-    #[nwg_control(parent: update_window, text: "立即更新", enabled: false)]
-    #[nwg_layout_item(layout: update_layout, row: 6, col: 2)]
-    #[nwg_events(OnButtonClick: [Voice2TypeApp::start_update])]
-    pub start_update_btn: nwg::Button,
-
-    #[nwg_control(parent: update_window, range: 0..100, pos: 0)]
-    #[nwg_layout_item(layout: update_layout, row: 7, col: 0, col_span: 3)]
-    pub update_progress: nwg::ProgressBar,
-
     // --- 麦克风选择窗口 ---
     #[nwg_control(size: (480, 140), position: (350, 350), title: "选择麦克风", flags: "WINDOW", icon: Some(&data.icon))]
     #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_mic_window])]
@@ -387,8 +336,8 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnButtonClick: [Voice2TypeApp::save_custom_api_config])]
     pub custom_api_save_btn: nwg::Button,
 
-    // --- 关于窗口 ---
-    #[nwg_control(size: (360, 300), position: (400, 400), title: "关于 Voice2Type", flags: "WINDOW", icon: Some(&data.icon))]
+    // --- 关于与更新窗口 ---
+    #[nwg_control(size: (540, 480), position: (400, 400), title: "关于 & 检查更新", flags: "WINDOW", icon: Some(&data.icon))]
     #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_about_window])]
     pub about_window: nwg::Window,
 
@@ -399,26 +348,57 @@ pub struct Voice2TypeApp {
     #[nwg_layout_item(layout: about_layout, row: 0, col: 0, col_span: 2)]
     pub app_name_label: nwg::Label,
 
-    #[nwg_control(parent: about_window, text: concat!("当前版本: ", env!("CARGO_PKG_VERSION")))]
-    #[nwg_layout_item(layout: about_layout, row: 1, col: 0, col_span: 2)]
-    pub version_label: nwg::Label,
+    #[nwg_control(parent: about_window, text: "作者：guchang233")]
+    #[nwg_layout_item(layout: about_layout, row: 0, col: 2, col_span: 1)]
+    pub author_label: nwg::Label,
 
-    #[nwg_control(parent: about_window, text: "最新版本: 未检测")]
-    #[nwg_layout_item(layout: about_layout, row: 2, col: 0, col_span: 2)]
-    pub about_latest_ver_label: nwg::Label,
+    #[nwg_control(parent: about_window, text: "当前版本:")]
+    #[nwg_layout_item(layout: about_layout, row: 1, col: 0, col_span: 1)]
+    pub current_ver_label: nwg::Label,
 
-    #[nwg_control(parent: about_window, text: "开源项目地址:")]
-    #[nwg_layout_item(layout: about_layout, row: 3, col: 0, col_span: 2)]
-    pub repo_label: nwg::Label,
+    #[nwg_control(parent: about_window, text: "")]
+    #[nwg_layout_item(layout: about_layout, row: 1, col: 1, col_span: 1)]
+    pub current_ver_val: nwg::Label,
 
     #[nwg_control(parent: about_window, text: "访问 GitHub 仓库")]
-    #[nwg_layout_item(layout: about_layout, row: 4, col: 0, col_span: 2)]
+    #[nwg_layout_item(layout: about_layout, row: 1, col: 2, col_span: 1)]
     #[nwg_events(OnButtonClick: [Voice2TypeApp::open_github])]
     pub github_btn: nwg::Button,
 
-    #[nwg_control(parent: about_window, text: "作者：guchang233")]
-    #[nwg_layout_item(layout: about_layout, row: 5, col: 0, col_span: 2)]
-    pub author_label: nwg::Label,
+    #[nwg_control(parent: about_window, text: "最新版本:")]
+    #[nwg_layout_item(layout: about_layout, row: 2, col: 0, col_span: 1)]
+    pub latest_ver_label: nwg::Label,
+
+    #[nwg_control(parent: about_window, text: "未检测")]
+    #[nwg_layout_item(layout: about_layout, row: 2, col: 1, col_span: 2)]
+    pub latest_ver_val: nwg::Label,
+
+    #[nwg_control(parent: about_window, text: "更新日志与项目说明:")]
+    #[nwg_layout_item(layout: about_layout, row: 3, col: 0, col_span: 3)]
+    pub changelog_label: nwg::Label,
+
+    #[nwg_control(parent: about_window, text: "", flags: "VISIBLE", readonly: true)]
+    #[nwg_layout_item(layout: about_layout, row: 4, col: 0, col_span: 3, row_span: 3)]
+    pub changelog_text: nwg::TextBox,
+
+    #[nwg_control(parent: about_window, text: "检测新版本")]
+    #[nwg_layout_item(layout: about_layout, row: 7, col: 0, col_span: 1)]
+    #[nwg_events(OnButtonClick: [Voice2TypeApp::do_check_update])]
+    pub check_update_btn: nwg::Button,
+
+    #[nwg_control(parent: about_window, text: "忽略此版本", enabled: false)]
+    #[nwg_layout_item(layout: about_layout, row: 7, col: 1, col_span: 1)]
+    #[nwg_events(OnButtonClick: [Voice2TypeApp::ignore_update])]
+    pub ignore_btn: nwg::Button,
+
+    #[nwg_control(parent: about_window, text: "立即更新", enabled: false)]
+    #[nwg_layout_item(layout: about_layout, row: 7, col: 2, col_span: 1)]
+    #[nwg_events(OnButtonClick: [Voice2TypeApp::start_update])]
+    pub start_update_btn: nwg::Button,
+
+    #[nwg_control(parent: about_window, range: 0..100, pos: 0)]
+    #[nwg_layout_item(layout: about_layout, row: 8, col: 0, col_span: 3)]
+    pub update_progress: nwg::ProgressBar,
 
     #[nwg_resource(family: "Segoe UI", size: 24, weight: 700)]
     pub font_bold: nwg::Font,
@@ -530,14 +510,10 @@ impl Voice2TypeApp {
             app.trigger_toggle_item.set_checked(false);
         }
 
-        // 设置模型选择初始状态
-        app.update_model_checks();
-
         // 初始隐藏窗口
         app.hotkey_window.set_visible(false);
         app.whisper_window.set_visible(false);
         app.about_window.set_visible(false);
-        app.update_window.set_visible(false);
         app.current_ver_val.set_text(CURRENT_VERSION);
 
         // 确保主锚点窗口也不可见
@@ -607,6 +583,7 @@ impl Voice2TypeApp {
         }
 
         // 启动自动检测
+        app.update_model_menu_checks();
         app.do_check_update();
 
         app_ui
@@ -615,6 +592,17 @@ impl Voice2TypeApp {
     fn show_menu(&self) {
         let (x, y) = nwg::GlobalCursor::position();
         self.tray_menu.popup(x, y);
+    }
+
+    fn update_model_menu_checks(&self) {
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            let model_id = mgr.get_model_id();
+            self.model_teleai_item.set_checked(model_id == crate::config::MODEL_TELEAI);
+            self.model_sensevoice_item.set_checked(model_id == crate::config::MODEL_SENSEVOICE);
+            self.model_whisper_item.set_checked(model_id == crate::config::MODEL_WHISPER);
+            self.model_local_whisper_item.set_checked(model_id == crate::config::MODEL_LOCAL_WHISPER);
+            self.model_custom_item.set_checked(model_id == crate::config::MODEL_CUSTOM);
+        }
     }
 
     fn toggle_emoji(&self) {
@@ -781,50 +769,36 @@ impl Voice2TypeApp {
     }
 
     // 模型选择方法
-    fn update_model_checks(&self) {
-        let model = if let Some(mgr) = &*self.config_manager.borrow() {
-            mgr.raw_model_name()
-        } else {
-            return;
-        };
-        self.model_teleai_item.set_checked(model == config::MODEL_TELEAI);
-        self.model_sensevoice_item.set_checked(model == config::MODEL_SENSEVOICE);
-        self.model_whisper_item.set_checked(model == config::MODEL_WHISPER);
-        self.model_local_whisper_item.set_checked(model == config::MODEL_LOCAL_WHISPER);
-        self.model_custom_item.set_checked(model == config::MODEL_CUSTOM);
-    }
-
     fn select_model_teleai(&self) {
         if let Some(mgr) = &*self.config_manager.borrow() {
             mgr.set_model_name("TeleAI/TeleSpeechASR".to_string());
             mgr.save_or_notify();
+            self.update_model_menu_checks();
             nwg::simple_message("已选择模型", "TeleAI/TeleSpeechASR");
         }
-        self.update_model_checks();
     }
 
     fn select_model_sensevoice(&self) {
         if let Some(mgr) = &*self.config_manager.borrow() {
             mgr.set_model_name("FunAudioLLM/SenseVoiceSmall".to_string());
             mgr.save_or_notify();
+            self.update_model_menu_checks();
             nwg::simple_message("已选择模型", "FunAudioLLM/SenseVoiceSmall");
         }
-        self.update_model_checks();
     }
 
     fn select_model_whisper(&self) {
         if let Some(mgr) = &*self.config_manager.borrow() {
             mgr.set_model_name("whisper-large-v3".to_string());
             mgr.save_or_notify();
+            self.update_model_menu_checks();
             nwg::simple_message("已选择模型", "whisper-large-v3");
         }
-        self.update_model_checks();
     }
 
     fn select_model_local_whisper(&self) {
         if let Some(mgr) = &*self.config_manager.borrow() {
             if !mgr.has_local_whisper_dir() {
-                self.update_model_checks();
                 nwg::simple_message(
                     "本地 Whisper",
                     "请先设置 Whisper 根目录（设置 → 配置 → 设置本地 Whisper 目录）。",
@@ -834,10 +808,10 @@ impl Voice2TypeApp {
             }
             mgr.set_model_name(crate::config::MODEL_LOCAL_WHISPER.to_string());
             mgr.save_or_notify();
+            self.update_model_menu_checks();
             let status = crate::whisper_local::LocalWhisper::status_message(mgr);
             nwg::simple_message("本地 Whisper", &status);
         }
-        self.update_model_checks();
     }
 
     fn show_whisper_window(&self) {
@@ -991,8 +965,8 @@ impl Voice2TypeApp {
             self.custom_url_input.set_text(&mgr.get_api_url());
             self.custom_model_input.set_text(&mgr.get_custom_model_name());
             self.custom_key_input.set_text(&mgr.get_api_key());
+            self.update_model_menu_checks();
         }
-        self.update_model_checks();
         self.custom_api_window.set_visible(true);
         self.custom_api_window.set_focus();
     }
@@ -1008,9 +982,9 @@ impl Voice2TypeApp {
             mgr.set_custom_model_name(self.custom_model_input.text());
             mgr.set_api_key(self.custom_key_input.text());
             mgr.save_or_notify();
+            self.update_model_menu_checks();
             nwg::simple_message("已保存", "自定义 API 已保存并设为当前模型。");
         }
-        self.update_model_checks();
         self.custom_api_window.set_visible(false);
     }
 
@@ -1103,13 +1077,13 @@ impl Voice2TypeApp {
     }
 
     fn show_update_window(&self) {
-        self.update_window.set_visible(true);
-        self.update_window.set_focus();
+        self.about_window.set_visible(true);
+        self.about_window.set_focus();
         self.do_check_update();
     }
 
     fn hide_update_window(&self) {
-        self.update_window.set_visible(false);
+        self.about_window.set_visible(false);
     }
 
     fn do_check_update(&self) {
@@ -1145,7 +1119,7 @@ impl Voice2TypeApp {
                     self.ignore_btn.set_enabled(true);
 
                     // 如果窗口不可见（后台检测），且未忽略，则提示
-                    if !self.update_window.visible() {
+                    if !self.about_window.visible() {
                         let (ignored, last_check) =
                             if let Some(mgr) = &*self.config_manager.borrow() {
                                 (mgr.ignored_version(), mgr.last_check_time())
@@ -1197,7 +1171,7 @@ impl Voice2TypeApp {
                 Err(e) => {
                     self.latest_ver_val.set_text("检测失败");
                     self.ignore_btn.set_enabled(false);
-                    if self.update_window.visible() {
+                    if self.about_window.visible() {
                         nwg::simple_message("检测失败", &format!("错误: {}", e));
                     }
                 }
@@ -1331,15 +1305,9 @@ impl Voice2TypeApp {
     }
 
     fn show_about(&self) {
-        // 更新最新版本信息
-        if let Some(info) = self.update_info.borrow().as_ref() {
-            self.about_latest_ver_label
-                .set_text(&format!("最新版本: {}", info.version));
-        } else {
-            self.about_latest_ver_label.set_text("最新版本: 未检测");
-        }
         self.about_window.set_visible(true);
         self.about_window.set_focus();
+        self.do_check_update();
     }
 
     fn hide_about_window(&self) {
