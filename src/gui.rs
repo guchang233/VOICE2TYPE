@@ -1072,7 +1072,13 @@ impl Voice2TypeApp {
             let click_through = self.sub_click_through_item.check_state() == nwg::CheckBoxState::Checked;
             mgr.set_interpreter_subtitle_click_through(click_through);
             mgr.save_or_notify();
-            nwg::simple_message("已保存", "实时字幕设置已保存。\n部分设置需重新开启实时字幕后生效。");
+
+            #[cfg(target_os = "windows")]
+            {
+                crate::update_interpreter_subtitle_config(&mgr);
+            }
+
+            nwg::simple_message("已保存", "实时字幕设置已保存并已生效。");
         }
         self.subtitle_settings_window.set_visible(false);
     }

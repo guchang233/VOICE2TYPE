@@ -16,7 +16,6 @@ pub struct AudioChunker {
     silence_samples_needed: usize,
     consecutive_silence: usize,
     last_data_time: std::time::Instant,
-    last_chunk_end: usize,
 }
 
 impl AudioChunker {
@@ -34,7 +33,6 @@ impl AudioChunker {
             silence_samples_needed,
             consecutive_silence: 0,
             last_data_time: std::time::Instant::now(),
-            last_chunk_end: 0,
         }
     }
 
@@ -55,7 +53,6 @@ impl AudioChunker {
             if split_point > self.sample_rate as usize / 5 {
                 let chunk: Vec<f32> = self.buffer.drain(..split_point).collect();
                 self.consecutive_silence = 0;
-                self.last_chunk_end = 0;
                 send_wav_chunk(chunk, self.sample_rate, chunk_tx);
             }
         }
@@ -65,7 +62,6 @@ impl AudioChunker {
             let chunk: Vec<f32> = self.buffer[..self.chunk_samples].to_vec();
             self.buffer.drain(..advance);
             self.consecutive_silence = 0;
-            self.last_chunk_end = self.chunk_samples;
             send_wav_chunk(chunk, self.sample_rate, chunk_tx);
         }
     }
@@ -82,12 +78,10 @@ impl AudioChunker {
         if self.buffer.len() >= self.sample_rate as usize / 10 {
             let chunk: Vec<f32> = self.buffer.drain(..).collect();
             self.consecutive_silence = 0;
-            self.last_chunk_end = 0;
             send_wav_chunk(chunk, self.sample_rate, chunk_tx);
         } else {
             self.buffer.clear();
             self.consecutive_silence = 0;
-            self.last_chunk_end = 0;
         }
     }
 }

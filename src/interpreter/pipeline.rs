@@ -202,8 +202,7 @@ async fn translate(
 
     let user_prompt = format!("{}", text);
 
-    let client = reqwest::Client::new();
-    let response = client
+    let response = crate::api::client::HTTP_CLIENT
         .post("https://api.groq.com/openai/v1/chat/completions")
         .header("Authorization", format!("Bearer {}", api_key))
         .header("Content-Type", "application/json")

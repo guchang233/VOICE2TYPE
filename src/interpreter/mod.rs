@@ -30,6 +30,12 @@ impl InterpreterEngine {
             config.interpreter_subtitle_font_size(),
         );
 
+        subtitle_window.set_bilingual_mode(config.interpreter_bilingual_mode());
+        subtitle_window.set_original_font_size(config.interpreter_original_font_size());
+        subtitle_window.set_original_color(config.interpreter_original_color());
+        subtitle_window.set_translated_font_size(config.interpreter_translated_font_size());
+        subtitle_window.set_translated_color(config.interpreter_translated_color());
+
         write_log_line("[字幕] 正在初始化实时字幕引擎...", None);
 
         let (audio_tx, audio_rx): (std::sync::mpsc::Sender<f32>, std::sync::mpsc::Receiver<f32>) =
@@ -141,10 +147,23 @@ impl InterpreterEngine {
         })
     }
 
+    pub fn update_subtitle_config(&self, config: &ConfigManager) {
+        self.subtitle_window.set_bilingual_mode(config.interpreter_bilingual_mode());
+        self.subtitle_window.set_original_font_size(config.interpreter_original_font_size());
+        self.subtitle_window.set_original_color(config.interpreter_original_color());
+        self.subtitle_window.set_translated_font_size(config.interpreter_translated_font_size());
+        self.subtitle_window.set_translated_color(config.interpreter_translated_color());
+        self.subtitle_window.set_click_through(config.interpreter_subtitle_click_through());
+        self.subtitle_window.set_opacity(config.interpreter_subtitle_opacity());
+        self.subtitle_window.set_font_size(config.interpreter_subtitle_font_size());
+        self.subtitle_window.set_position(config.interpreter_subtitle_position());
+    }
+
     pub fn stop(&mut self) {
         write_log_line("[字幕] 正在停止实时字幕引擎...", None);
         self.stop_flag.store(true, Ordering::Relaxed);
         self.subtitle_window.hide();
+        self.subtitle_window.shutdown();
         pipeline::reset_last_transcription();
 
         if let Some(handle) = self.capture_handle.take() {

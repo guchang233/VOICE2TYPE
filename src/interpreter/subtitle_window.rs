@@ -16,7 +16,6 @@ use windows::{
 pub struct SubtitleLine {
     pub original: String,
     pub translated: Option<String>,
-    pub timestamp: Instant,
 }
 
 #[derive(Clone)]
@@ -57,10 +56,6 @@ impl SubtitleWindow {
         let _ = self.tx.send(SubtitleMessage::ShowBilingual { original, translated });
     }
 
-    pub fn show(&self, text: String) {
-        let _ = self.tx.send(SubtitleMessage::ShowBilingual { original: text, translated: None });
-    }
-
     pub fn hide(&self) {
         let _ = self.tx.send(SubtitleMessage::Hide);
     }
@@ -71,6 +66,34 @@ impl SubtitleWindow {
 
     pub fn set_opacity(&self, opacity: f32) {
         let _ = self.tx.send(SubtitleMessage::SetOpacity(opacity));
+    }
+
+    pub fn set_bilingual_mode(&self, mode: bool) {
+        let _ = self.tx.send(SubtitleMessage::SetBilingualMode(mode));
+    }
+
+    pub fn set_original_font_size(&self, size: u32) {
+        let _ = self.tx.send(SubtitleMessage::SetOriginalFontSize(size));
+    }
+
+    pub fn set_original_color(&self, color: String) {
+        let _ = self.tx.send(SubtitleMessage::SetOriginalColor(color));
+    }
+
+    pub fn set_translated_font_size(&self, size: u32) {
+        let _ = self.tx.send(SubtitleMessage::SetTranslatedFontSize(size));
+    }
+
+    pub fn set_translated_color(&self, color: String) {
+        let _ = self.tx.send(SubtitleMessage::SetTranslatedColor(color));
+    }
+
+    pub fn set_font_size(&self, size: u32) {
+        let _ = self.tx.send(SubtitleMessage::SetFontSize(size));
+    }
+
+    pub fn set_position(&self, pos: String) {
+        let _ = self.tx.send(SubtitleMessage::SetPosition(pos));
     }
 
     pub fn shutdown(&self) {
@@ -134,7 +157,7 @@ unsafe fn run_subtitle_window(
 
     let screen_width = GetSystemMetrics(SM_CXSCREEN);
     let screen_height = GetSystemMetrics(SM_CYSCREEN);
-    let initial_width = 800;
+    let initial_width = (screen_width * 4 / 5).min(1000);
     let initial_height = 120;
 
     let x = (screen_width - initial_width) / 2;
@@ -180,7 +203,6 @@ unsafe fn run_subtitle_window(
                         state.lines.push(SubtitleLine {
                             original,
                             translated,
-                            timestamp: Instant::now(),
                         });
                         let max_lines = if state.bilingual_mode { 2 } else { 3 };
                         while state.lines.len() > max_lines {
@@ -290,6 +312,9 @@ unsafe extern "system" fn subtitle_wnd_proc(
             PostQuitMessage(0);
             LRESULT(0)
         }
+        WM_NCHITTEST => {
+            LRESULT(HTCAPTION as isize)
+        }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
 }
@@ -305,32 +330,29 @@ unsafe fn draw_subtitle(hwnd: HWND, state: &SubtitleState) {
     let screen_height = GetSystemMetrics(SM_CYSCREEN);
 
     let padding = 20i32;
+    let w = (screen_width * 4 / 5).min(1000);
 
-    let mut total_rows = 0i32;
+    let mut row_specs: Vec<(i32, String, u32, (u8, u8, u8))> = Vec::new();
+
     for line in &state.lines {
         if state.bilingual_mode && line.translated.is_some() {
-            total_rows += 2;
+            let (tr, tg, tb) = parse_hex_color(&state.translated_color);
+            row_specs.push(((state.translated_font_size as f32 * 1.5) as i32, line.translated.as_ref().unwrap().clone(), state.translated_font_size, (tr, tg, tb)));
+            let (or, og, ob) = parse_hex_color(&state.original_color);
+            row_specs.push(((state.original_font_size as f32 * 1.4) as i32, line.original.clone(), state.original_font_size, (or, og, ob)));
         } else {
-            total_rows += 1;
+            let display_text = line.translated.as_deref().unwrap_or(&line.original);
+            let fs = if line.translated.is_some() { state.translated_font_size } else { state.font_size };
+            let (cr, cg, cb) = if line.translated.is_some() {
+                parse_hex_color(&state.translated_color)
+            } else {
+                (255, 255, 255)
+            };
+            row_specs.push(((fs as f32 * 1.6) as i32, display_text.to_string(), fs, (cr, cg, cb)));
         }
     }
 
-    let row_heights: Vec<i32> = {
-        let mut heights = Vec::new();
-        for line in &state.lines {
-            if state.bilingual_mode && line.translated.is_some() {
-                heights.push((state.translated_font_size as f32 * 1.5) as i32);
-                heights.push((state.original_font_size as f32 * 1.4) as i32);
-            } else {
-                let fs = if line.translated.is_some() { state.translated_font_size } else { state.font_size };
-                heights.push((fs as f32 * 1.6) as i32);
-            }
-        }
-        heights
-    };
-
-    let total_height: i32 = row_heights.iter().sum();
-    let w = 800i32;
+    let total_height: i32 = row_specs.iter().map(|(h, _, _, _)| *h).sum();
     let h = padding * 2 + total_height + 10;
 
     let x = (screen_width - w) / 2;
@@ -414,130 +436,87 @@ unsafe fn draw_subtitle(hwnd: HWND, state: &SubtitleState) {
         }
     }
 
-    SetBkMode(hdc_mem, TRANSPARENT);
+    let hdc_text = CreateCompatibleDC(hdc_screen);
+    let mut p_text_bits: *mut c_void = std::ptr::null_mut();
+    let text_bmp = CreateDIBSection(hdc_text, &bmi, DIB_RGB_COLORS, &mut p_text_bits, None, 0).unwrap();
+    let old_text_bmp = SelectObject(hdc_text, text_bmp);
 
-    let now = Instant::now();
+    SetBkMode(hdc_text, TRANSPARENT);
+
     let mut current_y = padding;
 
-    for (line_idx, line) in state.lines.iter().enumerate() {
-        let is_latest = line_idx == state.lines.len() - 1;
-        let age = now.duration_since(line.timestamp).as_secs_f32();
-        let fade_factor = if is_latest { 1.0f32 } else { 0.5f32.max(1.0 - age * 0.1) };
-
-        if state.bilingual_mode && line.translated.is_some() {
-            let (tr, tg, tb) = parse_hex_color(&state.translated_color);
-            let translated_color = COLORREF((tb as u32) << 16 | (tg as u32) << 8 | (tr as u32));
-            let translated_font = CreateFontW(
-                -(state.translated_font_size as i32),
-                0, 0, 0,
-                FW_MEDIUM.0 as i32,
-                0, 0, 0,
-                DEFAULT_CHARSET.0 as u32,
-                OUT_DEFAULT_PRECIS.0 as u32,
-                CLIP_DEFAULT_PRECIS.0 as u32,
-                CLEARTYPE_QUALITY.0 as u32,
-                DEFAULT_PITCH.0 as u32,
-                w!("Microsoft YaHei"),
-            );
-            let old_font = SelectObject(hdc_mem, translated_font);
-            SetTextColor(hdc_mem, translated_color);
-
-            let row_h = row_heights[line_idx * 2];
-            let mut text_rect = RECT {
-                left: padding + 10,
-                top: current_y,
-                right: w - padding - 10,
-                bottom: current_y + row_h,
-            };
-
-            let text = line.translated.as_ref().unwrap();
-            let mut text_wide: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
-            DrawTextW(hdc_mem, &mut text_wide, &mut text_rect, DT_VCENTER | DT_SINGLELINE | DT_WORD_ELLIPSIS);
-            alpha_blend_text_row(pixels, w, h, &text_rect);
-            current_y += row_h;
-
-            let (or, og, ob) = parse_hex_color(&state.original_color);
-            let original_color = COLORREF((ob as u32) << 16 | (og as u32) << 8 | (or as u32));
-            let original_font = CreateFontW(
-                -(state.original_font_size as i32),
-                0, 0, 0,
-                FW_NORMAL.0 as i32,
-                0, 0, 0,
-                DEFAULT_CHARSET.0 as u32,
-                OUT_DEFAULT_PRECIS.0 as u32,
-                CLIP_DEFAULT_PRECIS.0 as u32,
-                CLEARTYPE_QUALITY.0 as u32,
-                DEFAULT_PITCH.0 as u32,
-                w!("Microsoft YaHei"),
-            );
-            SelectObject(hdc_mem, original_font);
-            SetTextColor(hdc_mem, original_color);
-
-            let row_h2 = row_heights[line_idx * 2 + 1];
-            let mut text_rect2 = RECT {
-                left: padding + 10,
-                top: current_y,
-                right: w - padding - 10,
-                bottom: current_y + row_h2,
-            };
-
-            let mut text_wide2: Vec<u16> = line.original.encode_utf16().chain(Some(0)).collect();
-            DrawTextW(hdc_mem, &mut text_wide2, &mut text_rect2, DT_VCENTER | DT_SINGLELINE | DT_WORD_ELLIPSIS);
-            alpha_blend_text_row(pixels, w, h, &text_rect2);
-            current_y += row_h2;
-
-            SelectObject(hdc_mem, old_font);
-            DeleteObject(translated_font);
-            DeleteObject(original_font);
-        } else {
-            let display_text = if line.translated.is_some() {
-                line.translated.as_ref().unwrap()
-            } else {
-                &line.original
-            };
-
-            let fs = if line.translated.is_some() { state.translated_font_size } else { state.font_size };
-            let (cr, cg, cb) = if line.translated.is_some() {
-                parse_hex_color(&state.translated_color)
-            } else if is_latest {
-                (255, 255, 255)
-            } else {
-                (170, 160, 170)
-            };
-            let text_color = COLORREF((cb as u32) << 16 | (cg as u32) << 8 | (cr as u32));
-
-            let font = CreateFontW(
-                -(fs as i32),
-                0, 0, 0,
-                FW_MEDIUM.0 as i32,
-                0, 0, 0,
-                DEFAULT_CHARSET.0 as u32,
-                OUT_DEFAULT_PRECIS.0 as u32,
-                CLIP_DEFAULT_PRECIS.0 as u32,
-                CLEARTYPE_QUALITY.0 as u32,
-                DEFAULT_PITCH.0 as u32,
-                w!("Microsoft YaHei"),
-            );
-            let old_font = SelectObject(hdc_mem, font);
-            SetTextColor(hdc_mem, text_color);
-
-            let row_h = row_heights[line_idx];
-            let mut text_rect = RECT {
-                left: padding + 10,
-                top: current_y,
-                right: w - padding - 10,
-                bottom: current_y + row_h,
-            };
-
-            let mut text_wide: Vec<u16> = display_text.encode_utf16().chain(Some(0)).collect();
-            DrawTextW(hdc_mem, &mut text_wide, &mut text_rect, DT_VCENTER | DT_SINGLELINE | DT_WORD_ELLIPSIS);
-            alpha_blend_text_row(pixels, w, h, &text_rect);
-            current_y += row_h;
-
-            SelectObject(hdc_mem, old_font);
-            DeleteObject(font);
+    for (row_h, text, font_size, (cr, cg, cb)) in &row_specs {
+        let text_pixels = std::slice::from_raw_parts_mut(p_text_bits as *mut u32, (w * h) as usize);
+        for p in text_pixels.iter_mut() {
+            *p = 0xFF000000;
         }
+
+        let font = CreateFontW(
+            -(*font_size as i32),
+            0, 0, 0,
+            FW_MEDIUM.0 as i32,
+            0, 0, 0,
+            DEFAULT_CHARSET.0 as u32,
+            OUT_DEFAULT_PRECIS.0 as u32,
+            CLIP_DEFAULT_PRECIS.0 as u32,
+            CLEARTYPE_QUALITY.0 as u32,
+            DEFAULT_PITCH.0 as u32,
+            w!("Microsoft YaHei"),
+        );
+        let old_font = SelectObject(hdc_text, font);
+
+        SetTextColor(hdc_text, COLORREF((*cb as u32) << 16 | (*cg as u32) << 8 | (*cr as u32)));
+
+        let mut text_rect = RECT {
+            left: padding + 10,
+            top: current_y,
+            right: w - padding - 10,
+            bottom: current_y + row_h,
+        };
+
+        let mut text_wide: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
+        DrawTextW(hdc_text, &mut text_wide, &mut text_rect, DT_VCENTER | DT_SINGLELINE | DT_WORD_ELLIPSIS);
+
+        SelectObject(hdc_text, old_font);
+        DeleteObject(font);
+
+        let text_pixels = std::slice::from_raw_parts(p_text_bits as *const u32, (w * h) as usize);
+        for ty in current_y.max(0)..(current_y + row_h).min(h) {
+            let row_offset = ty * w;
+            for tx in (padding + 10).max(0)..(w - padding - 10).min(w) {
+                let idx = (row_offset + tx) as usize;
+                let text_val = text_pixels[idx];
+                let tr = (text_val >> 16) & 0xFF;
+                let tg = (text_val >> 8) & 0xFF;
+                let tb = text_val & 0xFF;
+                let brightness = tr.max(tg).max(tb);
+                if brightness > 10 {
+                    let text_alpha = brightness as u32;
+                    let bg_val = pixels[idx];
+                    let bg_a = (bg_val >> 24) & 0xFF;
+                    let bg_r_val = ((bg_val >> 16) & 0xFF) * 255 / bg_a.max(1);
+                    let bg_g_val = ((bg_val >> 8) & 0xFF) * 255 / bg_a.max(1);
+                    let bg_b_val = (bg_val & 0xFF) * 255 / bg_a.max(1);
+
+                    let out_a = (text_alpha + ((255 - text_alpha) * bg_a as u32) / 255).min(255);
+                    let out_r = (*cr as u32 * text_alpha + bg_r_val * (255 - text_alpha) * bg_a as u32 / 255) / out_a.max(1);
+                    let out_g = (*cg as u32 * text_alpha + bg_g_val * (255 - text_alpha) * bg_a as u32 / 255) / out_a.max(1);
+                    let out_b = (*cb as u32 * text_alpha + bg_b_val * (255 - text_alpha) * bg_a as u32 / 255) / out_a.max(1);
+
+                    let premult_r = out_r * out_a / 255;
+                    let premult_g = out_g * out_a / 255;
+                    let premult_b = out_b * out_a / 255;
+                    pixels[idx] = (out_a << 24) | (premult_r << 16) | (premult_g << 8) | premult_b;
+                }
+            }
+        }
+
+        current_y += row_h;
     }
+
+    SelectObject(hdc_text, old_text_bmp);
+    DeleteObject(text_bmp);
+    DeleteDC(hdc_text);
 
     let pt_src = POINT { x: 0, y: 0 };
     let size = SIZE { cx: w, cy: h };
@@ -569,31 +548,6 @@ unsafe fn draw_subtitle(hwnd: HWND, state: &SubtitleState) {
     DeleteObject(hbitmap);
     DeleteDC(hdc_mem);
     ReleaseDC(None, hdc_screen);
-}
-
-#[cfg(target_os = "windows")]
-unsafe fn alpha_blend_text_row(pixels: &mut [u32], w: i32, h: i32, text_rect: &RECT) {
-    let text_left = text_rect.left.max(0);
-    let text_right = text_rect.right.min(w);
-    let text_top = text_rect.top.max(0);
-    let text_bottom = text_rect.bottom.min(h);
-
-    for ty in text_top..text_bottom {
-        let row_offset = ty * w;
-        for tx in text_left..text_right {
-            let idx = (row_offset + tx) as usize;
-            let val = pixels[idx];
-            let r = (val >> 16) & 0xFF;
-            let g = (val >> 8) & 0xFF;
-            let b = val & 0xFF;
-            let max_c = r.max(g).max(b);
-            if max_c > 0 {
-                let current_a = (val >> 24) & 0xFF;
-                let target_a = current_a.max(max_c);
-                pixels[idx] = (target_a << 24) | (val & 0x00FFFFFF);
-            }
-        }
-    }
 }
 
 #[cfg(not(target_os = "windows"))]

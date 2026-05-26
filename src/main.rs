@@ -137,6 +137,14 @@ pub fn stop_interpreter() {
     notify::queue_tray_message("实时字幕", "实时字幕已停止");
 }
 
+#[cfg(target_os = "windows")]
+pub fn update_interpreter_subtitle_config(config: &ConfigManager) {
+    let guard = INTERPRETER.lock().unwrap();
+    if let Some(engine) = guard.as_ref() {
+        engine.update_subtitle_config(config);
+    }
+}
+
 fn main() -> Result<()> {
     #[cfg(target_os = "windows")]
     {

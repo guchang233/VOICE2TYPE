@@ -17,12 +17,6 @@ use crate::utils::logger::{write_log, LogLevel};
 
 const AUDCLNT_STREAMFLAGS_LOOPBACK: u32 = 0x00020000;
 
-pub struct LoopbackCapture {
-    pub sample_rate: u32,
-    pub stop_flag: Arc<AtomicBool>,
-    pub audio_tx: Sender<f32>,
-}
-
 #[cfg(target_os = "windows")]
 pub fn start_loopback_capture(
     stop_flag: Arc<AtomicBool>,
@@ -52,9 +46,7 @@ fn capture_loop(
 
         let device = enumerator.GetDefaultAudioEndpoint(eRender, eConsole)?;
 
-        let audio_client: IAudioClient = device.Activate(CLSCTX_ALL, None)?;
-
-        let format_ptr = audio_client.GetMixFormat()?;
+        let format_ptr = device.Activate::<IAudioClient>(CLSCTX_ALL, None)?.GetMixFormat()?;
         let format = &*format_ptr;
 
         let format_tag = (*format).wFormatTag;
@@ -62,56 +54,53 @@ fn capture_loop(
         let channels = (*format).nChannels as u32;
         let bits_per_sample = (*format).wBitsPerSample;
 
-        write_log(LogLevel::INFO, &format!("[字幕] WASAPI mix format: 采样率={}, 声道={}, 位深={}, wFormatTag={}", sample_rate, channels, bits_per_sample, format_tag), None);
+        let effective_format_tag = if format_tag == 0xFFFE {
+            let extensible = format as *const WAVEFORMATEX as *const WAVEFORMATEXTENSIBLE;
+            let sub_format = (*extensible).SubFormat;
+            if sub_format == windows::core::GUID::from_values(0x00000003, 0x0000, 0x0010, [0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71]) {
+                3u16
+            } else {
+                1u16
+            }
+        } else {
+            format_tag
+        };
+
+        let effective_bits = if effective_format_tag == 3 { 32u16 } else { 16u16 };
+
+        write_log(LogLevel::INFO, &format!("[字幕] WASAPI mix format: 采样率={}, 声道={}, 位深={}, wFormatTag={}, effectiveTag={}, effectiveBits={}",
+            sample_rate, channels, bits_per_sample, format_tag, effective_format_tag, effective_bits), None);
 
         let buffer_duration = 10000000i64;
-        let null_init = audio_client.Initialize(
-            AUDCLNT_SHAREMODE_SHARED,
-            AUDCLNT_STREAMFLAGS_LOOPBACK,
-            buffer_duration,
-            0,
-            std::ptr::null(),
-            None,
-        );
 
-        if let Err(e) = null_init {
-            write_log(LogLevel::WARN, &format!("[字幕] NULL格式初始化失败: {}, 尝试简化格式...", e), None);
+        let audio_client = try_initialize(&device, buffer_duration, std::ptr::null())
+            .or_else(|_| {
+                write_log(LogLevel::WARN, "[字幕] NULL格式初始化失败，尝试简化格式...", None);
+                let simple_format = WAVEFORMATEX {
+                    wFormatTag: effective_format_tag,
+                    nChannels: channels as u16,
+                    nSamplesPerSec: sample_rate,
+                    nAvgBytesPerSec: sample_rate * (channels * effective_bits as u32 / 8),
+                    nBlockAlign: (channels * effective_bits as u32 / 8) as u16,
+                    wBitsPerSample: effective_bits,
+                    cbSize: 0,
+                };
+                try_initialize(&device, buffer_duration, &simple_format as *const WAVEFORMATEX)
+            })
+            .or_else(|_| {
+                write_log(LogLevel::WARN, "[字幕] 简化格式也失败，尝试原始mix format...", None);
+                try_initialize(&device, buffer_duration, format_ptr)
+            })
+            .map_err(|e| {
+                CoTaskMemFree(Some(format_ptr as *const _ as *mut _));
+                e
+            })?;
 
-            let simple_format = WAVEFORMATEX {
-                wFormatTag: if bits_per_sample == 32 { 3 } else { 1 },
-                nChannels: channels as u16,
-                nSamplesPerSec: sample_rate,
-                nAvgBytesPerSec: sample_rate * (channels * bits_per_sample as u32 / 8),
-                nBlockAlign: (channels * bits_per_sample as u32 / 8) as u16,
-                wBitsPerSample: bits_per_sample,
-                cbSize: 0,
-            };
-
-            let simple_init = audio_client.Initialize(
-                AUDCLNT_SHAREMODE_SHARED,
-                AUDCLNT_STREAMFLAGS_LOOPBACK,
-                buffer_duration,
-                0,
-                &simple_format as *const WAVEFORMATEX,
-                None,
-            );
-
-            if let Err(e2) = simple_init {
-                write_log(LogLevel::WARN, &format!("[字幕] 简化格式初始化失败: {}, 尝试原始mix format...", e2), None);
-                audio_client.Initialize(
-                    AUDCLNT_SHAREMODE_SHARED,
-                    AUDCLNT_STREAMFLAGS_LOOPBACK,
-                    buffer_duration,
-                    0,
-                    format_ptr,
-                    None,
-                )?;
-            }
-        }
+        let capture_client: IAudioCaptureClient = audio_client.GetService()?;
 
         let _ = sample_rate_tx.send(sample_rate);
 
-        let capture_client: IAudioCaptureClient = audio_client.GetService()?;
+        CoTaskMemFree(Some(format_ptr as *const _ as *mut _));
 
         audio_client.Start()?;
         write_log(LogLevel::INFO, "[字幕] 音频捕获已启动", None);
@@ -145,7 +134,7 @@ fn capture_loop(
 
             let num_samples = num_frames as usize * channels as usize;
 
-            if bits_per_sample == 32 {
+            if effective_bits == 32 {
                 let samples = std::slice::from_raw_parts(data_ptr as *const f32, num_samples);
                 for frame in samples.chunks(channels as usize) {
                     let mono: f32 = frame.iter().sum::<f32>() / channels as f32;
@@ -153,7 +142,7 @@ fn capture_loop(
                         break;
                     }
                 }
-            } else if bits_per_sample == 16 {
+            } else if effective_bits == 16 {
                 let samples = std::slice::from_raw_parts(data_ptr as *const i16, num_samples);
                 for frame in samples.chunks(channels as usize) {
                     let mono: f32 = frame.iter()
@@ -174,6 +163,24 @@ fn capture_loop(
     }
 
     Ok(())
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn try_initialize(
+    device: &IMMDevice,
+    buffer_duration: i64,
+    format: *const WAVEFORMATEX,
+) -> Result<IAudioClient> {
+    let audio_client: IAudioClient = device.Activate(CLSCTX_ALL, None)?;
+    audio_client.Initialize(
+        AUDCLNT_SHAREMODE_SHARED,
+        AUDCLNT_STREAMFLAGS_LOOPBACK,
+        buffer_duration,
+        0,
+        format,
+        None,
+    )?;
+    Ok(audio_client)
 }
 
 #[cfg(not(target_os = "windows"))]
