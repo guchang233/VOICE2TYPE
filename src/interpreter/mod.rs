@@ -13,7 +13,7 @@ use subtitle_window::SubtitleWindow;
 
 pub struct InterpreterEngine {
     stop_flag: Arc<AtomicBool>,
-    subtitle_window: SubtitleWindow,
+    pub subtitle_window: SubtitleWindow,
     capture_handle: Option<std::thread::JoinHandle<()>>,
     chunker_handle: Option<std::thread::JoinHandle<()>>,
     pipeline_handle: Option<std::thread::JoinHandle<()>>,

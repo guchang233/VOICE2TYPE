@@ -68,6 +68,14 @@ static INTERPRETER: once_cell::sync::Lazy<std::sync::Mutex<Option<interpreter::I
     once_cell::sync::Lazy::new(|| std::sync::Mutex::new(None));
 
 #[cfg(target_os = "windows")]
+pub fn toggle_subtitle_visibility() {
+    let guard = INTERPRETER.lock().unwrap();
+    if let Some(engine) = guard.as_ref() {
+        engine.subtitle_window.toggle_visibility();
+    }
+}
+
+#[cfg(target_os = "windows")]
 static LOG_MENU_NEEDS_UNCHECK: AtomicBool = AtomicBool::new(false);
 
 #[cfg(target_os = "windows")]

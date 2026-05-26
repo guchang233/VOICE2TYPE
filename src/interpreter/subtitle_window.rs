@@ -15,12 +15,14 @@ use windows::{
 };
 
 pub static SETTINGS_REQUESTED: AtomicBool = AtomicBool::new(false);
+pub static SUBTITLE_VISIBLE: AtomicBool = AtomicBool::new(true);
 
 #[cfg(target_os = "windows")]
 thread_local! {
     static SUBTITLE_TX: RefCell<Option<Sender<SubtitleMessage>>> = RefCell::new(None);
     static SUBTITLE_LOCKED: Cell<bool> = Cell::new(false);
     static SUBTITLE_CLICK_THROUGH: Cell<bool> = Cell::new(false);
+    static SUBTITLE_USER_HIDDEN: Cell<bool> = Cell::new(false);
 }
 
 #[derive(Debug, Clone)]
@@ -48,6 +50,7 @@ pub enum SubtitleMessage {
     ToggleLock,
     OpenSettings,
     SetLocked(bool),
+    ToggleVisibility,
     Shutdown,
 }
 
@@ -110,6 +113,10 @@ impl SubtitleWindow {
         let _ = self.tx.send(SubtitleMessage::SetLocked(locked));
     }
 
+    pub fn toggle_visibility(&self) {
+        let _ = self.tx.send(SubtitleMessage::ToggleVisibility);
+    }
+
     pub fn shutdown(&self) {
         let _ = self.tx.send(SubtitleMessage::Shutdown);
     }
@@ -128,6 +135,7 @@ struct SubtitleState {
     translated_font_size: u32,
     translated_color: String,
     locked: bool,
+    user_hidden: bool,
     last_update: Instant,
     hide_after: Duration,
 }
@@ -144,6 +152,26 @@ fn parse_hex_color(hex: &str) -> (u8, u8, u8) {
     }
 }
 
+const BTN_SIZE: i32 = 22;
+const BTN_MARGIN: i32 = 6;
+const BTN_GAP: i32 = 3;
+
+fn btn_layout(w: i32) -> [(i32, i32, i32, i32); 4] {
+    let y1 = BTN_MARGIN;
+    let y2 = BTN_MARGIN + BTN_SIZE;
+    let r0 = w - BTN_MARGIN;
+    let r1 = r0 - BTN_SIZE;
+    let r2 = r1 - BTN_GAP - BTN_SIZE;
+    let r3 = r2 - BTN_GAP - BTN_SIZE;
+    let r4 = r3 - BTN_GAP - BTN_SIZE;
+    [
+        (r1, y1, r0, y2),
+        (r2, y1, r1 - BTN_GAP, y2),
+        (r3, y1, r2 - BTN_GAP, y2),
+        (r4, y1, r3 - BTN_GAP, y2),
+    ]
+}
+
 #[cfg(target_os = "windows")]
 unsafe fn run_subtitle_window(
     rx: Receiver<SubtitleMessage>,
@@ -156,6 +184,7 @@ unsafe fn run_subtitle_window(
     SUBTITLE_TX.with(|tl| *tl.borrow_mut() = Some(tx_for_wnd));
     SUBTITLE_LOCKED.with(|tl| tl.set(false));
     SUBTITLE_CLICK_THROUGH.with(|tl| tl.set(click_through));
+    SUBTITLE_USER_HIDDEN.with(|tl| tl.set(false));
 
     let instance = GetModuleHandleW(None).unwrap();
     let class_name = w!("Voice2TypeSubtitleClass");
@@ -206,6 +235,7 @@ unsafe fn run_subtitle_window(
         translated_font_size: 24,
         translated_color: "#FFFFFF".to_string(),
         locked: false,
+        user_hidden: false,
         last_update: Instant::now(),
         hide_after: Duration::from_secs(8),
     };
@@ -226,12 +256,16 @@ unsafe fn run_subtitle_window(
                         }
                         state.visible = true;
                         state.last_update = Instant::now();
-                        draw_subtitle(hwnd, &state);
+                        SUBTITLE_VISIBLE.store(true, Ordering::SeqCst);
+                        if !state.user_hidden {
+                            draw_subtitle(hwnd, &state);
+                        }
                     }
                 }
                 SubtitleMessage::Hide => {
                     state.visible = false;
                     state.lines.clear();
+                    SUBTITLE_VISIBLE.store(false, Ordering::SeqCst);
                     ShowWindow(hwnd, SW_HIDE);
                 }
                 SubtitleMessage::SetClickThrough(enabled) => {
@@ -240,50 +274,50 @@ unsafe fn run_subtitle_window(
                 }
                 SubtitleMessage::SetOpacity(op) => {
                     state.opacity = op.clamp(0.1, 1.0);
-                    if state.visible {
+                    if state.visible && !state.user_hidden {
                         draw_subtitle(hwnd, &state);
                     }
                 }
                 SubtitleMessage::SetPosition(pos) => {
                     state.position = pos;
-                    if state.visible {
+                    if state.visible && !state.user_hidden {
                         draw_subtitle(hwnd, &state);
                     }
                 }
                 SubtitleMessage::SetFontSize(size) => {
                     state.font_size = size;
-                    if state.visible {
+                    if state.visible && !state.user_hidden {
                         draw_subtitle(hwnd, &state);
                     }
                 }
                 SubtitleMessage::SetOriginalFontSize(size) => {
                     state.original_font_size = size;
-                    if state.visible {
+                    if state.visible && !state.user_hidden {
                         draw_subtitle(hwnd, &state);
                     }
                 }
                 SubtitleMessage::SetOriginalColor(color) => {
                     state.original_color = color;
-                    if state.visible {
+                    if state.visible && !state.user_hidden {
                         draw_subtitle(hwnd, &state);
                     }
                 }
                 SubtitleMessage::SetTranslatedFontSize(size) => {
                     state.translated_font_size = size;
-                    if state.visible {
+                    if state.visible && !state.user_hidden {
                         draw_subtitle(hwnd, &state);
                     }
                 }
                 SubtitleMessage::SetTranslatedColor(color) => {
                     state.translated_color = color;
-                    if state.visible {
+                    if state.visible && !state.user_hidden {
                         draw_subtitle(hwnd, &state);
                     }
                 }
                 SubtitleMessage::ToggleLock => {
                     state.locked = !state.locked;
                     SUBTITLE_LOCKED.with(|tl| tl.set(state.locked));
-                    if state.visible {
+                    if state.visible && !state.user_hidden {
                         draw_subtitle(hwnd, &state);
                     }
                 }
@@ -293,7 +327,17 @@ unsafe fn run_subtitle_window(
                 SubtitleMessage::SetLocked(locked) => {
                     state.locked = locked;
                     SUBTITLE_LOCKED.with(|tl| tl.set(locked));
-                    if state.visible {
+                    if state.visible && !state.user_hidden {
+                        draw_subtitle(hwnd, &state);
+                    }
+                }
+                SubtitleMessage::ToggleVisibility => {
+                    state.user_hidden = !state.user_hidden;
+                    SUBTITLE_USER_HIDDEN.with(|tl| tl.set(state.user_hidden));
+                    SUBTITLE_VISIBLE.store(!state.user_hidden, Ordering::SeqCst);
+                    if state.user_hidden {
+                        ShowWindow(hwnd, SW_HIDE);
+                    } else if state.visible {
                         draw_subtitle(hwnd, &state);
                     }
                 }
@@ -305,9 +349,10 @@ unsafe fn run_subtitle_window(
             }
         }
 
-        if state.visible && state.last_update.elapsed() > state.hide_after {
+        if state.visible && !state.user_hidden && state.last_update.elapsed() > state.hide_after {
             state.visible = false;
             state.lines.clear();
+            SUBTITLE_VISIBLE.store(false, Ordering::SeqCst);
             ShowWindow(hwnd, SW_HIDE);
         }
 
@@ -346,21 +391,14 @@ unsafe extern "system" fn subtitle_wnd_proc(
             let local_y = y - rect.top;
             let w = rect.right - rect.left;
 
-            let btn_size = 24i32;
-            let btn_margin = 8i32;
+            let btns = btn_layout(w);
 
-            let lock_x1 = w - btn_margin - btn_size;
-            let lock_x2 = w - btn_margin;
-            let lock_y1 = btn_margin;
-            let lock_y2 = btn_margin + btn_size;
+            let in_btn_0 = local_x >= btns[0].0 && local_x <= btns[0].2 && local_y >= btns[0].1 && local_y <= btns[0].3;
+            let in_btn_1 = local_x >= btns[1].0 && local_x <= btns[1].2 && local_y >= btns[1].1 && local_y <= btns[1].3;
+            let in_btn_2 = local_x >= btns[2].0 && local_x <= btns[2].2 && local_y >= btns[2].1 && local_y <= btns[2].3;
+            let in_btn_3 = local_x >= btns[3].0 && local_x <= btns[3].2 && local_y >= btns[3].1 && local_y <= btns[3].3;
 
-            let settings_x1 = w - btn_margin - btn_size * 2 - 4;
-            let settings_x2 = w - btn_margin - btn_size - 4;
-
-            let in_button = (local_x >= lock_x1 && local_x <= lock_x2 && local_y >= lock_y1 && local_y <= lock_y2)
-                || (local_x >= settings_x1 && local_x <= settings_x2 && local_y >= lock_y1 && local_y <= lock_y2);
-
-            if in_button {
+            if in_btn_0 || in_btn_1 || in_btn_2 || in_btn_3 {
                 LRESULT(HTCLIENT as isize)
             } else if SUBTITLE_LOCKED.get() {
                 LRESULT(HTCLIENT as isize)
@@ -368,6 +406,25 @@ unsafe extern "system" fn subtitle_wnd_proc(
                 LRESULT(HTTRANSPARENT as isize)
             } else {
                 LRESULT(HTCAPTION as isize)
+            }
+        }
+        WM_LBUTTONDOWN => {
+            let x = (lparam.0 & 0xFFFF) as i16 as i32;
+            let y = ((lparam.0 >> 16) & 0xFFFF) as i16 as i32;
+
+            let mut rect = RECT::default();
+            let _ = GetClientRect(hwnd, &mut rect);
+            let w = rect.right;
+
+            let btns = btn_layout(w);
+
+            let in_drag = local_x_in_btn(x, &btns[3]) && local_y_in_btn(y, &btns[3]);
+
+            if in_drag && !SUBTITLE_LOCKED.get() {
+                let _ = PostMessageW(hwnd, WM_NCLBUTTONDOWN, WPARAM(HTCAPTION as usize), lparam);
+                LRESULT(0)
+            } else {
+                DefWindowProcW(hwnd, msg, wparam, lparam)
             }
         }
         WM_LBUTTONUP => {
@@ -378,24 +435,15 @@ unsafe extern "system" fn subtitle_wnd_proc(
             let _ = GetClientRect(hwnd, &mut rect);
             let w = rect.right;
 
-            let btn_size = 24i32;
-            let btn_margin = 8i32;
-
-            let lock_x1 = w - btn_margin - btn_size;
-            let lock_x2 = w - btn_margin;
-            let lock_y1 = btn_margin;
-            let lock_y2 = btn_margin + btn_size;
-
-            let settings_x1 = w - btn_margin - btn_size * 2 - 4;
-            let settings_x2 = w - btn_margin - btn_size - 4;
-            let settings_y1 = btn_margin;
-            let settings_y2 = btn_margin + btn_size;
+            let btns = btn_layout(w);
 
             SUBTITLE_TX.with(|tx| {
                 if let Some(sender) = tx.borrow().as_ref() {
-                    if x >= lock_x1 && x <= lock_x2 && y >= lock_y1 && y <= lock_y2 {
+                    if local_x_in_btn(x, &btns[0]) && local_y_in_btn(y, &btns[0]) {
+                        let _ = sender.send(SubtitleMessage::ToggleVisibility);
+                    } else if local_x_in_btn(x, &btns[1]) && local_y_in_btn(y, &btns[1]) {
                         let _ = sender.send(SubtitleMessage::ToggleLock);
-                    } else if x >= settings_x1 && x <= settings_x2 && y >= settings_y1 && y <= settings_y2 {
+                    } else if local_x_in_btn(x, &btns[2]) && local_y_in_btn(y, &btns[2]) {
                         let _ = sender.send(SubtitleMessage::OpenSettings);
                     }
                 }
@@ -407,13 +455,53 @@ unsafe extern "system" fn subtitle_wnd_proc(
 }
 
 #[cfg(target_os = "windows")]
-fn draw_button_bg(pixels: &mut [u32], w: i32, h: i32, x: i32, y: i32, size: i32, alpha: u32) {
-    for by in y..(y + size) {
-        for bx in x..(x + size) {
+fn local_x_in_btn(x: i32, btn: &(i32, i32, i32, i32)) -> bool {
+    x >= btn.0 && x <= btn.2
+}
+
+#[cfg(target_os = "windows")]
+fn local_y_in_btn(y: i32, btn: &(i32, i32, i32, i32)) -> bool {
+    y >= btn.1 && y <= btn.3
+}
+
+#[cfg(target_os = "windows")]
+fn draw_button_bg(pixels: &mut [u32], w: i32, h: i32, x1: i32, y1: i32, x2: i32, y2: i32, alpha: u32) {
+    for by in y1..y2 {
+        for bx in x1..x2 {
             if bx >= 0 && bx < w && by >= 0 && by < h {
                 let idx = (by * w + bx) as usize;
                 let premult = alpha * 40 / 255;
                 pixels[idx] = (alpha << 24) | (premult << 16) | (premult << 8) | premult;
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn draw_icon(pixels: &mut [u32], p_text_bits: *const u32, w: i32, h: i32, x1: i32, y1: i32, x2: i32, y2: i32) {
+    let text_pixels = std::slice::from_raw_parts(p_text_bits, (w * h) as usize);
+    for by in y1.max(0)..y2.min(h) {
+        let row_offset = by * w;
+        for bx in x1.max(0)..x2.min(w) {
+            let idx = (row_offset + bx) as usize;
+            let text_val = text_pixels[idx];
+            let tb = text_val & 0xFF;
+            let brightness = tb;
+            if brightness > 10 {
+                let text_alpha = brightness as u32;
+                let bg_val = pixels[idx];
+                let bg_a = (bg_val >> 24) & 0xFF;
+                let bg_r_val = ((bg_val >> 16) & 0xFF) * 255 / bg_a.max(1);
+                let bg_g_val = ((bg_val >> 8) & 0xFF) * 255 / bg_a.max(1);
+                let bg_b_val = (bg_val & 0xFF) * 255 / bg_a.max(1);
+                let out_a = (text_alpha + ((255 - text_alpha) * bg_a as u32) / 255).min(255);
+                let out_r = (255u32 * text_alpha + bg_r_val * (255 - text_alpha) * bg_a as u32 / 255) / out_a.max(1);
+                let out_g = (255u32 * text_alpha + bg_g_val * (255 - text_alpha) * bg_a as u32 / 255) / out_a.max(1);
+                let out_b = (255u32 * text_alpha + bg_b_val * (255 - text_alpha) * bg_a as u32 / 255) / out_a.max(1);
+                let premult_r = out_r * out_a / 255;
+                let premult_g = out_g * out_a / 255;
+                let premult_b = out_b * out_a / 255;
+                pixels[idx] = (out_a << 24) | (premult_r << 16) | (premult_g << 8) | premult_b;
             }
         }
     }
@@ -608,33 +696,33 @@ unsafe fn draw_subtitle(hwnd: HWND, state: &SubtitleState) {
         current_y += row_h;
     }
 
-    let btn_size = 24i32;
-    let btn_margin = 8i32;
+    let btns = btn_layout(w);
 
-    let lock_x = w - btn_margin - btn_size;
-    let lock_y = btn_margin;
-    let settings_x = w - btn_margin - btn_size * 2 - 4;
-    let settings_y = btn_margin;
-
-    draw_button_bg(pixels, w, h, lock_x, lock_y, btn_size, 160);
-    draw_button_bg(pixels, w, h, settings_x, settings_y, btn_size, 160);
+    draw_button_bg(pixels, w, h, btns[0].0, btns[0].1, btns[0].2, btns[0].3, 160);
+    draw_button_bg(pixels, w, h, btns[1].0, btns[1].1, btns[1].2, btns[1].3, 160);
+    draw_button_bg(pixels, w, h, btns[2].0, btns[2].1, btns[2].2, btns[2].3, 160);
+    if !state.locked {
+        draw_button_bg(pixels, w, h, btns[3].0, btns[3].1, btns[3].2, btns[3].3, 120);
+    }
 
     let btn_font = CreateFontW(
-        -14,
+        -12,
         0, 0, 0,
-        FW_MEDIUM.0 as i32,
+        FW_BOLD.0 as i32,
         0, 0, 0,
         DEFAULT_CHARSET.0 as u32,
         OUT_DEFAULT_PRECIS.0 as u32,
         CLIP_DEFAULT_PRECIS.0 as u32,
         CLEARTYPE_QUALITY.0 as u32,
         DEFAULT_PITCH.0 as u32,
-        w!("Microsoft YaHei"),
+        w!("Segoe UI"),
     );
     let old_btn_font = SelectObject(hdc_text, btn_font);
 
-    let lock_text = if state.locked { "\u{25A3}" } else { "\u{25A1}" };
-    let settings_text = "\u{2699}";
+    let eye_text = if state.user_hidden { "X" } else { "O" };
+    let lock_text = if state.locked { "L" } else { "U" };
+    let settings_text = "S";
+    let drag_text = "+";
 
     {
         let text_pixels = std::slice::from_raw_parts_mut(p_text_bits as *mut u32, (w * h) as usize);
@@ -644,74 +732,28 @@ unsafe fn draw_subtitle(hwnd: HWND, state: &SubtitleState) {
 
         SetTextColor(hdc_text, COLORREF(0x00FFFFFF));
 
-        let mut lock_wide: Vec<u16> = lock_text.encode_utf16().chain(Some(0)).collect();
-        let mut lock_rect = RECT {
-            left: lock_x,
-            top: lock_y,
-            right: lock_x + btn_size,
-            bottom: lock_y + btn_size,
+        let draw_btn_text = |text: &str, idx: usize| {
+            let mut wide: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
+            let mut rect = RECT {
+                left: btns[idx].0,
+                top: btns[idx].1,
+                right: btns[idx].2,
+                bottom: btns[idx].3,
+            };
+            DrawTextW(hdc_text, &mut wide, &mut rect, DT_VCENTER | DT_SINGLELINE | DT_CENTER);
         };
-        DrawTextW(hdc_text, &mut lock_wide, &mut lock_rect, DT_VCENTER | DT_SINGLELINE | DT_CENTER);
 
-        let mut settings_wide: Vec<u16> = settings_text.encode_utf16().chain(Some(0)).collect();
-        let mut settings_rect = RECT {
-            left: settings_x,
-            top: settings_y,
-            right: settings_x + btn_size,
-            bottom: settings_y + btn_size,
-        };
-        DrawTextW(hdc_text, &mut settings_wide, &mut settings_rect, DT_VCENTER | DT_SINGLELINE | DT_CENTER);
+        draw_btn_text(eye_text, 0);
+        draw_btn_text(lock_text, 1);
+        draw_btn_text(settings_text, 2);
+        draw_btn_text(drag_text, 3);
 
-        let text_pixels = std::slice::from_raw_parts(p_text_bits as *const u32, (w * h) as usize);
-        for by in lock_y..(lock_y + btn_size).min(h) {
-            let row_offset = by * w;
-            for bx in lock_x..(lock_x + btn_size).min(w) {
-                let idx = (row_offset + bx) as usize;
-                let text_val = text_pixels[idx];
-                let tb = text_val & 0xFF;
-                let brightness = tb;
-                if brightness > 10 {
-                    let text_alpha = brightness as u32;
-                    let bg_val = pixels[idx];
-                    let bg_a = (bg_val >> 24) & 0xFF;
-                    let bg_r_val = ((bg_val >> 16) & 0xFF) * 255 / bg_a.max(1);
-                    let bg_g_val = ((bg_val >> 8) & 0xFF) * 255 / bg_a.max(1);
-                    let bg_b_val = (bg_val & 0xFF) * 255 / bg_a.max(1);
-                    let out_a = (text_alpha + ((255 - text_alpha) * bg_a as u32) / 255).min(255);
-                    let out_r = (255u32 * text_alpha + bg_r_val * (255 - text_alpha) * bg_a as u32 / 255) / out_a.max(1);
-                    let out_g = (255u32 * text_alpha + bg_g_val * (255 - text_alpha) * bg_a as u32 / 255) / out_a.max(1);
-                    let out_b = (255u32 * text_alpha + bg_b_val * (255 - text_alpha) * bg_a as u32 / 255) / out_a.max(1);
-                    let premult_r = out_r * out_a / 255;
-                    let premult_g = out_g * out_a / 255;
-                    let premult_b = out_b * out_a / 255;
-                    pixels[idx] = (out_a << 24) | (premult_r << 16) | (premult_g << 8) | premult_b;
-                }
-            }
-        }
-        for by in settings_y..(settings_y + btn_size).min(h) {
-            let row_offset = by * w;
-            for bx in settings_x..(settings_x + btn_size).min(w) {
-                let idx = (row_offset + bx) as usize;
-                let text_val = text_pixels[idx];
-                let tb = text_val & 0xFF;
-                let brightness = tb;
-                if brightness > 10 {
-                    let text_alpha = brightness as u32;
-                    let bg_val = pixels[idx];
-                    let bg_a = (bg_val >> 24) & 0xFF;
-                    let bg_r_val = ((bg_val >> 16) & 0xFF) * 255 / bg_a.max(1);
-                    let bg_g_val = ((bg_val >> 8) & 0xFF) * 255 / bg_a.max(1);
-                    let bg_b_val = (bg_val & 0xFF) * 255 / bg_a.max(1);
-                    let out_a = (text_alpha + ((255 - text_alpha) * bg_a as u32) / 255).min(255);
-                    let out_r = (255u32 * text_alpha + bg_r_val * (255 - text_alpha) * bg_a as u32 / 255) / out_a.max(1);
-                    let out_g = (255u32 * text_alpha + bg_g_val * (255 - text_alpha) * bg_a as u32 / 255) / out_a.max(1);
-                    let out_b = (255u32 * text_alpha + bg_b_val * (255 - text_alpha) * bg_a as u32 / 255) / out_a.max(1);
-                    let premult_r = out_r * out_a / 255;
-                    let premult_g = out_g * out_a / 255;
-                    let premult_b = out_b * out_a / 255;
-                    pixels[idx] = (out_a << 24) | (premult_r << 16) | (premult_g << 8) | premult_b;
-                }
-            }
+        let p_text = p_text_bits as *const u32;
+        draw_icon(pixels, p_text, w, h, btns[0].0, btns[0].1, btns[0].2, btns[0].3);
+        draw_icon(pixels, p_text, w, h, btns[1].0, btns[1].1, btns[1].2, btns[1].3);
+        draw_icon(pixels, p_text, w, h, btns[2].0, btns[2].1, btns[2].2, btns[2].3);
+        if !state.locked {
+            draw_icon(pixels, p_text, w, h, btns[3].0, btns[3].1, btns[3].2, btns[3].3);
         }
     }
 
