@@ -21,8 +21,8 @@ pub static SUBTITLE_VISIBLE: AtomicBool = AtomicBool::new(true);
 thread_local! {
     static SUBTITLE_TX: RefCell<Option<Sender<SubtitleMessage>>> = RefCell::new(None);
     static SUBTITLE_LOCKED: Cell<bool> = Cell::new(false);
-    static SUBTITLE_CLICK_THROUGH: Cell<bool> = Cell::new(false);
     static SUBTITLE_USER_HIDDEN: Cell<bool> = Cell::new(false);
+    static SUBTITLE_USER_MOVED: Cell<bool> = Cell::new(false);
 }
 
 #[derive(Debug, Clone)]
@@ -39,7 +39,6 @@ pub struct SubtitleWindow {
 pub enum SubtitleMessage {
     ShowBilingual { original: String, translated: Option<String> },
     Hide,
-    SetClickThrough(bool),
     SetOpacity(f32),
     SetPosition(String),
     SetFontSize(u32),
@@ -59,10 +58,11 @@ impl SubtitleWindow {
         let (tx, rx) = channel();
         let tx_for_wnd = tx.clone();
 
+        let _click_through = click_through;
         thread::spawn(move || {
             #[cfg(target_os = "windows")]
             unsafe {
-                run_subtitle_window(rx, tx_for_wnd, click_through, opacity, position, font_size);
+                run_subtitle_window(rx, tx_for_wnd, opacity, position, font_size);
             }
         });
 
@@ -77,8 +77,7 @@ impl SubtitleWindow {
         let _ = self.tx.send(SubtitleMessage::Hide);
     }
 
-    pub fn set_click_through(&self, enabled: bool) {
-        let _ = self.tx.send(SubtitleMessage::SetClickThrough(enabled));
+    pub fn set_click_through(&self, _enabled: bool) {
     }
 
     pub fn set_opacity(&self, opacity: f32) {
@@ -126,7 +125,6 @@ impl SubtitleWindow {
 struct SubtitleState {
     lines: Vec<SubtitleLine>,
     visible: bool,
-    click_through: bool,
     opacity: f32,
     position: String,
     font_size: u32,
@@ -136,6 +134,7 @@ struct SubtitleState {
     translated_color: String,
     locked: bool,
     user_hidden: bool,
+    user_moved: bool,
     last_update: Instant,
     hide_after: Duration,
 }
@@ -176,15 +175,14 @@ fn btn_layout(w: i32) -> [(i32, i32, i32, i32); 4] {
 unsafe fn run_subtitle_window(
     rx: Receiver<SubtitleMessage>,
     tx_for_wnd: Sender<SubtitleMessage>,
-    click_through: bool,
     opacity: f32,
     position: String,
     font_size: u32,
 ) {
     SUBTITLE_TX.with(|tl| *tl.borrow_mut() = Some(tx_for_wnd));
     SUBTITLE_LOCKED.with(|tl| tl.set(false));
-    SUBTITLE_CLICK_THROUGH.with(|tl| tl.set(click_through));
     SUBTITLE_USER_HIDDEN.with(|tl| tl.set(false));
+    SUBTITLE_USER_MOVED.with(|tl| tl.set(false));
 
     let instance = GetModuleHandleW(None).unwrap();
     let class_name = w!("Voice2TypeSubtitleClass");
@@ -226,7 +224,6 @@ unsafe fn run_subtitle_window(
     let mut state = SubtitleState {
         lines: Vec::new(),
         visible: false,
-        click_through,
         opacity,
         position,
         font_size,
@@ -236,6 +233,7 @@ unsafe fn run_subtitle_window(
         translated_color: "#FFFFFF".to_string(),
         locked: false,
         user_hidden: false,
+        user_moved: false,
         last_update: Instant::now(),
         hide_after: Duration::from_secs(8),
     };
@@ -268,10 +266,6 @@ unsafe fn run_subtitle_window(
                     SUBTITLE_VISIBLE.store(false, Ordering::SeqCst);
                     ShowWindow(hwnd, SW_HIDE);
                 }
-                SubtitleMessage::SetClickThrough(enabled) => {
-                    state.click_through = enabled;
-                    SUBTITLE_CLICK_THROUGH.with(|tl| tl.set(enabled));
-                }
                 SubtitleMessage::SetOpacity(op) => {
                     state.opacity = op.clamp(0.1, 1.0);
                     if state.visible && !state.user_hidden {
@@ -280,6 +274,8 @@ unsafe fn run_subtitle_window(
                 }
                 SubtitleMessage::SetPosition(pos) => {
                     state.position = pos;
+                    state.user_moved = false;
+                    SUBTITLE_USER_MOVED.with(|tl| tl.set(false));
                     if state.visible && !state.user_hidden {
                         draw_subtitle(hwnd, &state);
                     }
@@ -380,6 +376,10 @@ unsafe extern "system" fn subtitle_wnd_proc(
             PostQuitMessage(0);
             LRESULT(0)
         }
+        WM_ENTERSIZEMOVE => {
+            SUBTITLE_USER_MOVED.with(|tl| tl.set(true));
+            LRESULT(0)
+        }
         WM_NCHITTEST => {
             let x = (lparam.0 & 0xFFFF) as i16 as i32;
             let y = ((lparam.0 >> 16) & 0xFFFF) as i16 as i32;
@@ -401,8 +401,6 @@ unsafe extern "system" fn subtitle_wnd_proc(
             if in_btn_0 || in_btn_1 || in_btn_2 || in_btn_3 {
                 LRESULT(HTCLIENT as isize)
             } else if SUBTITLE_LOCKED.get() {
-                LRESULT(HTCLIENT as isize)
-            } else if SUBTITLE_CLICK_THROUGH.get() {
                 LRESULT(HTTRANSPARENT as isize)
             } else {
                 LRESULT(HTCAPTION as isize)
@@ -537,14 +535,20 @@ unsafe fn draw_subtitle(hwnd: HWND, state: &SubtitleState) {
     let total_height: i32 = row_specs.iter().map(|(h, _, _, _)| *h).sum();
     let h = padding * 2 + total_height + 10;
 
-    let x = (screen_width - w) / 2;
-    let y = if state.position == "top" {
-        60
+    let user_moved = SUBTITLE_USER_MOVED.with(|tl| tl.get());
+    if user_moved {
+        let mut cur_rect = RECT::default();
+        let _ = GetWindowRect(hwnd, &mut cur_rect);
+        let _ = SetWindowPos(hwnd, HWND(0), cur_rect.left, cur_rect.top, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
     } else {
-        screen_height - h - 80
-    };
-
-    let _ = SetWindowPos(hwnd, HWND(0), x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+        let x = (screen_width - w) / 2;
+        let y = if state.position == "top" {
+            60
+        } else {
+            screen_height - h - 80
+        };
+        let _ = SetWindowPos(hwnd, HWND(0), x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+    }
 
     let hdc_screen = GetDC(None);
     let hdc_mem = CreateCompatibleDC(hdc_screen);
@@ -706,23 +710,23 @@ unsafe fn draw_subtitle(hwnd: HWND, state: &SubtitleState) {
     }
 
     let btn_font = CreateFontW(
-        -12,
+        -13,
         0, 0, 0,
-        FW_BOLD.0 as i32,
+        FW_NORMAL.0 as i32,
         0, 0, 0,
         DEFAULT_CHARSET.0 as u32,
         OUT_DEFAULT_PRECIS.0 as u32,
         CLIP_DEFAULT_PRECIS.0 as u32,
         CLEARTYPE_QUALITY.0 as u32,
         DEFAULT_PITCH.0 as u32,
-        w!("Segoe UI"),
+        w!("Segoe UI Symbol"),
     );
     let old_btn_font = SelectObject(hdc_text, btn_font);
 
-    let eye_text = if state.user_hidden { "X" } else { "O" };
-    let lock_text = if state.locked { "L" } else { "U" };
-    let settings_text = "S";
-    let drag_text = "+";
+    let eye_text = if state.user_hidden { "\u{25CB}" } else { "\u{25C9}" };
+    let lock_text = if state.locked { "\u{1F512}" } else { "\u{1F513}" };
+    let settings_text = "\u{2699}";
+    let drag_text = "\u{2725}";
 
     {
         let text_pixels = std::slice::from_raw_parts_mut(p_text_bits as *mut u32, (w * h) as usize);
