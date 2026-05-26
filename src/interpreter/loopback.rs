@@ -15,7 +15,7 @@ use windows::{
 #[cfg(target_os = "windows")]
 use crate::utils::logger::{write_log, LogLevel};
 
-const AUDCLNT_STREAMFLAGS_LOOPBACK: u32 = 0x00010000;
+const AUDCLNT_STREAMFLAGS_LOOPBACK: u32 = 0x00020000;
 
 pub struct LoopbackCapture {
     pub sample_rate: u32,
