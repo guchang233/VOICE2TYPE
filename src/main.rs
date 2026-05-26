@@ -663,14 +663,24 @@ async fn process_audio_and_type(
     let transcribe_start = std::time::Instant::now();
 
     let raw_text = if config.is_local_whisper() {
+        write_log_line("[处理] 调用本地 Whisper...", Some(&config));
         let cfg = config.clone();
         let wav = wav_data;
-        tokio::task::spawn_blocking(move || whisper_local::LocalWhisper::transcribe_sync(&wav, &cfg))
+        let result = tokio::task::spawn_blocking(move || whisper_local::LocalWhisper::transcribe_sync(&wav, &cfg))
             .await
-            .context("本地 Whisper 任务异常")??
+            .context("本地 Whisper 任务异常")??;
+        write_log_line(&format!("[处理] 本地 Whisper 完成: {}", result.trim()), Some(&config));
+        result
     } else {
+        write_log_line(&format!("[处理] 调用 API: {}", config.get_api_url()), Some(&config));
         let api_client = ApiClient::new();
-        api_client.process_audio(wav_data, &config).await?
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(60),
+            api_client.process_audio(wav_data, &config)
+        ).await
+        .map_err(|_| anyhow::anyhow!("API 请求超时 (60秒)"))??;
+        write_log_line(&format!("[处理] API 完成: {}", result.trim()), Some(&config));
+        result
     };
 
     let label = if config.is_local_whisper() {

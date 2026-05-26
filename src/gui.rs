@@ -437,7 +437,7 @@ pub struct Voice2TypeApp {
     pub font_bold: nwg::Font,
 
     // --- 实时字幕设置窗口 ---
-    #[nwg_control(size: (480, 400), position: (350, 300), title: "实时字幕设置", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_control(size: (480, 520), position: (350, 300), title: "实时字幕设置", flags: "WINDOW", icon: Some(&data.icon))]
     #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_subtitle_settings_window])]
     pub subtitle_settings_window: nwg::Window,
 
@@ -500,6 +500,30 @@ pub struct Voice2TypeApp {
     #[nwg_layout_item(layout: subtitle_settings_layout, row: 7, col: 1)]
     #[nwg_events(OnButtonClick: [Voice2TypeApp::save_subtitle_settings])]
     pub sub_save_btn: nwg::Button,
+
+    #[nwg_control(parent: subtitle_settings_window, text: "转写模型:", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 8, col: 0)]
+    pub sub_model_label: nwg::Label,
+
+    #[nwg_control(parent: subtitle_settings_window, font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 8, col: 1, col_span: 2)]
+    pub sub_model_combo: nwg::ComboBox<String>,
+
+    #[nwg_control(parent: subtitle_settings_window, text: "API Key:", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 9, col: 0)]
+    pub sub_api_key_label: nwg::Label,
+
+    #[nwg_control(parent: subtitle_settings_window, font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 9, col: 1, col_span: 2)]
+    pub sub_api_key_input: nwg::TextInput,
+
+    #[nwg_control(parent: subtitle_settings_window, text: "API URL:", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 10, col: 0)]
+    pub sub_api_url_label: nwg::Label,
+
+    #[nwg_control(parent: subtitle_settings_window, font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 10, col: 1, col_span: 2)]
+    pub sub_api_url_input: nwg::TextInput,
 
     pub update_info: RefCell<Option<update::UpdateInfo>>,
 
@@ -897,6 +921,15 @@ impl Voice2TypeApp {
 
             self.sub_chunk_ms_input.set_text(&chunk_ms.to_string());
             self.sub_click_through_item.set_check_state(if click_through { nwg::CheckBoxState::Checked } else { nwg::CheckBoxState::Unchecked });
+
+            let models = vec!["whisper-large-v3".to_string(), "whisper-large-v3-turbo".to_string(), "distil-whisper-large-v3-en".to_string()];
+            let current_model = mgr.get_model_name();
+            let model_idx = models.iter().position(|m| m == &current_model).unwrap_or(0);
+            self.sub_model_combo.set_collection(models);
+            self.sub_model_combo.set_selection(Some(model_idx));
+
+            self.sub_api_key_input.set_text(&mgr.get_api_key());
+            self.sub_api_url_input.set_text(&mgr.get_api_url());
         }
         self.subtitle_settings_window.set_visible(true);
         self.subtitle_settings_window.set_focus();
@@ -941,6 +974,20 @@ impl Voice2TypeApp {
                 if ms >= 1000 && ms <= 10000 {
                     mgr.set_interpreter_chunk_ms(ms);
                 }
+            }
+            let models = vec!["whisper-large-v3".to_string(), "whisper-large-v3-turbo".to_string(), "distil-whisper-large-v3-en".to_string()];
+            if let Some(idx) = self.sub_model_combo.selection() {
+                if idx < models.len() {
+                    mgr.set_model_name(models[idx].clone());
+                }
+            }
+            let api_key = self.sub_api_key_input.text();
+            if !api_key.is_empty() {
+                mgr.set_api_key(api_key);
+            }
+            let api_url = self.sub_api_url_input.text();
+            if !api_url.is_empty() {
+                mgr.set_api_url(api_url);
             }
             let click_through = self.sub_click_through_item.check_state() == nwg::CheckBoxState::Checked;
             mgr.set_interpreter_subtitle_click_through(click_through);
