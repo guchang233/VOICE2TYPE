@@ -600,10 +600,6 @@ pub struct Voice2TypeApp {
     #[nwg_layout_item(layout: subtitle_settings_layout, row: 10, col: 1, col_span: 2)]
     pub sub_api_url_input: nwg::TextInput,
 
-    #[nwg_control(parent: subtitle_settings_window, text: "双语对照模式", font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: subtitle_settings_layout, row: 11, col: 0, col_span: 3)]
-    pub sub_bilingual_item: nwg::CheckBox,
-
     #[nwg_control(parent: subtitle_settings_window, text: "译文颜色:", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: subtitle_settings_layout, row: 12, col: 0)]
     pub sub_translated_color_label: nwg::Label,
@@ -1052,7 +1048,6 @@ impl Voice2TypeApp {
 
             self.sub_api_key_input.set_text(&mgr.interpreter_api_key());
             self.sub_api_url_input.set_text(&mgr.interpreter_api_url());
-            self.sub_bilingual_item.set_check_state(if mgr.interpreter_bilingual_mode() { nwg::CheckBoxState::Checked } else { nwg::CheckBoxState::Unchecked });
             self.sub_translated_color_input.set_text(&mgr.interpreter_translated_color());
             self.sub_translated_font_size_input.set_text(&mgr.interpreter_translated_font_size().to_string());
             self.sub_original_color_input.set_text(&mgr.interpreter_original_color());
@@ -1118,8 +1113,6 @@ impl Voice2TypeApp {
             mgr.set_interpreter_api_key(api_key);
             let api_url = self.sub_api_url_input.text();
             mgr.set_interpreter_api_url(api_url);
-            let bilingual = self.sub_bilingual_item.check_state() == nwg::CheckBoxState::Checked;
-            mgr.set_interpreter_bilingual_mode(bilingual);
             let translated_color = self.sub_translated_color_input.text();
             if !translated_color.is_empty() {
                 mgr.set_interpreter_translated_color(translated_color);

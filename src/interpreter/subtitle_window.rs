@@ -20,6 +20,7 @@ pub static SETTINGS_REQUESTED: AtomicBool = AtomicBool::new(false);
 thread_local! {
     static SUBTITLE_TX: RefCell<Option<Sender<SubtitleMessage>>> = RefCell::new(None);
     static SUBTITLE_LOCKED: Cell<bool> = Cell::new(false);
+    static SUBTITLE_CLICK_THROUGH: Cell<bool> = Cell::new(false);
 }
 
 #[derive(Debug, Clone)]
@@ -40,7 +41,6 @@ pub enum SubtitleMessage {
     SetOpacity(f32),
     SetPosition(String),
     SetFontSize(u32),
-    SetBilingualMode(bool),
     SetOriginalFontSize(u32),
     SetOriginalColor(String),
     SetTranslatedFontSize(u32),
@@ -80,10 +80,6 @@ impl SubtitleWindow {
 
     pub fn set_opacity(&self, opacity: f32) {
         let _ = self.tx.send(SubtitleMessage::SetOpacity(opacity));
-    }
-
-    pub fn set_bilingual_mode(&self, mode: bool) {
-        let _ = self.tx.send(SubtitleMessage::SetBilingualMode(mode));
     }
 
     pub fn set_original_font_size(&self, size: u32) {
@@ -127,7 +123,6 @@ struct SubtitleState {
     opacity: f32,
     position: String,
     font_size: u32,
-    bilingual_mode: bool,
     original_font_size: u32,
     original_color: String,
     translated_font_size: u32,
@@ -160,6 +155,7 @@ unsafe fn run_subtitle_window(
 ) {
     SUBTITLE_TX.with(|tl| *tl.borrow_mut() = Some(tx_for_wnd));
     SUBTITLE_LOCKED.with(|tl| tl.set(false));
+    SUBTITLE_CLICK_THROUGH.with(|tl| tl.set(click_through));
 
     let instance = GetModuleHandleW(None).unwrap();
     let class_name = w!("Voice2TypeSubtitleClass");
@@ -173,10 +169,7 @@ unsafe fn run_subtitle_window(
 
     RegisterClassW(&wc);
 
-    let mut ex_style = WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW;
-    if click_through {
-        ex_style |= WS_EX_TRANSPARENT;
-    }
+    let ex_style = WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW;
 
     let screen_width = GetSystemMetrics(SM_CXSCREEN);
     let screen_height = GetSystemMetrics(SM_CYSCREEN);
@@ -208,7 +201,6 @@ unsafe fn run_subtitle_window(
         opacity,
         position,
         font_size,
-        bilingual_mode: false,
         original_font_size: 18,
         original_color: "#AAAAAA".to_string(),
         translated_font_size: 24,
@@ -228,7 +220,7 @@ unsafe fn run_subtitle_window(
                             original,
                             translated,
                         });
-                        let max_lines = if state.bilingual_mode { 2 } else { 3 };
+                        let max_lines = 3;
                         while state.lines.len() > max_lines {
                             state.lines.remove(0);
                         }
@@ -244,11 +236,7 @@ unsafe fn run_subtitle_window(
                 }
                 SubtitleMessage::SetClickThrough(enabled) => {
                     state.click_through = enabled;
-                    let mut new_ex_style = WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW;
-                    if enabled {
-                        new_ex_style |= WS_EX_TRANSPARENT;
-                    }
-                    SetWindowLongW(hwnd, GWL_EXSTYLE, new_ex_style.0 as i32);
+                    SUBTITLE_CLICK_THROUGH.with(|tl| tl.set(enabled));
                 }
                 SubtitleMessage::SetOpacity(op) => {
                     state.opacity = op.clamp(0.1, 1.0);
@@ -264,12 +252,6 @@ unsafe fn run_subtitle_window(
                 }
                 SubtitleMessage::SetFontSize(size) => {
                     state.font_size = size;
-                    if state.visible {
-                        draw_subtitle(hwnd, &state);
-                    }
-                }
-                SubtitleMessage::SetBilingualMode(mode) => {
-                    state.bilingual_mode = mode;
                     if state.visible {
                         draw_subtitle(hwnd, &state);
                     }
@@ -301,11 +283,6 @@ unsafe fn run_subtitle_window(
                 SubtitleMessage::ToggleLock => {
                     state.locked = !state.locked;
                     SUBTITLE_LOCKED.with(|tl| tl.set(state.locked));
-                    let mut new_ex_style = WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW;
-                    if state.locked || state.click_through {
-                        new_ex_style |= WS_EX_TRANSPARENT;
-                    }
-                    SetWindowLongW(hwnd, GWL_EXSTYLE, new_ex_style.0 as i32);
                     if state.visible {
                         draw_subtitle(hwnd, &state);
                     }
@@ -316,11 +293,6 @@ unsafe fn run_subtitle_window(
                 SubtitleMessage::SetLocked(locked) => {
                     state.locked = locked;
                     SUBTITLE_LOCKED.with(|tl| tl.set(locked));
-                    let mut new_ex_style = WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW;
-                    if state.locked || state.click_through {
-                        new_ex_style |= WS_EX_TRANSPARENT;
-                    }
-                    SetWindowLongW(hwnd, GWL_EXSTYLE, new_ex_style.0 as i32);
                     if state.visible {
                         draw_subtitle(hwnd, &state);
                     }
@@ -392,6 +364,8 @@ unsafe extern "system" fn subtitle_wnd_proc(
                 LRESULT(HTCLIENT as isize)
             } else if SUBTITLE_LOCKED.get() {
                 LRESULT(HTCLIENT as isize)
+            } else if SUBTITLE_CLICK_THROUGH.get() {
+                LRESULT(HTTRANSPARENT as isize)
             } else {
                 LRESULT(HTCAPTION as isize)
             }
@@ -461,20 +435,14 @@ unsafe fn draw_subtitle(hwnd: HWND, state: &SubtitleState) {
     let mut row_specs: Vec<(i32, String, u32, (u8, u8, u8))> = Vec::new();
 
     for line in &state.lines {
-        if state.bilingual_mode && line.translated.is_some() {
+        if let Some(ref translated_text) = line.translated {
             let (tr, tg, tb) = parse_hex_color(&state.translated_color);
-            row_specs.push(((state.translated_font_size as f32 * 1.5) as i32, line.translated.as_ref().unwrap().clone(), state.translated_font_size, (tr, tg, tb)));
+            row_specs.push(((state.translated_font_size as f32 * 1.5) as i32, translated_text.clone(), state.translated_font_size, (tr, tg, tb)));
             let (or, og, ob) = parse_hex_color(&state.original_color);
             row_specs.push(((state.original_font_size as f32 * 1.4) as i32, line.original.clone(), state.original_font_size, (or, og, ob)));
         } else {
-            let display_text = line.translated.as_deref().unwrap_or(&line.original);
-            let fs = if line.translated.is_some() { state.translated_font_size } else { state.font_size };
-            let (cr, cg, cb) = if line.translated.is_some() {
-                parse_hex_color(&state.translated_color)
-            } else {
-                (255, 255, 255)
-            };
-            row_specs.push(((fs as f32 * 1.6) as i32, display_text.to_string(), fs, (cr, cg, cb)));
+            let (cr, cg, cb) = (255u8, 255u8, 255u8);
+            row_specs.push(((state.font_size as f32 * 1.6) as i32, line.original.clone(), state.font_size, (cr, cg, cb)));
         }
     }
 

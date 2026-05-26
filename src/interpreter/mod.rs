@@ -30,7 +30,6 @@ impl InterpreterEngine {
             config.interpreter_subtitle_font_size(),
         );
 
-        subtitle_window.set_bilingual_mode(config.interpreter_bilingual_mode());
         subtitle_window.set_original_font_size(config.interpreter_original_font_size());
         subtitle_window.set_original_color(config.interpreter_original_color());
         subtitle_window.set_translated_font_size(config.interpreter_translated_font_size());
@@ -148,7 +147,6 @@ impl InterpreterEngine {
     }
 
     pub fn update_subtitle_config(&self, config: &ConfigManager) {
-        self.subtitle_window.set_bilingual_mode(config.interpreter_bilingual_mode());
         self.subtitle_window.set_original_font_size(config.interpreter_original_font_size());
         self.subtitle_window.set_original_color(config.interpreter_original_color());
         self.subtitle_window.set_translated_font_size(config.interpreter_translated_font_size());

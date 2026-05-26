@@ -151,7 +151,6 @@ pub struct InterpreterConfig {
     pub subtitle_click_through: bool,
     pub use_translation: bool,
     pub chunk_ms: u64,
-    pub bilingual_mode: bool,
     pub original_font_size: u32,
     pub original_color: String,
     pub translated_font_size: u32,
@@ -178,7 +177,6 @@ impl Default for InterpreterConfig {
             subtitle_click_through: true,
             use_translation: true,
             chunk_ms: 3000,
-            bilingual_mode: false,
             original_font_size: 18,
             original_color: "#AAAAAA".to_string(),
             translated_font_size: 24,
@@ -733,14 +731,6 @@ impl ConfigManager {
 
     pub fn set_interpreter_chunk_ms(&self, ms: u64) {
         self.config.lock().unwrap().interpreter.chunk_ms = ms;
-    }
-
-    pub fn interpreter_bilingual_mode(&self) -> bool {
-        self.config.lock().unwrap().interpreter.bilingual_mode
-    }
-
-    pub fn set_interpreter_bilingual_mode(&self, mode: bool) {
-        self.config.lock().unwrap().interpreter.bilingual_mode = mode;
     }
 
     pub fn interpreter_original_font_size(&self) -> u32 {
