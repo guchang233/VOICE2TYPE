@@ -157,6 +157,7 @@ pub struct InterpreterConfig {
     pub translated_font_size: u32,
     pub translated_color: String,
     pub translation_model: String,
+    pub translation_context: bool,
 }
 
 impl Default for InterpreterConfig {
@@ -177,6 +178,7 @@ impl Default for InterpreterConfig {
             translated_font_size: 24,
             translated_color: "#FFFFFF".to_string(),
             translation_model: "llama-3.1-8b-instant".to_string(),
+            translation_context: true,
         }
     }
 }
@@ -767,6 +769,14 @@ impl ConfigManager {
 
     pub fn set_interpreter_translation_model(&self, model: String) {
         self.config.lock().unwrap().interpreter.translation_model = model;
+    }
+
+    pub fn interpreter_translation_context(&self) -> bool {
+        self.config.lock().unwrap().interpreter.translation_context
+    }
+
+    pub fn set_interpreter_translation_context(&self, enabled: bool) {
+        self.config.lock().unwrap().interpreter.translation_context = enabled;
     }
 
     pub fn reset_ai_config(&self) {

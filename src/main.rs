@@ -588,16 +588,29 @@ fn begin_audio_processing(
     let state_clone = app_state.clone();
     let config_clone = config.clone();
     tokio::spawn(async move {
-        let result = process_audio_and_type(audio_data, sample_rate, config_clone).await;
-        if let Err(e) = &result {
-            write_log(
-                LogLevel::ERROR,
-                &format!("转写失败: {}", e),
-                Some(&config),
-            );
-            notify::queue_tray_message("转写失败", &e.to_string());
-            set_indicator_state(IndicatorState::Error, &config);
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(90),
+            process_audio_and_type(audio_data, sample_rate, config_clone)
+        ).await;
+
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                write_log(
+                    LogLevel::ERROR,
+                    &format!("转写失败: {}", e),
+                    Some(&config),
+                );
+                notify::queue_tray_message("转写失败", &e.to_string());
+                set_indicator_state(IndicatorState::Error, &config);
+            }
+            Err(_) => {
+                write_log(LogLevel::ERROR, "转写超时 (90秒)", Some(&config));
+                notify::queue_tray_message("转写失败", "转写超时");
+                set_indicator_state(IndicatorState::Error, &config);
+            }
         }
+
         let mut st = state_clone.lock().unwrap();
         if *st == AppState::Processing {
             *st = AppState::Idle;

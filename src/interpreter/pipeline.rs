@@ -6,8 +6,16 @@ use std::sync::Mutex;
 static LAST_TRANSCRIPTION: once_cell::sync::Lazy<Mutex<String>> =
     once_cell::sync::Lazy::new(|| Mutex::new(String::new()));
 
+static TRANSLATION_CONTEXT: once_cell::sync::Lazy<Mutex<Vec<(String, String)>>> =
+    once_cell::sync::Lazy::new(|| Mutex::new(Vec::new()));
+
+pub fn reset_translation_context() {
+    TRANSLATION_CONTEXT.lock().unwrap().clear();
+}
+
 pub fn reset_last_transcription() {
     *LAST_TRANSCRIPTION.lock().unwrap() = String::new();
+    reset_translation_context();
 }
 
 #[derive(Debug, Clone)]
@@ -36,7 +44,7 @@ pub async fn process_chunk(wav_data: Vec<u8>, config: &ConfigManager) -> Option<
     let source = config.interpreter_source_language();
     let target = config.interpreter_target_language();
 
-    if source == target {
+    if source == target || source == "auto" {
         *LAST_TRANSCRIPTION.lock().unwrap() = raw_text.trim().to_string();
         return Some(SubtitleResult {
             original: deduped,
@@ -44,7 +52,12 @@ pub async fn process_chunk(wav_data: Vec<u8>, config: &ConfigManager) -> Option<
         });
     }
 
-    match translate(&deduped, &source, &target, config).await {
+    let ctx = if config.interpreter_translation_context() {
+        TRANSLATION_CONTEXT.lock().unwrap().clone()
+    } else {
+        Vec::new()
+    };
+    match translate(&deduped, &source, &target, config, &ctx).await {
         Ok(translated) => {
             *LAST_TRANSCRIPTION.lock().unwrap() = raw_text.trim().to_string();
             if translated.trim().is_empty() {
@@ -54,6 +67,13 @@ pub async fn process_chunk(wav_data: Vec<u8>, config: &ConfigManager) -> Option<
                 })
             } else {
                 write_log(LogLevel::INFO, &format!("[字幕] 翻译结果: {}", translated.trim()), None);
+                {
+                    let mut ctx = TRANSLATION_CONTEXT.lock().unwrap();
+                    ctx.push((deduped.clone(), translated.clone()));
+                    if ctx.len() > 5 {
+                        ctx.remove(0);
+                    }
+                }
                 Some(SubtitleResult {
                     original: deduped,
                     translated: Some(translated),
@@ -162,6 +182,7 @@ async fn translate(
     source_lang: &str,
     target_lang: &str,
     config: &ConfigManager,
+    context: &[(String, String)],
 ) -> Result<String, String> {
     let api_key = config.get_groq_api_key();
     if api_key.is_empty() {
@@ -202,16 +223,22 @@ async fn translate(
 
     let user_prompt = format!("{}", text);
 
+    let mut messages = vec![
+        serde_json::json!({"role": "system", "content": system_prompt}),
+    ];
+    for (orig, trans) in context {
+        messages.push(serde_json::json!({"role": "user", "content": orig}));
+        messages.push(serde_json::json!({"role": "assistant", "content": trans}));
+    }
+    messages.push(serde_json::json!({"role": "user", "content": user_prompt}));
+
     let response = crate::api::client::HTTP_CLIENT
         .post("https://api.groq.com/openai/v1/chat/completions")
         .header("Authorization", format!("Bearer {}", api_key))
         .header("Content-Type", "application/json")
         .json(&serde_json::json!({
             "model": model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
+            "messages": messages,
             "temperature": 0.3,
             "max_tokens": 1024,
         }))

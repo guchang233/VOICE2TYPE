@@ -134,8 +134,8 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_out_lang_en])]
     pub output_lang_en_item: nwg::MenuItem,
 
-    // --- 设置 -> 配置 ---
-    #[nwg_control(parent: settings_menu, text: "配置")]
+    // --- 设置 -> 模型与密钥 ---
+    #[nwg_control(parent: settings_menu, text: "模型与密钥")]
     pub config_menu: nwg::Menu,
 
     #[nwg_control(parent: config_menu, text: "模型选择")]
@@ -194,11 +194,11 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::repaste_last])]
     pub repaste_item: nwg::MenuItem,
 
-    #[nwg_control(parent: voice_menu)]
-    pub sep_update: nwg::MenuSeparator,
+    #[nwg_control(parent: tray_menu)]
+    pub sep_voice_about: nwg::MenuSeparator,
 
-    // --- 语音转文字 -> 关于父菜单 ---
-    #[nwg_control(parent: voice_menu, text: "关于")]
+    // --- 关于父菜单 (Top Level) ---
+    #[nwg_control(parent: tray_menu, text: "关于")]
     pub about_parent_menu: nwg::Menu,
 
     #[nwg_control(parent: about_parent_menu, text: "项目信息")]
@@ -437,7 +437,7 @@ pub struct Voice2TypeApp {
     pub font_bold: nwg::Font,
 
     // --- 实时字幕设置窗口 ---
-    #[nwg_control(size: (480, 700), position: (350, 300), title: "实时字幕设置", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_control(size: (480, 740), position: (350, 300), title: "实时字幕设置", flags: "WINDOW", icon: Some(&data.icon))]
     #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_subtitle_settings_window])]
     pub subtitle_settings_window: nwg::Window,
 
@@ -569,6 +569,10 @@ pub struct Voice2TypeApp {
     #[nwg_layout_item(layout: subtitle_settings_layout, row: 16, col: 1, col_span: 2)]
     pub sub_translation_model_combo: nwg::ComboBox<String>,
 
+    #[nwg_control(parent: subtitle_settings_window, text: "翻译上下文", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 17, col: 0, col_span: 3)]
+    pub sub_translation_context_item: nwg::CheckBox,
+
     pub update_info: RefCell<Option<update::UpdateInfo>>,
 
     #[nwg_control]
@@ -586,6 +590,7 @@ pub struct Voice2TypeApp {
 
     // 状态
     pub config_manager: RefCell<Option<Arc<ConfigManager>>>,
+    pub needs_auto_start: RefCell<bool>,
 
     // UI 线程轮询同步日志菜单状态
     #[nwg_control(interval: std::time::Duration::from_millis(100), active: false)]
@@ -759,12 +764,8 @@ impl Voice2TypeApp {
         app.update_model_menu_checks();
         app.do_check_update();
 
-        // 如果配置中实时字幕已启用，自动启动引擎
         if config_manager.interpreter_enabled() {
-            #[cfg(target_os = "windows")]
-            {
-                crate::start_interpreter(config_manager.clone());
-            }
+            *app.needs_auto_start.borrow_mut() = true;
         }
 
         app_ui
@@ -984,6 +985,7 @@ impl Voice2TypeApp {
             let tm_idx = translation_models.iter().position(|m| m == &current_tm).unwrap_or(0);
             self.sub_translation_model_combo.set_collection(translation_models);
             self.sub_translation_model_combo.set_selection(Some(tm_idx));
+            self.sub_translation_context_item.set_check_state(if mgr.interpreter_translation_context() { nwg::CheckBoxState::Checked } else { nwg::CheckBoxState::Unchecked });
         }
         self.subtitle_settings_window.set_visible(true);
         self.subtitle_settings_window.set_focus();
@@ -1071,6 +1073,8 @@ impl Voice2TypeApp {
             }
             let click_through = self.sub_click_through_item.check_state() == nwg::CheckBoxState::Checked;
             mgr.set_interpreter_subtitle_click_through(click_through);
+            let translation_context = self.sub_translation_context_item.check_state() == nwg::CheckBoxState::Checked;
+            mgr.set_interpreter_translation_context(translation_context);
             mgr.save_or_notify();
 
             #[cfg(target_os = "windows")]
@@ -1692,6 +1696,13 @@ impl Voice2TypeApp {
     fn on_tick(&self) {
         #[cfg(target_os = "windows")]
         {
+            if *self.needs_auto_start.borrow() {
+                *self.needs_auto_start.borrow_mut() = false;
+                if let Some(mgr) = &*self.config_manager.borrow() {
+                    crate::start_interpreter(mgr.clone());
+                }
+            }
+
             if crate::should_uncheck_log_menu_and_reset() {
                 self.log_item.set_checked(false);
                 if let Some(mgr) = &*self.config_manager.borrow() {
@@ -1721,6 +1732,11 @@ impl Voice2TypeApp {
                         crate::win_utils::show_tray_balloon(hwnd, &title, &body);
                     }
                 }
+            }
+
+            if crate::interpreter::subtitle_window::SETTINGS_REQUESTED.load(std::sync::atomic::Ordering::SeqCst) {
+                crate::interpreter::subtitle_window::SETTINGS_REQUESTED.store(false, std::sync::atomic::Ordering::SeqCst);
+                self.show_subtitle_settings_window();
             }
         }
     }
