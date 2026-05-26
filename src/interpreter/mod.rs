@@ -145,6 +145,7 @@ impl InterpreterEngine {
         write_log_line("[字幕] 正在停止实时字幕引擎...", None);
         self.stop_flag.store(true, Ordering::Relaxed);
         self.subtitle_window.hide();
+        pipeline::reset_last_transcription();
 
         if let Some(handle) = self.capture_handle.take() {
             let _ = handle.join();

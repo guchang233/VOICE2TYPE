@@ -37,10 +37,24 @@ pub struct Voice2TypeApp {
     #[nwg_control(popup: true)]
     pub tray_menu: nwg::Menu,
 
-    // --- 实时字幕 (Top Level) ---
-    #[nwg_control(parent: tray_menu, text: "实时字幕", check: true)]
+    // --- 实时字幕 (Top Level Submenu) ---
+    #[nwg_control(parent: tray_menu, text: "实时字幕")]
+    pub subtitle_menu: nwg::Menu,
+
+    #[nwg_control(parent: subtitle_menu, text: "开启实时字幕", check: true)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_subtitle])]
     pub subtitle_item: nwg::MenuItem,
+
+    #[nwg_control(parent: subtitle_menu)]
+    pub sep_subtitle_inner: nwg::MenuSeparator,
+
+    #[nwg_control(parent: subtitle_menu, text: "启用翻译", check: true)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_subtitle_translation])]
+    pub subtitle_translation_item: nwg::MenuItem,
+
+    #[nwg_control(parent: subtitle_menu, text: "字幕设置...")]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_subtitle_settings_window])]
+    pub subtitle_settings_item: nwg::MenuItem,
 
     #[nwg_control(parent: tray_menu)]
     pub sep_subtitle: nwg::MenuSeparator,
@@ -422,6 +436,71 @@ pub struct Voice2TypeApp {
     #[nwg_resource(family: "DengXian", size: 26, weight: 700)]
     pub font_bold: nwg::Font,
 
+    // --- 实时字幕设置窗口 ---
+    #[nwg_control(size: (480, 400), position: (350, 300), title: "实时字幕设置", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_subtitle_settings_window])]
+    pub subtitle_settings_window: nwg::Window,
+
+    #[nwg_layout(parent: subtitle_settings_window, spacing: 8, margin: [20, 20, 20, 20])]
+    pub subtitle_settings_layout: nwg::GridLayout,
+
+    #[nwg_control(parent: subtitle_settings_window, text: "目标语言:", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 0, col: 0)]
+    pub sub_target_lang_label: nwg::Label,
+
+    #[nwg_control(parent: subtitle_settings_window, font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 0, col: 1, col_span: 2)]
+    pub sub_target_lang_combo: nwg::ComboBox<String>,
+
+    #[nwg_control(parent: subtitle_settings_window, text: "源语言:", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 1, col: 0)]
+    pub sub_source_lang_label: nwg::Label,
+
+    #[nwg_control(parent: subtitle_settings_window, font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 1, col: 1, col_span: 2)]
+    pub sub_source_lang_combo: nwg::ComboBox<String>,
+
+    #[nwg_control(parent: subtitle_settings_window, text: "字体大小:", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 2, col: 0)]
+    pub sub_font_size_label: nwg::Label,
+
+    #[nwg_control(parent: subtitle_settings_window, text: "22", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 2, col: 1, col_span: 2)]
+    pub sub_font_size_input: nwg::TextInput,
+
+    #[nwg_control(parent: subtitle_settings_window, text: "透明度 (0.1-1.0):", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 3, col: 0)]
+    pub sub_opacity_label: nwg::Label,
+
+    #[nwg_control(parent: subtitle_settings_window, text: "0.85", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 3, col: 1, col_span: 2)]
+    pub sub_opacity_input: nwg::TextInput,
+
+    #[nwg_control(parent: subtitle_settings_window, text: "位置:", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 4, col: 0)]
+    pub sub_position_label: nwg::Label,
+
+    #[nwg_control(parent: subtitle_settings_window, font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 4, col: 1, col_span: 2)]
+    pub sub_position_combo: nwg::ComboBox<String>,
+
+    #[nwg_control(parent: subtitle_settings_window, text: "音频分段时长(ms):", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 5, col: 0)]
+    pub sub_chunk_ms_label: nwg::Label,
+
+    #[nwg_control(parent: subtitle_settings_window, text: "3000", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 5, col: 1, col_span: 2)]
+    pub sub_chunk_ms_input: nwg::TextInput,
+
+    #[nwg_control(parent: subtitle_settings_window, text: "鼠标穿透", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 6, col: 0, col_span: 3)]
+    pub sub_click_through_item: nwg::CheckBox,
+
+    #[nwg_control(parent: subtitle_settings_window, text: "保存", font: Some(&data.font_medium))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 7, col: 1)]
+    #[nwg_events(OnButtonClick: [Voice2TypeApp::save_subtitle_settings])]
+    pub sub_save_btn: nwg::Button,
+
     pub update_info: RefCell<Option<update::UpdateInfo>>,
 
     #[nwg_control]
@@ -518,6 +597,9 @@ impl Voice2TypeApp {
         app.subtitle_item
             .set_checked(config_manager.interpreter_enabled());
 
+        app.subtitle_translation_item
+            .set_checked(config_manager.interpreter_use_translation());
+
         // 设置触发模式初始状态
         let trigger_mode = config_manager.trigger_mode();
         if trigger_mode == "hold" {
@@ -543,6 +625,7 @@ impl Voice2TypeApp {
 
         // 初始隐藏窗口
         app.key_config_window.set_visible(false);
+        app.subtitle_settings_window.set_visible(false);
 
         // 初始化热键下拉框
         let hotkeys = vec![
@@ -763,6 +846,100 @@ impl Voice2TypeApp {
                 crate::stop_interpreter();
             }
         }
+    }
+
+    fn toggle_subtitle_translation(&self) {
+        let new_state = !self.subtitle_translation_item.checked();
+        self.subtitle_translation_item.set_checked(new_state);
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            mgr.set_interpreter_use_translation(new_state);
+            mgr.save_or_notify();
+        }
+    }
+
+    fn show_subtitle_settings_window(&self) {
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            let target = mgr.interpreter_target_language();
+            let source = mgr.interpreter_source_language();
+            let font_size = mgr.interpreter_subtitle_font_size();
+            let opacity = mgr.interpreter_subtitle_opacity();
+            let position = mgr.interpreter_subtitle_position();
+            let chunk_ms = mgr.interpreter_chunk_ms();
+            let click_through = mgr.interpreter_subtitle_click_through();
+
+            let target_langs = vec!["zh".to_string(), "en".to_string(), "ja".to_string(), "ko".to_string(), "fr".to_string(), "de".to_string(), "es".to_string()];
+            let source_langs = vec!["auto".to_string(), "zh".to_string(), "en".to_string(), "ja".to_string(), "ko".to_string(), "fr".to_string(), "de".to_string(), "es".to_string()];
+            let positions = vec!["bottom".to_string(), "top".to_string()];
+
+            let target_idx = target_langs.iter().position(|l| l == &target).unwrap_or(0);
+            let source_idx = source_langs.iter().position(|l| l == &source).unwrap_or(0);
+            let pos_idx = positions.iter().position(|l| l == &position).unwrap_or(0);
+
+            self.sub_target_lang_combo.set_collection(target_langs);
+            self.sub_target_lang_combo.set_selection(Some(target_idx));
+
+            self.sub_source_lang_combo.set_collection(source_langs);
+            self.sub_source_lang_combo.set_selection(Some(source_idx));
+
+            self.sub_font_size_input.set_text(&font_size.to_string());
+            self.sub_opacity_input.set_text(&format!("{:.2}", opacity));
+
+            self.sub_position_combo.set_collection(positions);
+            self.sub_position_combo.set_selection(Some(pos_idx));
+
+            self.sub_chunk_ms_input.set_text(&chunk_ms.to_string());
+            self.sub_click_through_item.set_check_state(if click_through { nwg::CheckBoxState::Checked } else { nwg::CheckBoxState::Unchecked });
+        }
+        self.subtitle_settings_window.set_visible(true);
+        self.subtitle_settings_window.set_focus();
+    }
+
+    fn hide_subtitle_settings_window(&self) {
+        self.subtitle_settings_window.set_visible(false);
+    }
+
+    fn save_subtitle_settings(&self) {
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            let target_langs = vec!["zh".to_string(), "en".to_string(), "ja".to_string(), "ko".to_string(), "fr".to_string(), "de".to_string(), "es".to_string()];
+            let source_langs = vec!["auto".to_string(), "zh".to_string(), "en".to_string(), "ja".to_string(), "ko".to_string(), "fr".to_string(), "de".to_string(), "es".to_string()];
+            let positions = vec!["bottom".to_string(), "top".to_string()];
+
+            if let Some(idx) = self.sub_target_lang_combo.selection() {
+                if idx < target_langs.len() {
+                    mgr.set_interpreter_target_language(target_langs[idx].clone());
+                }
+            }
+            if let Some(idx) = self.sub_source_lang_combo.selection() {
+                if idx < source_langs.len() {
+                    mgr.set_interpreter_source_language(source_langs[idx].clone());
+                }
+            }
+            if let Ok(size) = self.sub_font_size_input.text().parse::<u32>() {
+                if size >= 10 && size <= 72 {
+                    mgr.set_interpreter_subtitle_font_size(size);
+                }
+            }
+            if let Ok(opacity) = self.sub_opacity_input.text().parse::<f32>() {
+                if opacity >= 0.1 && opacity <= 1.0 {
+                    mgr.set_interpreter_subtitle_opacity(opacity);
+                }
+            }
+            if let Some(idx) = self.sub_position_combo.selection() {
+                if idx < positions.len() {
+                    mgr.set_interpreter_subtitle_position(positions[idx].clone());
+                }
+            }
+            if let Ok(ms) = self.sub_chunk_ms_input.text().parse::<u64>() {
+                if ms >= 1000 && ms <= 10000 {
+                    mgr.set_interpreter_chunk_ms(ms);
+                }
+            }
+            let click_through = self.sub_click_through_item.check_state() == nwg::CheckBoxState::Checked;
+            mgr.set_interpreter_subtitle_click_through(click_through);
+            mgr.save_or_notify();
+            nwg::simple_message("已保存", "实时字幕设置已保存。\n部分设置需重新开启实时字幕后生效。");
+        }
+        self.subtitle_settings_window.set_visible(false);
     }
 
     fn set_trigger_hold(&self) {
