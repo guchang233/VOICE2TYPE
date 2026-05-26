@@ -333,42 +333,14 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
     );
 
     let audio_buffer: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
-    let audio_buffer_writer = audio_buffer.clone();
-    let channels_usize = channels as usize;
 
-    // 创建输入流
-    let config_clone = config.clone();
-    let input_stream = device.build_input_stream(
-        &stream_config,
-        move |data: &[f32], _: &_| {
-            if !IS_RECORDING.load(Ordering::Relaxed) {
-                return;
-            }
-            if let Ok(mut buffer) = audio_buffer_writer.lock() {
-                if channels_usize > 1 {
-                    // 混音到单声道，直接写入缓冲区，避免每帧分配临时 Vec
-                    buffer.reserve(data.len() / channels_usize);
-                    let scale = 1.0 / channels as f32;
-                    for frame in data.chunks(channels_usize) {
-                        let sum: f32 = frame.iter().sum();
-                        buffer.push(sum * scale);
-                    }
-                } else {
-                    buffer.extend_from_slice(data);
-                }
-            }
-        },
-        move |err| {
-            write_log(
-                LogLevel::ERROR,
-                &format!("音频输入流错误: {}", err),
-                Some(&config_clone),
-            );
-        },
-        None,
-    )?;
-
-    input_stream.play()?;
+    write_log_line(
+        &format!(
+            "[音频] 设备: {}, 采样率: {}Hz, 通道数: {}",
+            device_name, sample_rate, channels
+        ),
+        Some(&config),
+    );
 
     // 通信通道
     let (tx, mut rx) = mpsc::channel(100);
@@ -384,6 +356,7 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
     recording_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     let mut processing_task: Option<tokio::task::JoinHandle<()>> = None;
+    let mut active_stream: Option<cpal::Stream> = None;
 
     loop {
         tokio::select! {
@@ -426,6 +399,54 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
                         }
                         IS_RECORDING.store(true, Ordering::Relaxed);
 
+                        let buf_writer = audio_buffer.clone();
+                        let ch_usize = channels as usize;
+                        let ch_f32 = channels as f32;
+                        let err_config = config.clone();
+                        match device.build_input_stream(
+                            &stream_config,
+                            move |data: &[f32], _: &_| {
+                                if !IS_RECORDING.load(Ordering::Relaxed) {
+                                    return;
+                                }
+                                if let Ok(mut buffer) = buf_writer.lock() {
+                                    if ch_usize > 1 {
+                                        buffer.reserve(data.len() / ch_usize);
+                                        let scale = 1.0 / ch_f32;
+                                        for frame in data.chunks(ch_usize) {
+                                            let sum: f32 = frame.iter().sum();
+                                            buffer.push(sum * scale);
+                                        }
+                                    } else {
+                                        buffer.extend_from_slice(data);
+                                    }
+                                }
+                            },
+                            move |err| {
+                                write_log(
+                                    LogLevel::ERROR,
+                                    &format!("音频输入流错误: {}", err),
+                                    Some(&err_config),
+                                );
+                            },
+                            None,
+                        ) {
+                            Ok(stream) => {
+                                if stream.play().is_ok() {
+                                    active_stream = Some(stream);
+                                } else {
+                                    write_log(LogLevel::ERROR, "无法启动音频流", Some(&config));
+                                }
+                            }
+                            Err(e) => {
+                                write_log(
+                                    LogLevel::ERROR,
+                                    &format!("无法创建音频流: {}", e),
+                                    Some(&config),
+                                );
+                            }
+                        }
+
                         #[cfg(target_os = "windows")]
                         if config.enable_indicator() {
                             if let Some(ind) = INDICATOR.get() {
@@ -438,6 +459,7 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
                         if is_recording {
                             *app_state.lock().unwrap() = AppState::Cancelled;
                             IS_RECORDING.store(false, Ordering::Relaxed);
+                            drop(active_stream.take());
                             write_log_line("--> [取消] 录音已取消", Some(&config));
                             audio_buffer.lock().unwrap().clear();
                             #[cfg(target_os = "windows")]
@@ -458,6 +480,8 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
                     InputMessage::StopRecording => {
                         let state_now = *app_state.lock().unwrap();
                         if state_now == AppState::Recording {
+                            IS_RECORDING.store(false, Ordering::Relaxed);
+                            drop(active_stream.take());
                             processing_task = Some(begin_audio_processing(
                                 &audio_buffer,
                                 &app_state,
@@ -482,6 +506,8 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
                     }
                 };
                 if should_stop {
+                    IS_RECORDING.store(false, Ordering::Relaxed);
+                    drop(active_stream.take());
                     write_log_line(
                         &format!(
                             "--> [录音] 已达最长 {} 秒，自动结束并转写",
