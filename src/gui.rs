@@ -37,8 +37,20 @@ pub struct Voice2TypeApp {
     #[nwg_control(popup: true)]
     pub tray_menu: nwg::Menu,
 
-    // 设置 (Top Level)
-    #[nwg_control(parent: tray_menu, text: "设置")]
+    // --- 实时字幕 (Top Level) ---
+    #[nwg_control(parent: tray_menu, text: "实时字幕", check: true)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_subtitle])]
+    pub subtitle_item: nwg::MenuItem,
+
+    #[nwg_control(parent: tray_menu)]
+    pub sep_subtitle: nwg::MenuSeparator,
+
+    // --- 语音转文字 (Top Level Menu) ---
+    #[nwg_control(parent: tray_menu, text: "语音转文字")]
+    pub voice_menu: nwg::Menu,
+
+    // --- 语音转文字 -> 设置 ---
+    #[nwg_control(parent: voice_menu, text: "设置")]
     pub settings_menu: nwg::Menu,
 
     // --- 设置 -> 触发模式 ---
@@ -64,10 +76,6 @@ pub struct Voice2TypeApp {
     #[nwg_control(parent: general_menu, text: "状态浮窗", check: true)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_indicator])]
     pub indicator_item: nwg::MenuItem,
-
-    #[nwg_control(parent: general_menu, text: "实时字幕", check: true)]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_subtitle])]
-    pub subtitle_item: nwg::MenuItem,
 
     #[nwg_control(parent: general_menu)]
     pub sep_general: nwg::MenuSeparator,
@@ -167,16 +175,16 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::open_log_dir])]
     pub log_dir_item: nwg::MenuItem,
 
-    // --- Root Level Items ---
-    #[nwg_control(parent: tray_menu, text: "重新粘贴上一条")]
+    // --- 语音转文字 -> 重新粘贴上一条 ---
+    #[nwg_control(parent: voice_menu, text: "重新粘贴上一条")]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::repaste_last])]
     pub repaste_item: nwg::MenuItem,
 
-    #[nwg_control(parent: tray_menu)]
+    #[nwg_control(parent: voice_menu)]
     pub sep_update: nwg::MenuSeparator,
 
-    // --- 关于父菜单 ---
-    #[nwg_control(parent: tray_menu, text: "关于")]
+    // --- 语音转文字 -> 关于父菜单 ---
+    #[nwg_control(parent: voice_menu, text: "关于")]
     pub about_parent_menu: nwg::Menu,
 
     #[nwg_control(parent: about_parent_menu, text: "项目信息")]
