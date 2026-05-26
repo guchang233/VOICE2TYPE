@@ -437,7 +437,7 @@ pub struct Voice2TypeApp {
     pub font_bold: nwg::Font,
 
     // --- 实时字幕设置窗口 ---
-    #[nwg_control(size: (480, 520), position: (350, 300), title: "实时字幕设置", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_control(size: (480, 700), position: (350, 300), title: "实时字幕设置", flags: "WINDOW", icon: Some(&data.icon))]
     #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_subtitle_settings_window])]
     pub subtitle_settings_window: nwg::Window,
 
@@ -524,6 +524,50 @@ pub struct Voice2TypeApp {
     #[nwg_control(parent: subtitle_settings_window, font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: subtitle_settings_layout, row: 10, col: 1, col_span: 2)]
     pub sub_api_url_input: nwg::TextInput,
+
+    #[nwg_control(parent: subtitle_settings_window, text: "双语对照模式", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 11, col: 0, col_span: 3)]
+    pub sub_bilingual_item: nwg::CheckBox,
+
+    #[nwg_control(parent: subtitle_settings_window, text: "译文颜色:", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 12, col: 0)]
+    pub sub_translated_color_label: nwg::Label,
+
+    #[nwg_control(parent: subtitle_settings_window, text: "#FFFFFF", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 12, col: 1, col_span: 2)]
+    pub sub_translated_color_input: nwg::TextInput,
+
+    #[nwg_control(parent: subtitle_settings_window, text: "译文大小:", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 13, col: 0)]
+    pub sub_translated_font_size_label: nwg::Label,
+
+    #[nwg_control(parent: subtitle_settings_window, text: "24", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 13, col: 1, col_span: 2)]
+    pub sub_translated_font_size_input: nwg::TextInput,
+
+    #[nwg_control(parent: subtitle_settings_window, text: "原文颜色:", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 14, col: 0)]
+    pub sub_original_color_label: nwg::Label,
+
+    #[nwg_control(parent: subtitle_settings_window, text: "#AAAAAA", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 14, col: 1, col_span: 2)]
+    pub sub_original_color_input: nwg::TextInput,
+
+    #[nwg_control(parent: subtitle_settings_window, text: "原文大小:", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 15, col: 0)]
+    pub sub_original_font_size_label: nwg::Label,
+
+    #[nwg_control(parent: subtitle_settings_window, text: "18", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 15, col: 1, col_span: 2)]
+    pub sub_original_font_size_input: nwg::TextInput,
+
+    #[nwg_control(parent: subtitle_settings_window, text: "翻译模型:", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 16, col: 0)]
+    pub sub_translation_model_label: nwg::Label,
+
+    #[nwg_control(parent: subtitle_settings_window, font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 16, col: 1, col_span: 2)]
+    pub sub_translation_model_combo: nwg::ComboBox<String>,
 
     pub update_info: RefCell<Option<update::UpdateInfo>>,
 
@@ -930,6 +974,16 @@ impl Voice2TypeApp {
 
             self.sub_api_key_input.set_text(&mgr.get_api_key());
             self.sub_api_url_input.set_text(&mgr.get_api_url());
+            self.sub_bilingual_item.set_check_state(if mgr.interpreter_bilingual_mode() { nwg::CheckBoxState::Checked } else { nwg::CheckBoxState::Unchecked });
+            self.sub_translated_color_input.set_text(&mgr.interpreter_translated_color());
+            self.sub_translated_font_size_input.set_text(&mgr.interpreter_translated_font_size().to_string());
+            self.sub_original_color_input.set_text(&mgr.interpreter_original_color());
+            self.sub_original_font_size_input.set_text(&mgr.interpreter_original_font_size().to_string());
+            let translation_models = vec!["llama-3.1-8b-instant".to_string(), "llama-3.3-70b-versatile".to_string(), "deepseek-r1-distill-llama-70b".to_string()];
+            let current_tm = mgr.interpreter_translation_model();
+            let tm_idx = translation_models.iter().position(|m| m == &current_tm).unwrap_or(0);
+            self.sub_translation_model_combo.set_collection(translation_models);
+            self.sub_translation_model_combo.set_selection(Some(tm_idx));
         }
         self.subtitle_settings_window.set_visible(true);
         self.subtitle_settings_window.set_focus();
@@ -988,6 +1042,32 @@ impl Voice2TypeApp {
             let api_url = self.sub_api_url_input.text();
             if !api_url.is_empty() {
                 mgr.set_api_url(api_url);
+            }
+            let bilingual = self.sub_bilingual_item.check_state() == nwg::CheckBoxState::Checked;
+            mgr.set_interpreter_bilingual_mode(bilingual);
+            let translated_color = self.sub_translated_color_input.text();
+            if !translated_color.is_empty() {
+                mgr.set_interpreter_translated_color(translated_color);
+            }
+            if let Ok(size) = self.sub_translated_font_size_input.text().parse::<u32>() {
+                if size >= 10 && size <= 72 {
+                    mgr.set_interpreter_translated_font_size(size);
+                }
+            }
+            let original_color = self.sub_original_color_input.text();
+            if !original_color.is_empty() {
+                mgr.set_interpreter_original_color(original_color);
+            }
+            if let Ok(size) = self.sub_original_font_size_input.text().parse::<u32>() {
+                if size >= 10 && size <= 72 {
+                    mgr.set_interpreter_original_font_size(size);
+                }
+            }
+            let translation_models = vec!["llama-3.1-8b-instant".to_string(), "llama-3.3-70b-versatile".to_string(), "deepseek-r1-distill-llama-70b".to_string()];
+            if let Some(idx) = self.sub_translation_model_combo.selection() {
+                if idx < translation_models.len() {
+                    mgr.set_interpreter_translation_model(translation_models[idx].clone());
+                }
             }
             let click_through = self.sub_click_through_item.check_state() == nwg::CheckBoxState::Checked;
             mgr.set_interpreter_subtitle_click_through(click_through);

@@ -151,6 +151,12 @@ pub struct InterpreterConfig {
     pub subtitle_click_through: bool,
     pub use_translation: bool,
     pub chunk_ms: u64,
+    pub bilingual_mode: bool,
+    pub original_font_size: u32,
+    pub original_color: String,
+    pub translated_font_size: u32,
+    pub translated_color: String,
+    pub translation_model: String,
 }
 
 impl Default for InterpreterConfig {
@@ -165,6 +171,12 @@ impl Default for InterpreterConfig {
             subtitle_click_through: true,
             use_translation: true,
             chunk_ms: 3000,
+            bilingual_mode: false,
+            original_font_size: 18,
+            original_color: "#AAAAAA".to_string(),
+            translated_font_size: 24,
+            translated_color: "#FFFFFF".to_string(),
+            translation_model: "llama-3.1-8b-instant".to_string(),
         }
     }
 }
@@ -707,6 +719,54 @@ impl ConfigManager {
 
     pub fn set_interpreter_chunk_ms(&self, ms: u64) {
         self.config.lock().unwrap().interpreter.chunk_ms = ms;
+    }
+
+    pub fn interpreter_bilingual_mode(&self) -> bool {
+        self.config.lock().unwrap().interpreter.bilingual_mode
+    }
+
+    pub fn set_interpreter_bilingual_mode(&self, mode: bool) {
+        self.config.lock().unwrap().interpreter.bilingual_mode = mode;
+    }
+
+    pub fn interpreter_original_font_size(&self) -> u32 {
+        self.config.lock().unwrap().interpreter.original_font_size
+    }
+
+    pub fn set_interpreter_original_font_size(&self, size: u32) {
+        self.config.lock().unwrap().interpreter.original_font_size = size;
+    }
+
+    pub fn interpreter_original_color(&self) -> String {
+        self.config.lock().unwrap().interpreter.original_color.clone()
+    }
+
+    pub fn set_interpreter_original_color(&self, color: String) {
+        self.config.lock().unwrap().interpreter.original_color = color;
+    }
+
+    pub fn interpreter_translated_font_size(&self) -> u32 {
+        self.config.lock().unwrap().interpreter.translated_font_size
+    }
+
+    pub fn set_interpreter_translated_font_size(&self, size: u32) {
+        self.config.lock().unwrap().interpreter.translated_font_size = size;
+    }
+
+    pub fn interpreter_translated_color(&self) -> String {
+        self.config.lock().unwrap().interpreter.translated_color.clone()
+    }
+
+    pub fn set_interpreter_translated_color(&self, color: String) {
+        self.config.lock().unwrap().interpreter.translated_color = color;
+    }
+
+    pub fn interpreter_translation_model(&self) -> String {
+        self.config.lock().unwrap().interpreter.translation_model.clone()
+    }
+
+    pub fn set_interpreter_translation_model(&self, model: String) {
+        self.config.lock().unwrap().interpreter.translation_model = model;
     }
 
     pub fn reset_ai_config(&self) {

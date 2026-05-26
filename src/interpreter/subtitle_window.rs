@@ -14,7 +14,8 @@ use windows::{
 
 #[derive(Debug, Clone)]
 pub struct SubtitleLine {
-    pub text: String,
+    pub original: String,
+    pub translated: Option<String>,
     pub timestamp: Instant,
 }
 
@@ -24,12 +25,17 @@ pub struct SubtitleWindow {
 }
 
 pub enum SubtitleMessage {
-    Show(String),
+    ShowBilingual { original: String, translated: Option<String> },
     Hide,
     SetClickThrough(bool),
     SetOpacity(f32),
     SetPosition(String),
     SetFontSize(u32),
+    SetBilingualMode(bool),
+    SetOriginalFontSize(u32),
+    SetOriginalColor(String),
+    SetTranslatedFontSize(u32),
+    SetTranslatedColor(String),
     Shutdown,
 }
 
@@ -47,8 +53,12 @@ impl SubtitleWindow {
         Self { tx }
     }
 
+    pub fn show_bilingual(&self, original: String, translated: Option<String>) {
+        let _ = self.tx.send(SubtitleMessage::ShowBilingual { original, translated });
+    }
+
     pub fn show(&self, text: String) {
-        let _ = self.tx.send(SubtitleMessage::Show(text));
+        let _ = self.tx.send(SubtitleMessage::ShowBilingual { original: text, translated: None });
     }
 
     pub fn hide(&self) {
@@ -76,8 +86,25 @@ struct SubtitleState {
     opacity: f32,
     position: String,
     font_size: u32,
+    bilingual_mode: bool,
+    original_font_size: u32,
+    original_color: String,
+    translated_font_size: u32,
+    translated_color: String,
     last_update: Instant,
     hide_after: Duration,
+}
+
+fn parse_hex_color(hex: &str) -> (u8, u8, u8) {
+    let hex = hex.trim_start_matches('#');
+    if hex.len() == 6 {
+        let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(255);
+        let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(255);
+        let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(255);
+        (r, g, b)
+    } else {
+        (255, 255, 255)
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -135,6 +162,11 @@ unsafe fn run_subtitle_window(
         opacity,
         position,
         font_size,
+        bilingual_mode: false,
+        original_font_size: 18,
+        original_color: "#AAAAAA".to_string(),
+        translated_font_size: 24,
+        translated_color: "#FFFFFF".to_string(),
         last_update: Instant::now(),
         hide_after: Duration::from_secs(8),
     };
@@ -143,13 +175,15 @@ unsafe fn run_subtitle_window(
     loop {
         if let Ok(message) = rx.try_recv() {
             match message {
-                SubtitleMessage::Show(text) => {
-                    if !text.is_empty() {
+                SubtitleMessage::ShowBilingual { original, translated } => {
+                    if !original.is_empty() {
                         state.lines.push(SubtitleLine {
-                            text,
+                            original,
+                            translated,
                             timestamp: Instant::now(),
                         });
-                        if state.lines.len() > 3 {
+                        let max_lines = if state.bilingual_mode { 2 } else { 3 };
+                        while state.lines.len() > max_lines {
                             state.lines.remove(0);
                         }
                         state.visible = true;
@@ -184,6 +218,36 @@ unsafe fn run_subtitle_window(
                 }
                 SubtitleMessage::SetFontSize(size) => {
                     state.font_size = size;
+                    if state.visible {
+                        draw_subtitle(hwnd, &state);
+                    }
+                }
+                SubtitleMessage::SetBilingualMode(mode) => {
+                    state.bilingual_mode = mode;
+                    if state.visible {
+                        draw_subtitle(hwnd, &state);
+                    }
+                }
+                SubtitleMessage::SetOriginalFontSize(size) => {
+                    state.original_font_size = size;
+                    if state.visible {
+                        draw_subtitle(hwnd, &state);
+                    }
+                }
+                SubtitleMessage::SetOriginalColor(color) => {
+                    state.original_color = color;
+                    if state.visible {
+                        draw_subtitle(hwnd, &state);
+                    }
+                }
+                SubtitleMessage::SetTranslatedFontSize(size) => {
+                    state.translated_font_size = size;
+                    if state.visible {
+                        draw_subtitle(hwnd, &state);
+                    }
+                }
+                SubtitleMessage::SetTranslatedColor(color) => {
+                    state.translated_color = color;
                     if state.visible {
                         draw_subtitle(hwnd, &state);
                     }
@@ -241,10 +305,33 @@ unsafe fn draw_subtitle(hwnd: HWND, state: &SubtitleState) {
     let screen_height = GetSystemMetrics(SM_CYSCREEN);
 
     let padding = 20i32;
-    let line_height = (state.font_size as f32 * 1.6) as i32;
-    let num_lines = state.lines.len() as i32;
+
+    let mut total_rows = 0i32;
+    for line in &state.lines {
+        if state.bilingual_mode && line.translated.is_some() {
+            total_rows += 2;
+        } else {
+            total_rows += 1;
+        }
+    }
+
+    let row_heights: Vec<i32> = {
+        let mut heights = Vec::new();
+        for line in &state.lines {
+            if state.bilingual_mode && line.translated.is_some() {
+                heights.push((state.translated_font_size as f32 * 1.5) as i32);
+                heights.push((state.original_font_size as f32 * 1.4) as i32);
+            } else {
+                let fs = if line.translated.is_some() { state.translated_font_size } else { state.font_size };
+                heights.push((fs as f32 * 1.6) as i32);
+            }
+        }
+        heights
+    };
+
+    let total_height: i32 = row_heights.iter().sum();
     let w = 800i32;
-    let h = padding * 2 + line_height * num_lines + 10;
+    let h = padding * 2 + total_height + 10;
 
     let x = (screen_width - w) / 2;
     let y = if state.position == "top" {
@@ -329,84 +416,128 @@ unsafe fn draw_subtitle(hwnd: HWND, state: &SubtitleState) {
 
     SetBkMode(hdc_mem, TRANSPARENT);
 
-    let font_height = state.font_size as i32;
-    let font = CreateFontW(
-        -font_height,
-        0,
-        0,
-        0,
-        FW_MEDIUM.0 as i32,
-        0,
-        0,
-        0,
-        DEFAULT_CHARSET.0 as u32,
-        OUT_DEFAULT_PRECIS.0 as u32,
-        CLIP_DEFAULT_PRECIS.0 as u32,
-        CLEARTYPE_QUALITY.0 as u32,
-        DEFAULT_PITCH.0 as u32,
-        w!("Microsoft YaHei"),
-    );
-    let old_font = SelectObject(hdc_mem, font);
-
     let now = Instant::now();
-    for (i, line) in state.lines.iter().enumerate() {
+    let mut current_y = padding;
+
+    for (line_idx, line) in state.lines.iter().enumerate() {
+        let is_latest = line_idx == state.lines.len() - 1;
         let age = now.duration_since(line.timestamp).as_secs_f32();
-        let fade_factor = if i == state.lines.len() - 1 {
-            1.0f32
+        let fade_factor = if is_latest { 1.0f32 } else { 0.5f32.max(1.0 - age * 0.1) };
+
+        if state.bilingual_mode && line.translated.is_some() {
+            let (tr, tg, tb) = parse_hex_color(&state.translated_color);
+            let translated_color = COLORREF((tb as u32) << 16 | (tg as u32) << 8 | (tr as u32));
+            let translated_font = CreateFontW(
+                -(state.translated_font_size as i32),
+                0, 0, 0,
+                FW_MEDIUM.0 as i32,
+                0, 0, 0,
+                DEFAULT_CHARSET.0 as u32,
+                OUT_DEFAULT_PRECIS.0 as u32,
+                CLIP_DEFAULT_PRECIS.0 as u32,
+                CLEARTYPE_QUALITY.0 as u32,
+                DEFAULT_PITCH.0 as u32,
+                w!("Microsoft YaHei"),
+            );
+            let old_font = SelectObject(hdc_mem, translated_font);
+            SetTextColor(hdc_mem, translated_color);
+
+            let row_h = row_heights[line_idx * 2];
+            let mut text_rect = RECT {
+                left: padding + 10,
+                top: current_y,
+                right: w - padding - 10,
+                bottom: current_y + row_h,
+            };
+
+            let text = line.translated.as_ref().unwrap();
+            let mut text_wide: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
+            DrawTextW(hdc_mem, &mut text_wide, &mut text_rect, DT_VCENTER | DT_SINGLELINE | DT_WORD_ELLIPSIS);
+            alpha_blend_text_row(pixels, w, h, &text_rect);
+            current_y += row_h;
+
+            let (or, og, ob) = parse_hex_color(&state.original_color);
+            let original_color = COLORREF((ob as u32) << 16 | (og as u32) << 8 | (or as u32));
+            let original_font = CreateFontW(
+                -(state.original_font_size as i32),
+                0, 0, 0,
+                FW_NORMAL.0 as i32,
+                0, 0, 0,
+                DEFAULT_CHARSET.0 as u32,
+                OUT_DEFAULT_PRECIS.0 as u32,
+                CLIP_DEFAULT_PRECIS.0 as u32,
+                CLEARTYPE_QUALITY.0 as u32,
+                DEFAULT_PITCH.0 as u32,
+                w!("Microsoft YaHei"),
+            );
+            SelectObject(hdc_mem, original_font);
+            SetTextColor(hdc_mem, original_color);
+
+            let row_h2 = row_heights[line_idx * 2 + 1];
+            let mut text_rect2 = RECT {
+                left: padding + 10,
+                top: current_y,
+                right: w - padding - 10,
+                bottom: current_y + row_h2,
+            };
+
+            let mut text_wide2: Vec<u16> = line.original.encode_utf16().chain(Some(0)).collect();
+            DrawTextW(hdc_mem, &mut text_wide2, &mut text_rect2, DT_VCENTER | DT_SINGLELINE | DT_WORD_ELLIPSIS);
+            alpha_blend_text_row(pixels, w, h, &text_rect2);
+            current_y += row_h2;
+
+            SelectObject(hdc_mem, old_font);
+            DeleteObject(translated_font);
+            DeleteObject(original_font);
         } else {
-            0.5f32.max(1.0 - age * 0.1)
-        };
+            let display_text = if line.translated.is_some() {
+                line.translated.as_ref().unwrap()
+            } else {
+                &line.original
+            };
 
-        let _text_alpha = (255.0 * fade_factor) as u8;
-        let text_color = if i == state.lines.len() - 1 {
-            COLORREF(0x00FFFFFF)
-        } else {
-            COLORREF(0x00AAA0AA)
-        };
+            let fs = if line.translated.is_some() { state.translated_font_size } else { state.font_size };
+            let (cr, cg, cb) = if line.translated.is_some() {
+                parse_hex_color(&state.translated_color)
+            } else if is_latest {
+                (255, 255, 255)
+            } else {
+                (170, 160, 170)
+            };
+            let text_color = COLORREF((cb as u32) << 16 | (cg as u32) << 8 | (cr as u32));
 
-        SetTextColor(hdc_mem, text_color);
+            let font = CreateFontW(
+                -(fs as i32),
+                0, 0, 0,
+                FW_MEDIUM.0 as i32,
+                0, 0, 0,
+                DEFAULT_CHARSET.0 as u32,
+                OUT_DEFAULT_PRECIS.0 as u32,
+                CLIP_DEFAULT_PRECIS.0 as u32,
+                CLEARTYPE_QUALITY.0 as u32,
+                DEFAULT_PITCH.0 as u32,
+                w!("Microsoft YaHei"),
+            );
+            let old_font = SelectObject(hdc_mem, font);
+            SetTextColor(hdc_mem, text_color);
 
-        let y_pos = padding + i as i32 * line_height;
-        let mut text_rect = RECT {
-            left: padding + 10,
-            top: y_pos,
-            right: w - padding - 10,
-            bottom: y_pos + line_height,
-        };
+            let row_h = row_heights[line_idx];
+            let mut text_rect = RECT {
+                left: padding + 10,
+                top: current_y,
+                right: w - padding - 10,
+                bottom: current_y + row_h,
+            };
 
-        let mut text_wide: Vec<u16> = line.text.encode_utf16().chain(Some(0)).collect();
-        DrawTextW(
-            hdc_mem,
-            &mut text_wide,
-            &mut text_rect,
-            DT_VCENTER | DT_SINGLELINE | DT_WORD_ELLIPSIS,
-        );
+            let mut text_wide: Vec<u16> = display_text.encode_utf16().chain(Some(0)).collect();
+            DrawTextW(hdc_mem, &mut text_wide, &mut text_rect, DT_VCENTER | DT_SINGLELINE | DT_WORD_ELLIPSIS);
+            alpha_blend_text_row(pixels, w, h, &text_rect);
+            current_y += row_h;
 
-        let text_left = text_rect.left.max(0);
-        let text_right = text_rect.right.min(w);
-        let text_top = text_rect.top.max(0);
-        let text_bottom = text_rect.bottom.min(h);
-
-        for ty in text_top..text_bottom {
-            let row_offset = ty * w;
-            for tx in text_left..text_right {
-                let idx = (row_offset + tx) as usize;
-                let val = pixels[idx];
-                let r = (val >> 16) & 0xFF;
-                let g = (val >> 8) & 0xFF;
-                let b = val & 0xFF;
-                let max_c = r.max(g).max(b);
-                if max_c > 0 {
-                    let current_a = (val >> 24) & 0xFF;
-                    let target_a = current_a.max(max_c);
-                    pixels[idx] = (target_a << 24) | (val & 0x00FFFFFF);
-                }
-            }
+            SelectObject(hdc_mem, old_font);
+            DeleteObject(font);
         }
     }
-
-    SelectObject(hdc_mem, old_font);
-    DeleteObject(font);
 
     let pt_src = POINT { x: 0, y: 0 };
     let size = SIZE { cx: w, cy: h };
@@ -438,6 +569,31 @@ unsafe fn draw_subtitle(hwnd: HWND, state: &SubtitleState) {
     DeleteObject(hbitmap);
     DeleteDC(hdc_mem);
     ReleaseDC(None, hdc_screen);
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn alpha_blend_text_row(pixels: &mut [u32], w: i32, h: i32, text_rect: &RECT) {
+    let text_left = text_rect.left.max(0);
+    let text_right = text_rect.right.min(w);
+    let text_top = text_rect.top.max(0);
+    let text_bottom = text_rect.bottom.min(h);
+
+    for ty in text_top..text_bottom {
+        let row_offset = ty * w;
+        for tx in text_left..text_right {
+            let idx = (row_offset + tx) as usize;
+            let val = pixels[idx];
+            let r = (val >> 16) & 0xFF;
+            let g = (val >> 8) & 0xFF;
+            let b = val & 0xFF;
+            let max_c = r.max(g).max(b);
+            if max_c > 0 {
+                let current_a = (val >> 24) & 0xFF;
+                let target_a = current_a.max(max_c);
+                pixels[idx] = (target_a << 24) | (val & 0x00FFFFFF);
+            }
+        }
+    }
 }
 
 #[cfg(not(target_os = "windows"))]

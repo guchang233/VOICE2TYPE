@@ -10,7 +10,13 @@ pub fn reset_last_transcription() {
     *LAST_TRANSCRIPTION.lock().unwrap() = String::new();
 }
 
-pub async fn process_chunk(wav_data: Vec<u8>, config: &ConfigManager) -> Option<String> {
+#[derive(Debug, Clone)]
+pub struct SubtitleResult {
+    pub original: String,
+    pub translated: Option<String>,
+}
+
+pub async fn process_chunk(wav_data: Vec<u8>, config: &ConfigManager) -> Option<SubtitleResult> {
     let raw_text = transcribe(&wav_data, config).await?;
     write_log(LogLevel::INFO, &format!("[字幕] 转写结果: {}", raw_text.trim()), None);
     if raw_text.trim().is_empty() {
@@ -21,7 +27,10 @@ pub async fn process_chunk(wav_data: Vec<u8>, config: &ConfigManager) -> Option<
 
     if !config.interpreter_use_translation() {
         *LAST_TRANSCRIPTION.lock().unwrap() = raw_text.trim().to_string();
-        return Some(deduped);
+        return Some(SubtitleResult {
+            original: deduped,
+            translated: None,
+        });
     }
 
     let source = config.interpreter_source_language();
@@ -29,23 +38,35 @@ pub async fn process_chunk(wav_data: Vec<u8>, config: &ConfigManager) -> Option<
 
     if source == target {
         *LAST_TRANSCRIPTION.lock().unwrap() = raw_text.trim().to_string();
-        return Some(deduped);
+        return Some(SubtitleResult {
+            original: deduped,
+            translated: None,
+        });
     }
 
     match translate(&deduped, &source, &target, config).await {
         Ok(translated) => {
             *LAST_TRANSCRIPTION.lock().unwrap() = raw_text.trim().to_string();
             if translated.trim().is_empty() {
-                Some(deduped)
+                Some(SubtitleResult {
+                    original: deduped,
+                    translated: None,
+                })
             } else {
                 write_log(LogLevel::INFO, &format!("[字幕] 翻译结果: {}", translated.trim()), None);
-                Some(translated)
+                Some(SubtitleResult {
+                    original: deduped,
+                    translated: Some(translated),
+                })
             }
         }
         Err(e) => {
             *LAST_TRANSCRIPTION.lock().unwrap() = raw_text.trim().to_string();
             write_log(LogLevel::WARN, &format!("[字幕] 翻译失败，回退显示原文: {}", e), None);
-            Some(deduped)
+            Some(SubtitleResult {
+                original: deduped,
+                translated: None,
+            })
         }
     }
 }
@@ -148,15 +169,38 @@ async fn translate(
     }
 
     let source_desc = if source_lang == "auto" {
-        "自动检测的语言".to_string()
+        "the source language (auto-detect)".to_string()
     } else {
-        source_lang.to_string()
+        format!("{}", source_lang)
     };
 
-    let prompt = format!(
-        "将以下文本从{}翻译为{}，只输出翻译结果，不要添加任何解释：\n\n{}",
-        source_desc, target_lang, text
+    let target_desc = match target_lang {
+        "zh" => "简体中文".to_string(),
+        "en" => "English".to_string(),
+        "ja" => "日本語".to_string(),
+        "ko" => "한국어".to_string(),
+        "fr" => "Français".to_string(),
+        "de" => "Deutsch".to_string(),
+        "es" => "Español".to_string(),
+        _ => target_lang.to_string(),
+    };
+
+    let model = config.interpreter_translation_model();
+
+    let system_prompt = format!(
+        "你是一位精通{}和{}的专业翻译官。你的翻译遵循「信达雅」原则：\n\
+         - 信：忠实原文含义，不增删篡改\n\
+         - 达：译文通顺流畅，符合目标语言表达习惯\n\
+         - 雅：用词优美得体，避免生硬机翻\n\n\
+         规则：\n\
+         1. 只输出翻译结果，不要添加解释、注释或括号\n\
+         2. 专有名词、人名、品牌名保持原文不翻译\n\
+         3. 口语化内容保持口语风格，书面内容保持书面风格\n\
+         4. 如果原文已经是目标语言，直接输出原文",
+        source_desc, target_desc
     );
+
+    let user_prompt = format!("{}", text);
 
     let client = reqwest::Client::new();
     let response = client
@@ -164,8 +208,11 @@ async fn translate(
         .header("Authorization", format!("Bearer {}", api_key))
         .header("Content-Type", "application/json")
         .json(&serde_json::json!({
-            "model": "llama-3.1-8b-instant",
-            "messages": [{"role": "user", "content": prompt}],
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
             "temperature": 0.3,
             "max_tokens": 1024,
         }))

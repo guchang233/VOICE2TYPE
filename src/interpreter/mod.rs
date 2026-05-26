@@ -115,11 +115,11 @@ impl InterpreterEngine {
 
                     match chunk_rx.recv_timeout(std::time::Duration::from_millis(100)) {
                         Ok(wav_data) => {
-                            if let Some(text) =
+                            if let Some(result) =
                                 pipeline::process_chunk(wav_data, &pipeline_config).await
                             {
-                                if !text.is_empty() {
-                                    subtitle.show(text);
+                                if !result.original.is_empty() {
+                                    subtitle.show_bilingual(result.original, result.translated);
                                 }
                             }
                         }
