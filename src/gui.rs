@@ -37,7 +37,6 @@ pub struct Voice2TypeApp {
     #[nwg_control(popup: true)]
     pub tray_menu: nwg::Menu,
 
-    // --- 实时字幕 (Top Level Submenu) ---
     #[nwg_control(parent: tray_menu, text: "实时字幕")]
     pub subtitle_menu: nwg::Menu,
 
@@ -45,30 +44,28 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_subtitle])]
     pub subtitle_item: nwg::MenuItem,
 
-    #[nwg_control(parent: subtitle_menu)]
-    pub sep_subtitle_inner: nwg::MenuSeparator,
-
     #[nwg_control(parent: subtitle_menu, text: "启用翻译", check: true)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_subtitle_translation])]
     pub subtitle_translation_item: nwg::MenuItem,
+
+    #[nwg_control(parent: subtitle_menu)]
+    pub sep_subtitle_inner: nwg::MenuSeparator,
 
     #[nwg_control(parent: subtitle_menu, text: "字幕设置...")]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_subtitle_settings_window])]
     pub subtitle_settings_item: nwg::MenuItem,
 
+    #[nwg_control(parent: subtitle_menu, text: "字幕模型设置...")]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_subtitle_model_settings_window])]
+    pub subtitle_model_settings_item: nwg::MenuItem,
+
     #[nwg_control(parent: tray_menu)]
     pub sep_subtitle: nwg::MenuSeparator,
 
-    // --- 语音转文字 (Top Level Menu) ---
     #[nwg_control(parent: tray_menu, text: "语音转文字")]
     pub voice_menu: nwg::Menu,
 
-    // --- 语音转文字 -> 设置 ---
-    #[nwg_control(parent: voice_menu, text: "设置")]
-    pub settings_menu: nwg::Menu,
-
-    // --- 设置 -> 触发模式 ---
-    #[nwg_control(parent: settings_menu, text: "触发模式")]
+    #[nwg_control(parent: voice_menu, text: "触发模式")]
     pub trigger_menu: nwg::Menu,
 
     #[nwg_control(parent: trigger_menu, text: "按住说话", check: true)]
@@ -79,8 +76,7 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_trigger_toggle])]
     pub trigger_toggle_item: nwg::MenuItem,
 
-    // --- 设置 -> 通用 ---
-    #[nwg_control(parent: settings_menu, text: "通用")]
+    #[nwg_control(parent: voice_menu, text: "通用设置")]
     pub general_menu: nwg::Menu,
 
     #[nwg_control(parent: general_menu, text: "开机自启动", check: true)]
@@ -106,8 +102,7 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_mic_window])]
     pub mic_settings_item: nwg::MenuItem,
 
-    // --- 设置 -> 输出方式 ---
-    #[nwg_control(parent: settings_menu, text: "输出方式")]
+    #[nwg_control(parent: voice_menu, text: "输出方式")]
     pub output_menu: nwg::Menu,
 
     #[nwg_control(parent: output_menu, text: "键盘注入", check: true)]
@@ -118,8 +113,7 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_output_clipboard])]
     pub output_clipboard_item: nwg::MenuItem,
 
-    // --- 设置 -> 识别语言 ---
-    #[nwg_control(parent: settings_menu, text: "识别语言")]
+    #[nwg_control(parent: voice_menu, text: "识别语言")]
     pub output_lang_menu: nwg::Menu,
 
     #[nwg_control(parent: output_lang_menu, text: "自动", check: true)]
@@ -134,51 +128,81 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_out_lang_en])]
     pub output_lang_en_item: nwg::MenuItem,
 
-    // --- 设置 -> 模型与密钥 ---
-    #[nwg_control(parent: settings_menu, text: "模型与密钥")]
-    pub config_menu: nwg::Menu,
+    #[nwg_control(parent: voice_menu)]
+    pub sep_voice_inner: nwg::MenuSeparator,
 
-    #[nwg_control(parent: config_menu, text: "模型选择")]
-    pub model_menu: nwg::Menu,
+    #[nwg_control(parent: voice_menu, text: "重新粘贴上一条")]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::repaste_last])]
+    pub repaste_item: nwg::MenuItem,
 
-    #[nwg_control(parent: model_menu, text: "TeleAI", check: false)]
+    #[nwg_control(parent: tray_menu)]
+    pub sep_voice_model: nwg::MenuSeparator,
+
+    #[nwg_control(parent: tray_menu, text: "模型与密钥")]
+    pub model_and_key_menu: nwg::Menu,
+
+    #[nwg_control(parent: model_and_key_menu, text: "语音转文字模型")]
+    pub voice_model_menu: nwg::Menu,
+
+    #[nwg_control(parent: voice_model_menu, text: "TeleAI", check: false)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::select_model_teleai])]
     pub model_teleai_item: nwg::MenuItem,
 
-    #[nwg_control(parent: model_menu, text: "FunAudioLLM/SenseVoiceSmall", check: false)]
+    #[nwg_control(parent: voice_model_menu, text: "FunAudioLLM/SenseVoiceSmall", check: false)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::select_model_sensevoice])]
     pub model_sensevoice_item: nwg::MenuItem,
 
-    #[nwg_control(parent: model_menu, text: "whisper-large-v3", check: false)]
+    #[nwg_control(parent: voice_model_menu, text: "whisper-large-v3", check: false)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::select_model_whisper])]
     pub model_whisper_item: nwg::MenuItem,
 
-    #[nwg_control(parent: model_menu, text: "本地 Whisper（离线）", check: false)]
+    #[nwg_control(parent: voice_model_menu, text: "本地 Whisper（离线）", check: false)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::select_model_local_whisper])]
     pub model_local_whisper_item: nwg::MenuItem,
 
-    #[nwg_control(parent: model_menu, text: "自定义 API", check: false)]
+    #[nwg_control(parent: voice_model_menu, text: "自定义 API", check: false)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_custom_api_window])]
     pub model_custom_item: nwg::MenuItem,
 
-    #[nwg_control(parent: config_menu, text: "API Key")]
+    #[nwg_control(parent: model_and_key_menu, text: "实时字幕模型")]
+    pub subtitle_model_menu: nwg::Menu,
+
+    #[nwg_control(parent: subtitle_model_menu, text: "whisper-large-v3", check: true)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::select_sub_model_whisper])]
+    pub sub_model_whisper_item: nwg::MenuItem,
+
+    #[nwg_control(parent: subtitle_model_menu, text: "whisper-large-v3-turbo", check: false)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::select_sub_model_whisper_turbo])]
+    pub sub_model_whisper_turbo_item: nwg::MenuItem,
+
+    #[nwg_control(parent: subtitle_model_menu, text: "本地 Whisper（离线）", check: false)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::select_sub_model_local])]
+    pub sub_model_local_item: nwg::MenuItem,
+
+    #[nwg_control(parent: subtitle_model_menu, text: "自定义 API", check: false)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_sub_custom_api_window])]
+    pub sub_model_custom_item: nwg::MenuItem,
+
+    #[nwg_control(parent: model_and_key_menu, text: "API Key")]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_key_config_window])]
     pub key_config_item: nwg::MenuItem,
 
-    #[nwg_control(parent: config_menu, text: "热键绑定")]
+    #[nwg_control(parent: model_and_key_menu, text: "热键绑定")]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_hotkey_window])]
     pub hotkey_settings_item: nwg::MenuItem,
 
-    #[nwg_control(parent: config_menu, text: "打开配置目录")]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::open_config_dir])]
-    pub config_file_item: nwg::MenuItem,
-
-    #[nwg_control(parent: config_menu, text: "设置本地 Whisper 目录")]
+    #[nwg_control(parent: model_and_key_menu, text: "设置本地 Whisper 目录")]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_whisper_window])]
     pub whisper_settings_item: nwg::MenuItem,
 
-    // --- 设置 -> 调试 ---
-    #[nwg_control(parent: settings_menu, text: "调试")]
+    #[nwg_control(parent: model_and_key_menu, text: "打开配置目录")]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::open_config_dir])]
+    pub config_file_item: nwg::MenuItem,
+
+    #[nwg_control(parent: tray_menu)]
+    pub sep_model_debug: nwg::MenuSeparator,
+
+    #[nwg_control(parent: tray_menu, text: "调试")]
     pub debug_menu: nwg::Menu,
 
     #[nwg_control(parent: debug_menu, text: "显示日志窗口", check: true)]
@@ -188,11 +212,6 @@ pub struct Voice2TypeApp {
     #[nwg_control(parent: debug_menu, text: "打开日志目录")]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::open_log_dir])]
     pub log_dir_item: nwg::MenuItem,
-
-    // --- 语音转文字 -> 重新粘贴上一条 ---
-    #[nwg_control(parent: voice_menu, text: "重新粘贴上一条")]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::repaste_last])]
-    pub repaste_item: nwg::MenuItem,
 
     #[nwg_control(parent: tray_menu)]
     pub sep_voice_about: nwg::MenuSeparator,
@@ -362,6 +381,62 @@ pub struct Voice2TypeApp {
     #[nwg_layout_item(layout: custom_api_layout, row: 3, col: 1)]
     #[nwg_events(OnButtonClick: [Voice2TypeApp::save_custom_api_config])]
     pub custom_api_save_btn: nwg::Button,
+
+    #[nwg_control(size: (520, 320), position: (300, 300), title: "字幕模型设置", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_subtitle_model_settings_window])]
+    pub subtitle_model_window: nwg::Window,
+
+    #[nwg_layout(parent: subtitle_model_window, spacing: 10, margin: [20, 20, 20, 20])]
+    pub subtitle_model_layout: nwg::GridLayout,
+
+    #[nwg_control(parent: subtitle_model_window, text: "转写模型:", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_model_layout, row: 0, col: 0)]
+    pub sub_m_model_label: nwg::Label,
+
+    #[nwg_control(parent: subtitle_model_window, font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_model_layout, row: 0, col: 1, col_span: 2)]
+    pub sub_m_model_combo: nwg::ComboBox<String>,
+
+    #[nwg_control(parent: subtitle_model_window, text: "转写 API Key:", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_model_layout, row: 1, col: 0)]
+    pub sub_m_api_key_label: nwg::Label,
+
+    #[nwg_control(parent: subtitle_model_window, font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_model_layout, row: 1, col: 1, col_span: 2)]
+    pub sub_m_api_key_input: nwg::TextInput,
+
+    #[nwg_control(parent: subtitle_model_window, text: "转写 API URL:", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_model_layout, row: 2, col: 0)]
+    pub sub_m_api_url_label: nwg::Label,
+
+    #[nwg_control(parent: subtitle_model_window, font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_model_layout, row: 2, col: 1, col_span: 2)]
+    pub sub_m_api_url_input: nwg::TextInput,
+
+    #[nwg_control(parent: subtitle_model_window, text: "使用本地 Whisper（离线）", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_model_layout, row: 3, col: 0, col_span: 3)]
+    pub sub_m_local_whisper_item: nwg::CheckBox,
+
+    #[nwg_control(parent: subtitle_model_window, text: "翻译 API Key:", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_model_layout, row: 4, col: 0)]
+    pub sub_m_trans_api_key_label: nwg::Label,
+
+    #[nwg_control(parent: subtitle_model_window, font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_model_layout, row: 4, col: 1, col_span: 2)]
+    pub sub_m_trans_api_key_input: nwg::TextInput,
+
+    #[nwg_control(parent: subtitle_model_window, text: "翻译 API URL:", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_model_layout, row: 5, col: 0)]
+    pub sub_m_trans_api_url_label: nwg::Label,
+
+    #[nwg_control(parent: subtitle_model_window, font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_model_layout, row: 5, col: 1, col_span: 2)]
+    pub sub_m_trans_api_url_input: nwg::TextInput,
+
+    #[nwg_control(parent: subtitle_model_window, text: "保存", font: Some(&data.font_medium))]
+    #[nwg_layout_item(layout: subtitle_model_layout, row: 6, col: 1)]
+    #[nwg_events(OnButtonClick: [Voice2TypeApp::save_subtitle_model_settings])]
+    pub sub_m_save_btn: nwg::Button,
 
     // --- 关于与更新窗口 ---
     #[nwg_control(size: (560, 500), position: (400, 400), title: "关于 & 检查更新", flags: "WINDOW", icon: Some(&data.icon))]
@@ -699,6 +774,7 @@ impl Voice2TypeApp {
         // 初始隐藏窗口
         app.key_config_window.set_visible(false);
         app.subtitle_settings_window.set_visible(false);
+        app.subtitle_model_window.set_visible(false);
 
         // 初始化热键下拉框
         let hotkeys = vec![
@@ -762,6 +838,7 @@ impl Voice2TypeApp {
 
         // 启动自动检测
         app.update_model_menu_checks();
+        app.update_subtitle_model_menu_checks();
         app.do_check_update();
 
         if config_manager.interpreter_enabled() {
@@ -968,13 +1045,13 @@ impl Voice2TypeApp {
             self.sub_click_through_item.set_check_state(if click_through { nwg::CheckBoxState::Checked } else { nwg::CheckBoxState::Unchecked });
 
             let models = vec!["whisper-large-v3".to_string(), "whisper-large-v3-turbo".to_string(), "distil-whisper-large-v3-en".to_string()];
-            let current_model = mgr.get_model_name();
+            let current_model = mgr.interpreter_model_name();
             let model_idx = models.iter().position(|m| m == &current_model).unwrap_or(0);
             self.sub_model_combo.set_collection(models);
             self.sub_model_combo.set_selection(Some(model_idx));
 
-            self.sub_api_key_input.set_text(&mgr.get_api_key());
-            self.sub_api_url_input.set_text(&mgr.get_api_url());
+            self.sub_api_key_input.set_text(&mgr.interpreter_api_key());
+            self.sub_api_url_input.set_text(&mgr.interpreter_api_url());
             self.sub_bilingual_item.set_check_state(if mgr.interpreter_bilingual_mode() { nwg::CheckBoxState::Checked } else { nwg::CheckBoxState::Unchecked });
             self.sub_translated_color_input.set_text(&mgr.interpreter_translated_color());
             self.sub_translated_font_size_input.set_text(&mgr.interpreter_translated_font_size().to_string());
@@ -1034,17 +1111,13 @@ impl Voice2TypeApp {
             let models = vec!["whisper-large-v3".to_string(), "whisper-large-v3-turbo".to_string(), "distil-whisper-large-v3-en".to_string()];
             if let Some(idx) = self.sub_model_combo.selection() {
                 if idx < models.len() {
-                    mgr.set_model_name(models[idx].clone());
+                    mgr.set_interpreter_model_name(models[idx].clone());
                 }
             }
             let api_key = self.sub_api_key_input.text();
-            if !api_key.is_empty() {
-                mgr.set_api_key(api_key);
-            }
+            mgr.set_interpreter_api_key(api_key);
             let api_url = self.sub_api_url_input.text();
-            if !api_url.is_empty() {
-                mgr.set_api_url(api_url);
-            }
+            mgr.set_interpreter_api_url(api_url);
             let bilingual = self.sub_bilingual_item.check_state() == nwg::CheckBoxState::Checked;
             mgr.set_interpreter_bilingual_mode(bilingual);
             let translated_color = self.sub_translated_color_input.text();
@@ -1085,6 +1158,96 @@ impl Voice2TypeApp {
             nwg::simple_message("已保存", "实时字幕设置已保存并已生效。");
         }
         self.subtitle_settings_window.set_visible(false);
+    }
+
+    fn show_subtitle_model_settings_window(&self) {
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            let models = vec!["whisper-large-v3".to_string(), "whisper-large-v3-turbo".to_string(), "distil-whisper-large-v3-en".to_string()];
+            let current_model = mgr.interpreter_model_name();
+            let model_idx = models.iter().position(|m| m == &current_model).unwrap_or(0);
+            self.sub_m_model_combo.set_collection(models);
+            self.sub_m_model_combo.set_selection(Some(model_idx));
+            self.sub_m_api_key_input.set_text(&mgr.interpreter_api_key());
+            self.sub_m_api_url_input.set_text(&mgr.interpreter_api_url());
+            self.sub_m_local_whisper_item.set_check_state(if mgr.interpreter_use_local_whisper() { nwg::CheckBoxState::Checked } else { nwg::CheckBoxState::Unchecked });
+            self.sub_m_trans_api_key_input.set_text(&mgr.interpreter_translation_api_key());
+            self.sub_m_trans_api_url_input.set_text(&mgr.interpreter_translation_api_url());
+        }
+        self.subtitle_model_window.set_visible(true);
+        self.subtitle_model_window.set_focus();
+    }
+
+    fn hide_subtitle_model_settings_window(&self) {
+        self.subtitle_model_window.set_visible(false);
+    }
+
+    fn save_subtitle_model_settings(&self) {
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            let models = vec!["whisper-large-v3".to_string(), "whisper-large-v3-turbo".to_string(), "distil-whisper-large-v3-en".to_string()];
+            if let Some(idx) = self.sub_m_model_combo.selection() {
+                if idx < models.len() {
+                    mgr.set_interpreter_model_name(models[idx].clone());
+                }
+            }
+            mgr.set_interpreter_api_key(self.sub_m_api_key_input.text());
+            mgr.set_interpreter_api_url(self.sub_m_api_url_input.text());
+            let use_local = self.sub_m_local_whisper_item.check_state() == nwg::CheckBoxState::Checked;
+            mgr.set_interpreter_use_local_whisper(use_local);
+            mgr.set_interpreter_translation_api_key(self.sub_m_trans_api_key_input.text());
+            mgr.set_interpreter_translation_api_url(self.sub_m_trans_api_url_input.text());
+            mgr.save_or_notify();
+            self.update_subtitle_model_menu_checks();
+            nwg::simple_message("已保存", "字幕模型设置已保存。");
+        }
+        self.subtitle_model_window.set_visible(false);
+    }
+
+    fn select_sub_model_whisper(&self) {
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            mgr.set_interpreter_model_name("whisper-large-v3".to_string());
+            mgr.set_interpreter_use_local_whisper(false);
+            mgr.set_interpreter_api_url("https://api.groq.com/openai/v1/audio/transcriptions".to_string());
+            mgr.save_or_notify();
+            self.update_subtitle_model_menu_checks();
+        }
+    }
+
+    fn select_sub_model_whisper_turbo(&self) {
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            mgr.set_interpreter_model_name("whisper-large-v3-turbo".to_string());
+            mgr.set_interpreter_use_local_whisper(false);
+            mgr.set_interpreter_api_url("https://api.groq.com/openai/v1/audio/transcriptions".to_string());
+            mgr.save_or_notify();
+            self.update_subtitle_model_menu_checks();
+        }
+    }
+
+    fn select_sub_model_local(&self) {
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            if !mgr.has_local_whisper_dir() {
+                nwg::simple_message("本地 Whisper", "请先设置 Whisper 根目录。");
+                self.show_whisper_window();
+                return;
+            }
+            mgr.set_interpreter_use_local_whisper(true);
+            mgr.save_or_notify();
+            self.update_subtitle_model_menu_checks();
+        }
+    }
+
+    fn show_sub_custom_api_window(&self) {
+        self.show_subtitle_model_settings_window();
+    }
+
+    fn update_subtitle_model_menu_checks(&self) {
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            let use_local = mgr.interpreter_use_local_whisper();
+            let model = mgr.interpreter_model_name();
+            self.sub_model_whisper_item.set_checked(!use_local && model == "whisper-large-v3");
+            self.sub_model_whisper_turbo_item.set_checked(!use_local && model == "whisper-large-v3-turbo");
+            self.sub_model_local_item.set_checked(use_local);
+            self.sub_model_custom_item.set_checked(!use_local && model != "whisper-large-v3" && model != "whisper-large-v3-turbo");
+        }
     }
 
     fn set_trigger_hold(&self) {

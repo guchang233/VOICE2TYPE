@@ -6,7 +6,7 @@ use std::sync::Mutex;
 static LAST_TRANSCRIPTION: once_cell::sync::Lazy<Mutex<String>> =
     once_cell::sync::Lazy::new(|| Mutex::new(String::new()));
 
-static TRANSLATION_CONTEXT: once_cell::sync::Lazy<Mutex<Vec<(String, String)>>> =
+static TRANSLATION_CONTEXT: once_cell::sync::Lazy<Mutex<Vec<(String, String, std::time::Instant)>>> =
     once_cell::sync::Lazy::new(|| Mutex::new(Vec::new()));
 
 pub fn reset_translation_context() {
@@ -44,7 +44,7 @@ pub async fn process_chunk(wav_data: Vec<u8>, config: &ConfigManager) -> Option<
     let source = config.interpreter_source_language();
     let target = config.interpreter_target_language();
 
-    if source == target || source == "auto" {
+    if source == target {
         *LAST_TRANSCRIPTION.lock().unwrap() = raw_text.trim().to_string();
         return Some(SubtitleResult {
             original: deduped,
@@ -53,7 +53,7 @@ pub async fn process_chunk(wav_data: Vec<u8>, config: &ConfigManager) -> Option<
     }
 
     let ctx = if config.interpreter_translation_context() {
-        TRANSLATION_CONTEXT.lock().unwrap().clone()
+        TRANSLATION_CONTEXT.lock().unwrap().iter().map(|(o, t, _)| (o.clone(), t.clone())).collect()
     } else {
         Vec::new()
     };
@@ -69,8 +69,10 @@ pub async fn process_chunk(wav_data: Vec<u8>, config: &ConfigManager) -> Option<
                 write_log(LogLevel::INFO, &format!("[字幕] 翻译结果: {}", translated.trim()), None);
                 {
                     let mut ctx = TRANSLATION_CONTEXT.lock().unwrap();
-                    ctx.push((deduped.clone(), translated.clone()));
-                    if ctx.len() > 5 {
+                    let now = std::time::Instant::now();
+                    ctx.retain(|(_, _, t)| now.duration_since(*t).as_secs() < 120);
+                    ctx.push((deduped.clone(), translated.clone(), now));
+                    if ctx.len() > 10 {
                         ctx.remove(0);
                     }
                 }
@@ -147,7 +149,7 @@ fn find_overlap(previous: &str, current: &str) -> usize {
 }
 
 async fn transcribe(wav_data: &[u8], config: &ConfigManager) -> Option<String> {
-    if config.is_local_whisper() {
+    if config.interpreter_use_local_whisper() {
         let wav = wav_data.to_vec();
         let cfg = config.clone();
         match tokio::task::spawn_blocking(move || {
@@ -166,11 +168,48 @@ async fn transcribe(wav_data: &[u8], config: &ConfigManager) -> Option<String> {
             }
         }
     } else {
-        let api_client = crate::api::client::ApiClient::new();
-        match api_client.process_audio(wav_data.to_vec(), config).await {
-            Ok(text) => Some(text),
+        let api_key = config.interpreter_api_key();
+        let api_key = if api_key.is_empty() { config.get_groq_api_key() } else { api_key };
+        if api_key.is_empty() {
+            write_log(LogLevel::ERROR, "[字幕] 转写 API Key 未配置", None);
+            return None;
+        }
+        let api_url = config.interpreter_api_url();
+        let model = config.interpreter_model_name();
+
+        let form = reqwest::multipart::Form::new()
+            .text("model", model)
+            .text("response_format", "json")
+            .part("file", reqwest::multipart::Part::bytes(wav_data.to_vec())
+                .file_name("recording.wav".to_string())
+                .mime_str("audio/wav").unwrap());
+
+        let response = crate::api::client::HTTP_CLIENT
+            .post(&api_url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .multipart(form)
+            .send()
+            .await;
+
+        match response {
+            Ok(resp) => {
+                if resp.status().is_success() {
+                    match resp.json::<crate::api::client::ApiResponse>().await {
+                        Ok(result) => Some(result.text),
+                        Err(e) => {
+                            write_log(LogLevel::ERROR, &format!("[字幕] 解析转写响应失败: {}", e), None);
+                            None
+                        }
+                    }
+                } else {
+                    let status = resp.status();
+                    let body = resp.text().await.unwrap_or_default();
+                    write_log(LogLevel::ERROR, &format!("[字幕] 转写 API 错误 {}: {}", status, body), None);
+                    None
+                }
+            }
             Err(e) => {
-                write_log(LogLevel::ERROR, &format!("[字幕] API 转写失败: {}", e), None);
+                write_log(LogLevel::ERROR, &format!("[字幕] 转写请求失败: {}", e), None);
                 None
             }
         }
@@ -184,10 +223,13 @@ async fn translate(
     config: &ConfigManager,
     context: &[(String, String)],
 ) -> Result<String, String> {
-    let api_key = config.get_groq_api_key();
+    let api_key = config.interpreter_translation_api_key();
+    let api_key = if api_key.is_empty() { config.get_groq_api_key() } else { api_key };
     if api_key.is_empty() {
-        return Err("Groq API Key 未配置".to_string());
+        return Err("翻译 API Key 未配置".to_string());
     }
+
+    let api_url = config.interpreter_translation_api_url();
 
     let source_desc = if source_lang == "auto" {
         "the source language (auto-detect)".to_string()
@@ -233,7 +275,7 @@ async fn translate(
     messages.push(serde_json::json!({"role": "user", "content": user_prompt}));
 
     let response = crate::api::client::HTTP_CLIENT
-        .post("https://api.groq.com/openai/v1/chat/completions")
+        .post(&api_url)
         .header("Authorization", format!("Bearer {}", api_key))
         .header("Content-Type", "application/json")
         .json(&serde_json::json!({

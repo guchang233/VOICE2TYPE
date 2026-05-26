@@ -158,6 +158,12 @@ pub struct InterpreterConfig {
     pub translated_color: String,
     pub translation_model: String,
     pub translation_context: bool,
+    pub use_local_whisper: bool,
+    pub api_url: String,
+    pub api_key: String,
+    pub model_name: String,
+    pub translation_api_url: String,
+    pub translation_api_key: String,
 }
 
 impl Default for InterpreterConfig {
@@ -179,6 +185,12 @@ impl Default for InterpreterConfig {
             translated_color: "#FFFFFF".to_string(),
             translation_model: "llama-3.1-8b-instant".to_string(),
             translation_context: true,
+            use_local_whisper: false,
+            api_url: "https://api.groq.com/openai/v1/audio/transcriptions".to_string(),
+            api_key: String::new(),
+            model_name: "whisper-large-v3".to_string(),
+            translation_api_url: "https://api.groq.com/openai/v1/chat/completions".to_string(),
+            translation_api_key: String::new(),
         }
     }
 }
@@ -777,6 +789,54 @@ impl ConfigManager {
 
     pub fn set_interpreter_translation_context(&self, enabled: bool) {
         self.config.lock().unwrap().interpreter.translation_context = enabled;
+    }
+
+    pub fn interpreter_use_local_whisper(&self) -> bool {
+        self.config.lock().unwrap().interpreter.use_local_whisper
+    }
+
+    pub fn set_interpreter_use_local_whisper(&self, enabled: bool) {
+        self.config.lock().unwrap().interpreter.use_local_whisper = enabled;
+    }
+
+    pub fn interpreter_api_url(&self) -> String {
+        self.config.lock().unwrap().interpreter.api_url.clone()
+    }
+
+    pub fn set_interpreter_api_url(&self, url: String) {
+        self.config.lock().unwrap().interpreter.api_url = url;
+    }
+
+    pub fn interpreter_api_key(&self) -> String {
+        self.config.lock().unwrap().interpreter.api_key.clone()
+    }
+
+    pub fn set_interpreter_api_key(&self, key: String) {
+        self.config.lock().unwrap().interpreter.api_key = key;
+    }
+
+    pub fn interpreter_model_name(&self) -> String {
+        self.config.lock().unwrap().interpreter.model_name.clone()
+    }
+
+    pub fn set_interpreter_model_name(&self, model: String) {
+        self.config.lock().unwrap().interpreter.model_name = model;
+    }
+
+    pub fn interpreter_translation_api_url(&self) -> String {
+        self.config.lock().unwrap().interpreter.translation_api_url.clone()
+    }
+
+    pub fn set_interpreter_translation_api_url(&self, url: String) {
+        self.config.lock().unwrap().interpreter.translation_api_url = url;
+    }
+
+    pub fn interpreter_translation_api_key(&self) -> String {
+        self.config.lock().unwrap().interpreter.translation_api_key.clone()
+    }
+
+    pub fn set_interpreter_translation_api_key(&self, key: String) {
+        self.config.lock().unwrap().interpreter.translation_api_key = key;
     }
 
     pub fn reset_ai_config(&self) {
