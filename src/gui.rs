@@ -691,6 +691,14 @@ impl Voice2TypeApp {
         app.update_model_menu_checks();
         app.do_check_update();
 
+        // 如果配置中实时字幕已启用，自动启动引擎
+        if config_manager.interpreter_enabled() {
+            #[cfg(target_os = "windows")]
+            {
+                crate::start_interpreter(config_manager.clone());
+            }
+        }
+
         app_ui
     }
 
@@ -1557,6 +1565,16 @@ impl Voice2TypeApp {
                     mgr.set_show_log(false);
                     mgr.save_or_notify();
                 }
+            }
+
+            let subtitle_checked = self.subtitle_item.checked();
+            let config_enabled = if let Some(mgr) = &*self.config_manager.borrow() {
+                mgr.interpreter_enabled()
+            } else {
+                false
+            };
+            if subtitle_checked != config_enabled {
+                self.subtitle_item.set_checked(config_enabled);
             }
 
             let messages: Vec<(String, String)> = PENDING_TRAY_MESSAGES

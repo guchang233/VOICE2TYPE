@@ -115,6 +115,8 @@ pub fn start_interpreter(config: Arc<ConfigManager>) {
                 config_clone.save_or_notify();
             }
             Err(e) => {
+                config_clone.set_interpreter_enabled(false);
+                config_clone.save_or_notify();
                 notify::queue_tray_message("启动失败", &format!("实时字幕启动失败: {}", e));
                 crate::utils::logger::write_log(crate::utils::logger::LogLevel::ERROR, &format!("[字幕] 实时字幕引擎启动失败: {}", e), None);
             }
