@@ -4,11 +4,11 @@ use crate::audio::processor::{encode_wav_memory, resample_and_convert};
 use crate::utils::logger::{write_log, LogLevel};
 
 const SILENCE_RMS_THRESHOLD: f32 = 0.015;
-const SILENCE_DURATION_MS: u64 = 600;
-const FLUSH_TIMEOUT_MS: u64 = 2000;
+const SILENCE_DURATION_MS: u64 = 400;
+const FLUSH_TIMEOUT_MS: u64 = 800;
 const OVERLAP_RATIO: f64 = 0.3;
 const VAD_FRAME_SIZE: usize = 160;
-const MIN_CHUNK_SECS: f64 = 1.5;
+const MIN_CHUNK_SECS: f64 = 0.5;
 
 pub struct AudioChunker {
     buffer: Vec<f32>,

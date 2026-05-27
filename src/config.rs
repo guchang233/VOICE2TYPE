@@ -181,7 +181,7 @@ impl Default for InterpreterConfig {
             original_color: "#AAAAAA".to_string(),
             translated_font_size: 24,
             translated_color: "#FFFFFF".to_string(),
-            translation_model: "llama-3.3-70b-versatile".to_string(),
+            translation_model: "llama-3.1-8b-instant".to_string(),
             translation_context: true,
             use_local_whisper: false,
             api_url: "https://api.groq.com/openai/v1/audio/transcriptions".to_string(),
