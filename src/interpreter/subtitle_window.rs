@@ -51,6 +51,7 @@ pub enum SubtitleMessage {
     OpenSettings,
     SetLocked(bool),
     ToggleVisibility,
+    ToggleAudioSource,
     Shutdown,
 }
 
@@ -136,6 +137,7 @@ struct SubtitleState {
     locked: bool,
     user_hidden: bool,
     user_moved: bool,
+    audio_source: String,
     last_update: Instant,
     hide_after: Duration,
 }
@@ -157,7 +159,7 @@ const BTN_MARGIN: i32 = 6;
 const BTN_GAP: i32 = 3;
 const HOVER_TIMER_ID: usize = 1001;
 
-fn btn_layout(w: i32) -> [(i32, i32, i32, i32); 4] {
+fn btn_layout(w: i32) -> [(i32, i32, i32, i32); 5] {
     let y1 = BTN_MARGIN;
     let y2 = BTN_MARGIN + BTN_SIZE;
     let r0 = w - BTN_MARGIN;
@@ -165,11 +167,13 @@ fn btn_layout(w: i32) -> [(i32, i32, i32, i32); 4] {
     let r2 = r1 - BTN_GAP - BTN_SIZE;
     let r3 = r2 - BTN_GAP - BTN_SIZE;
     let r4 = r3 - BTN_GAP - BTN_SIZE;
+    let r5 = r4 - BTN_GAP - BTN_SIZE;
     [
         (r1, y1, r0, y2),
         (r2, y1, r1 - BTN_GAP, y2),
         (r3, y1, r2 - BTN_GAP, y2),
         (r4, y1, r3 - BTN_GAP, y2),
+        (r5, y1, r4 - BTN_GAP, y2),
     ]
 }
 
@@ -225,6 +229,12 @@ unsafe fn run_subtitle_window(
 
     let _ = SetTimer(hwnd, HOVER_TIMER_ID, 50, None);
 
+    let initial_audio_source = if super::AUDIO_SOURCE.load(Ordering::SeqCst) == super::loopback::AUDIO_SOURCE_MICROPHONE {
+        "microphone".to_string()
+    } else {
+        "speaker".to_string()
+    };
+
     let mut state = SubtitleState {
         lines: Vec::new(),
         visible: false,
@@ -238,6 +248,7 @@ unsafe fn run_subtitle_window(
         locked: false,
         user_hidden: false,
         user_moved: false,
+        audio_source: initial_audio_source,
         last_update: Instant::now(),
         hide_after: Duration::from_secs(8),
     };
@@ -343,6 +354,18 @@ unsafe fn run_subtitle_window(
                         draw_subtitle(hwnd, &state);
                     }
                 }
+                SubtitleMessage::ToggleAudioSource => {
+                    state.audio_source = if state.audio_source == "speaker" {
+                        super::AUDIO_SOURCE.store(super::loopback::AUDIO_SOURCE_MICROPHONE, Ordering::SeqCst);
+                        "microphone".to_string()
+                    } else {
+                        super::AUDIO_SOURCE.store(super::loopback::AUDIO_SOURCE_SPEAKER, Ordering::SeqCst);
+                        "speaker".to_string()
+                    };
+                    if state.visible && !state.user_hidden {
+                        draw_subtitle(hwnd, &state);
+                    }
+                }
                 SubtitleMessage::Shutdown => {
                     ShowWindow(hwnd, SW_HIDE);
                     let _ = DestroyWindow(hwnd);
@@ -442,6 +465,7 @@ unsafe extern "system" fn subtitle_wnd_proc(
             let in_btn_1 = local_x >= btns[1].0 && local_x <= btns[1].2 && local_y >= btns[1].1 && local_y <= btns[1].3;
             let in_btn_2 = local_x >= btns[2].0 && local_x <= btns[2].2 && local_y >= btns[2].1 && local_y <= btns[2].3;
             let in_btn_3 = local_x >= btns[3].0 && local_x <= btns[3].2 && local_y >= btns[3].1 && local_y <= btns[3].3;
+            let in_btn_4 = local_x >= btns[4].0 && local_x <= btns[4].2 && local_y >= btns[4].1 && local_y <= btns[4].3;
 
             if SUBTITLE_LOCKED.get() {
                 if SUBTITLE_HOVER_UNLOCK.get() && in_btn_1 {
@@ -449,7 +473,7 @@ unsafe extern "system" fn subtitle_wnd_proc(
                 } else {
                     LRESULT(HTTRANSPARENT as isize)
                 }
-            } else if in_btn_0 || in_btn_1 || in_btn_2 || in_btn_3 {
+            } else if in_btn_0 || in_btn_1 || in_btn_2 || in_btn_3 || in_btn_4 {
                 LRESULT(HTCLIENT as isize)
             } else {
                 LRESULT(HTCAPTION as isize)
@@ -465,7 +489,7 @@ unsafe extern "system" fn subtitle_wnd_proc(
 
             let btns = btn_layout(w);
 
-            let in_drag = local_x_in_btn(x, &btns[3]) && local_y_in_btn(y, &btns[3]);
+            let in_drag = local_x_in_btn(x, &btns[4]) && local_y_in_btn(y, &btns[4]);
 
             if in_drag && !SUBTITLE_LOCKED.get() {
                 let _ = PostMessageW(hwnd, WM_NCLBUTTONDOWN, WPARAM(HTCAPTION as usize), lparam);
@@ -491,6 +515,8 @@ unsafe extern "system" fn subtitle_wnd_proc(
                     } else if local_x_in_btn(x, &btns[1]) && local_y_in_btn(y, &btns[1]) {
                         let _ = sender.send(SubtitleMessage::ToggleLock);
                     } else if local_x_in_btn(x, &btns[2]) && local_y_in_btn(y, &btns[2]) {
+                        let _ = sender.send(SubtitleMessage::ToggleAudioSource);
+                    } else if local_x_in_btn(x, &btns[3]) && local_y_in_btn(y, &btns[3]) {
                         let _ = sender.send(SubtitleMessage::OpenSettings);
                     }
                 }
@@ -754,8 +780,9 @@ unsafe fn draw_subtitle(hwnd: HWND, state: &SubtitleState) {
     draw_button_bg(pixels, w, h, btns[0].0, btns[0].1, btns[0].2, btns[0].3, 160);
     draw_button_bg(pixels, w, h, btns[1].0, btns[1].1, btns[1].2, btns[1].3, 160);
     draw_button_bg(pixels, w, h, btns[2].0, btns[2].1, btns[2].2, btns[2].3, 160);
+    draw_button_bg(pixels, w, h, btns[3].0, btns[3].1, btns[3].2, btns[3].3, 160);
     if !state.locked {
-        draw_button_bg(pixels, w, h, btns[3].0, btns[3].1, btns[3].2, btns[3].3, 120);
+        draw_button_bg(pixels, w, h, btns[4].0, btns[4].1, btns[4].2, btns[4].3, 120);
     }
 
     let btn_font = CreateFontW(
@@ -774,6 +801,7 @@ unsafe fn draw_subtitle(hwnd: HWND, state: &SubtitleState) {
 
     let eye_text = if state.user_hidden { "\u{25CB}" } else { "\u{25C9}" };
     let lock_text = if state.locked { "\u{1F512}" } else { "\u{1F513}" };
+    let audio_text = if state.audio_source == "microphone" { "\u{1F3A4}" } else { "\u{1F50A}" };
     let settings_text = "\u{2699}";
     let drag_text = "\u{2725}";
 
@@ -798,15 +826,17 @@ unsafe fn draw_subtitle(hwnd: HWND, state: &SubtitleState) {
 
         draw_btn_text(eye_text, 0);
         draw_btn_text(lock_text, 1);
-        draw_btn_text(settings_text, 2);
-        draw_btn_text(drag_text, 3);
+        draw_btn_text(audio_text, 2);
+        draw_btn_text(settings_text, 3);
+        draw_btn_text(drag_text, 4);
 
         let p_text = p_text_bits as *const u32;
         draw_icon(pixels, p_text, w, h, btns[0].0, btns[0].1, btns[0].2, btns[0].3);
         draw_icon(pixels, p_text, w, h, btns[1].0, btns[1].1, btns[1].2, btns[1].3);
         draw_icon(pixels, p_text, w, h, btns[2].0, btns[2].1, btns[2].2, btns[2].3);
+        draw_icon(pixels, p_text, w, h, btns[3].0, btns[3].1, btns[3].2, btns[3].3);
         if !state.locked {
-            draw_icon(pixels, p_text, w, h, btns[3].0, btns[3].1, btns[3].2, btns[3].3);
+            draw_icon(pixels, p_text, w, h, btns[4].0, btns[4].1, btns[4].2, btns[4].3);
         }
     }
 

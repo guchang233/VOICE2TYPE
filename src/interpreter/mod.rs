@@ -3,13 +3,15 @@ pub mod loopback;
 pub mod pipeline;
 pub mod subtitle_window;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 
 use crate::config::ConfigManager;
 use crate::utils::logger::{write_log, write_log_line, LogLevel};
 use chunker::AudioChunker;
 use subtitle_window::SubtitleWindow;
+
+pub static AUDIO_SOURCE: AtomicU8 = AtomicU8::new(0);
 
 pub struct InterpreterEngine {
     stop_flag: Arc<AtomicBool>,
@@ -22,6 +24,15 @@ pub struct InterpreterEngine {
 impl InterpreterEngine {
     pub fn start(config: Arc<ConfigManager>) -> Result<Self, String> {
         let stop_flag = Arc::new(AtomicBool::new(false));
+
+        let audio_source_val = if config.interpreter_audio_source() == "microphone" {
+            loopback::AUDIO_SOURCE_MICROPHONE
+        } else {
+            loopback::AUDIO_SOURCE_SPEAKER
+        };
+        AUDIO_SOURCE.store(audio_source_val, Ordering::SeqCst);
+
+        let audio_source = Arc::new(AtomicU8::new(audio_source_val));
 
         let subtitle_window = SubtitleWindow::new(
             config.interpreter_subtitle_click_through(),
@@ -44,8 +55,10 @@ impl InterpreterEngine {
         let (error_tx, error_rx) = std::sync::mpsc::channel::<String>();
 
         let capture_stop = stop_flag.clone();
+        let capture_audio_source = audio_source.clone();
         let capture_handle = loopback::start_loopback_capture(
             capture_stop,
+            capture_audio_source,
             audio_tx,
             sample_rate_tx,
             error_tx,
@@ -78,11 +91,20 @@ impl InterpreterEngine {
         ) = std::sync::mpsc::channel();
 
         let chunker_handle = std::thread::spawn(move || {
+            let mut sample_rate = sample_rate;
             let mut chunker = AudioChunker::new(sample_rate, chunk_ms);
             loop {
                 if chunker_stop.load(Ordering::Relaxed) {
                     chunker.force_flush(&chunk_tx);
                     break;
+                }
+
+                let new_rate = loopback::CURRENT_SAMPLE_RATE.load(Ordering::SeqCst);
+                if new_rate > 0 && new_rate != sample_rate {
+                    chunker.force_flush(&chunk_tx);
+                    sample_rate = new_rate;
+                    chunker = AudioChunker::new(sample_rate, chunk_ms);
+                    write_log(LogLevel::INFO, &format!("[字幕] 采样率更新: {}Hz", sample_rate), None);
                 }
 
                 match audio_rx.recv_timeout(std::time::Duration::from_millis(100)) {

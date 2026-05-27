@@ -163,6 +163,7 @@ pub struct InterpreterConfig {
     pub model_name: String,
     pub translation_api_url: String,
     pub translation_api_key: String,
+    pub audio_source: String,
 }
 
 impl Default for InterpreterConfig {
@@ -189,6 +190,7 @@ impl Default for InterpreterConfig {
             model_name: "whisper-large-v3-turbo".to_string(),
             translation_api_url: "https://api.groq.com/openai/v1/chat/completions".to_string(),
             translation_api_key: String::new(),
+            audio_source: "speaker".to_string(),
         }
     }
 }
@@ -827,6 +829,14 @@ impl ConfigManager {
 
     pub fn set_interpreter_translation_api_key(&self, key: String) {
         self.config.lock().unwrap().interpreter.translation_api_key = key;
+    }
+
+    pub fn interpreter_audio_source(&self) -> String {
+        self.config.lock().unwrap().interpreter.audio_source.clone()
+    }
+
+    pub fn set_interpreter_audio_source(&self, source: String) {
+        self.config.lock().unwrap().interpreter.audio_source = source;
     }
 
     pub fn reset_ai_config(&self) {
