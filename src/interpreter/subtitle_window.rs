@@ -23,6 +23,7 @@ thread_local! {
     static SUBTITLE_LOCKED: Cell<bool> = Cell::new(false);
     static SUBTITLE_USER_HIDDEN: Cell<bool> = Cell::new(false);
     static SUBTITLE_USER_MOVED: Cell<bool> = Cell::new(false);
+    static SUBTITLE_HOVER_UNLOCK: Cell<bool> = Cell::new(false);
 }
 
 #[derive(Debug, Clone)]
@@ -154,6 +155,7 @@ fn parse_hex_color(hex: &str) -> (u8, u8, u8) {
 const BTN_SIZE: i32 = 22;
 const BTN_MARGIN: i32 = 6;
 const BTN_GAP: i32 = 3;
+const HOVER_TIMER_ID: usize = 1001;
 
 fn btn_layout(w: i32) -> [(i32, i32, i32, i32); 4] {
     let y1 = BTN_MARGIN;
@@ -220,6 +222,8 @@ unsafe fn run_subtitle_window(
         instance,
         None,
     );
+
+    let _ = SetTimer(hwnd, HOVER_TIMER_ID, 50, None);
 
     let mut state = SubtitleState {
         lines: Vec::new(),
@@ -313,6 +317,7 @@ unsafe fn run_subtitle_window(
                 SubtitleMessage::ToggleLock => {
                     state.locked = !state.locked;
                     SUBTITLE_LOCKED.with(|tl| tl.set(state.locked));
+                    update_window_transparency(hwnd, state.locked);
                     if state.visible && !state.user_hidden {
                         draw_subtitle(hwnd, &state);
                     }
@@ -323,6 +328,7 @@ unsafe fn run_subtitle_window(
                 SubtitleMessage::SetLocked(locked) => {
                     state.locked = locked;
                     SUBTITLE_LOCKED.with(|tl| tl.set(locked));
+                    update_window_transparency(hwnd, locked);
                     if state.visible && !state.user_hidden {
                         draw_subtitle(hwnd, &state);
                     }
@@ -365,6 +371,15 @@ unsafe fn run_subtitle_window(
 }
 
 #[cfg(target_os = "windows")]
+unsafe fn update_window_transparency(hwnd: HWND, locked: bool) {
+    let mut ex_style = (GetWindowLongW(hwnd, GWL_EXSTYLE) as u32) & !(WS_EX_TRANSPARENT.0 as u32);
+    if locked {
+        ex_style |= WS_EX_TRANSPARENT.0 as u32;
+    }
+    SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style as i32);
+}
+
+#[cfg(target_os = "windows")]
 unsafe extern "system" fn subtitle_wnd_proc(
     hwnd: HWND,
     msg: u32,
@@ -378,6 +393,36 @@ unsafe extern "system" fn subtitle_wnd_proc(
         }
         WM_ENTERSIZEMOVE => {
             SUBTITLE_USER_MOVED.with(|tl| tl.set(true));
+            LRESULT(0)
+        }
+        WM_TIMER => {
+            if wparam.0 == HOVER_TIMER_ID {
+                let locked = SUBTITLE_LOCKED.with(|tl| tl.get());
+                if locked && IsWindowVisible(hwnd).as_bool() {
+                    let mut pt = POINT::default();
+                    let _ = GetCursorPos(&mut pt);
+                    let _ = ScreenToClient(hwnd, &mut pt);
+
+                    let mut rect = RECT::default();
+                    let _ = GetClientRect(hwnd, &mut rect);
+                    let w = rect.right;
+
+                    let btns = btn_layout(w);
+                    let in_unlock = pt.x >= btns[1].0 && pt.x <= btns[1].2
+                        && pt.y >= btns[1].1 && pt.y <= btns[1].3;
+
+                    let was_hovering = SUBTITLE_HOVER_UNLOCK.with(|tl| tl.get());
+                    if in_unlock && !was_hovering {
+                        SUBTITLE_HOVER_UNLOCK.with(|tl| tl.set(true));
+                        update_window_transparency(hwnd, false);
+                    } else if !in_unlock && was_hovering {
+                        SUBTITLE_HOVER_UNLOCK.with(|tl| tl.set(false));
+                        update_window_transparency(hwnd, true);
+                    }
+                } else if !locked {
+                    SUBTITLE_HOVER_UNLOCK.with(|tl| tl.set(false));
+                }
+            }
             LRESULT(0)
         }
         WM_NCHITTEST => {
@@ -399,7 +444,7 @@ unsafe extern "system" fn subtitle_wnd_proc(
             let in_btn_3 = local_x >= btns[3].0 && local_x <= btns[3].2 && local_y >= btns[3].1 && local_y <= btns[3].3;
 
             if SUBTITLE_LOCKED.get() {
-                if in_btn_1 {
+                if SUBTITLE_HOVER_UNLOCK.get() && in_btn_1 {
                     LRESULT(HTCLIENT as isize)
                 } else {
                     LRESULT(HTTRANSPARENT as isize)
