@@ -164,7 +164,7 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_custom_api_window])]
     pub model_custom_item: nwg::MenuItem,
 
-    #[nwg_control(parent: model_and_key_menu, text: "实时字幕模型")]
+    #[nwg_control(parent: model_and_key_menu, text: "实时字幕转录模型")]
     pub subtitle_model_menu: nwg::Menu,
 
     #[nwg_control(parent: subtitle_model_menu, text: "whisper-large-v3", check: true)]
@@ -182,6 +182,21 @@ pub struct Voice2TypeApp {
     #[nwg_control(parent: subtitle_model_menu, text: "自定义 API", check: false)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_sub_custom_api_window])]
     pub sub_model_custom_item: nwg::MenuItem,
+
+    #[nwg_control(parent: model_and_key_menu, text: "实时字幕翻译模型")]
+    pub subtitle_translation_model_menu: nwg::Menu,
+
+    #[nwg_control(parent: subtitle_translation_model_menu, text: "llama-3.1-8b-instant", check: true)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::select_sub_translation_model_llama])]
+    pub sub_translation_llama_item: nwg::MenuItem,
+
+    #[nwg_control(parent: subtitle_translation_model_menu, text: "llama-3.3-70b-versatile", check: false)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::select_sub_translation_model_70b])]
+    pub sub_translation_70b_item: nwg::MenuItem,
+
+    #[nwg_control(parent: subtitle_translation_model_menu, text: "deepseek-r1-distill-llama-70b", check: false)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::select_sub_translation_model_deepseek])]
+    pub sub_translation_deepseek_item: nwg::MenuItem,
 
     #[nwg_control(parent: model_and_key_menu, text: "API Key")]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_key_config_window])]
@@ -835,6 +850,7 @@ impl Voice2TypeApp {
         // 启动自动检测
         app.update_model_menu_checks();
         app.update_subtitle_model_menu_checks();
+        app.update_subtitle_translation_model_menu_checks();
         app.do_check_update();
 
         if config_manager.interpreter_enabled() {
@@ -1240,6 +1256,39 @@ impl Voice2TypeApp {
             self.sub_model_whisper_turbo_item.set_checked(!use_local && model == "whisper-large-v3-turbo");
             self.sub_model_local_item.set_checked(use_local);
             self.sub_model_custom_item.set_checked(!use_local && model != "whisper-large-v3" && model != "whisper-large-v3-turbo");
+        }
+    }
+
+    fn update_subtitle_translation_model_menu_checks(&self) {
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            let tm = mgr.interpreter_translation_model();
+            self.sub_translation_llama_item.set_checked(tm == "llama-3.1-8b-instant");
+            self.sub_translation_70b_item.set_checked(tm == "llama-3.3-70b-versatile");
+            self.sub_translation_deepseek_item.set_checked(tm == "deepseek-r1-distill-llama-70b");
+        }
+    }
+
+    fn select_sub_translation_model_llama(&self) {
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            mgr.set_interpreter_translation_model("llama-3.1-8b-instant".to_string());
+            mgr.save_or_notify();
+            self.update_subtitle_translation_model_menu_checks();
+        }
+    }
+
+    fn select_sub_translation_model_70b(&self) {
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            mgr.set_interpreter_translation_model("llama-3.3-70b-versatile".to_string());
+            mgr.save_or_notify();
+            self.update_subtitle_translation_model_menu_checks();
+        }
+    }
+
+    fn select_sub_translation_model_deepseek(&self) {
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            mgr.set_interpreter_translation_model("deepseek-r1-distill-llama-70b".to_string());
+            mgr.save_or_notify();
+            self.update_subtitle_translation_model_menu_checks();
         }
     }
 
