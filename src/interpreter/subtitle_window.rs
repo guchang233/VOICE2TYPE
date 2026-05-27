@@ -398,10 +398,14 @@ unsafe extern "system" fn subtitle_wnd_proc(
             let in_btn_2 = local_x >= btns[2].0 && local_x <= btns[2].2 && local_y >= btns[2].1 && local_y <= btns[2].3;
             let in_btn_3 = local_x >= btns[3].0 && local_x <= btns[3].2 && local_y >= btns[3].1 && local_y <= btns[3].3;
 
-            if in_btn_0 || in_btn_1 || in_btn_2 || in_btn_3 {
+            if SUBTITLE_LOCKED.get() {
+                if in_btn_1 {
+                    LRESULT(HTCLIENT as isize)
+                } else {
+                    LRESULT(HTTRANSPARENT as isize)
+                }
+            } else if in_btn_0 || in_btn_1 || in_btn_2 || in_btn_3 {
                 LRESULT(HTCLIENT as isize)
-            } else if SUBTITLE_LOCKED.get() {
-                LRESULT(HTTRANSPARENT as isize)
             } else {
                 LRESULT(HTCAPTION as isize)
             }
