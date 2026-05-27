@@ -70,9 +70,9 @@ pub async fn process_chunk(wav_data: Vec<u8>, config: &ConfigManager) -> Option<
                 {
                     let mut ctx = TRANSLATION_CONTEXT.lock().unwrap();
                     let now = std::time::Instant::now();
-                    ctx.retain(|(_, _, t)| now.duration_since(*t).as_secs() < 120);
+                    ctx.retain(|(_, _, t)| now.duration_since(*t).as_secs() < 60);
                     ctx.push((deduped.clone(), translated.clone(), now));
-                    if ctx.len() > 10 {
+                    if ctx.len() > 3 {
                         ctx.remove(0);
                     }
                 }
@@ -126,7 +126,7 @@ fn find_overlap(previous: &str, current: &str) -> usize {
         return 0;
     }
 
-    let min_overlap = (curr_chars.len() as f64 * 0.3) as usize;
+    let min_overlap = ((curr_chars.len() as f64 * 0.3) as usize).max(4);
     let mut best_overlap = 0;
 
     for overlap_len in min_overlap..=max_check {
@@ -177,12 +177,17 @@ async fn transcribe(wav_data: &[u8], config: &ConfigManager) -> Option<String> {
         let api_url = config.interpreter_api_url();
         let model = config.interpreter_model_name();
 
-        let form = reqwest::multipart::Form::new()
+        let mut form = reqwest::multipart::Form::new()
             .text("model", model)
             .text("response_format", "json")
             .part("file", reqwest::multipart::Part::bytes(wav_data.to_vec())
                 .file_name("recording.wav".to_string())
                 .mime_str("audio/wav").unwrap());
+
+        let source = config.interpreter_source_language();
+        if source != "auto" {
+            form = form.text("language", source);
+        }
 
         let response = crate::api::client::HTTP_CLIENT
             .post(&api_url)
@@ -216,6 +221,20 @@ async fn transcribe(wav_data: &[u8], config: &ConfigManager) -> Option<String> {
     }
 }
 
+fn lang_display(code: &str) -> &str {
+    match code {
+        "zh" => "简体中文",
+        "en" => "English",
+        "ja" => "日本語",
+        "ko" => "한국어",
+        "fr" => "Français",
+        "de" => "Deutsch",
+        "es" => "Español",
+        "auto" => "the source language (auto-detect)",
+        _ => code,
+    }
+}
+
 async fn translate(
     text: &str,
     source_lang: &str,
@@ -231,22 +250,8 @@ async fn translate(
 
     let api_url = config.interpreter_translation_api_url();
 
-    let source_desc = if source_lang == "auto" {
-        "the source language (auto-detect)".to_string()
-    } else {
-        format!("{}", source_lang)
-    };
-
-    let target_desc = match target_lang {
-        "zh" => "简体中文".to_string(),
-        "en" => "English".to_string(),
-        "ja" => "日本語".to_string(),
-        "ko" => "한국어".to_string(),
-        "fr" => "Français".to_string(),
-        "de" => "Deutsch".to_string(),
-        "es" => "Español".to_string(),
-        _ => target_lang.to_string(),
-    };
+    let source_desc = lang_display(source_lang);
+    let target_desc = lang_display(target_lang);
 
     let model = config.interpreter_translation_model();
 
