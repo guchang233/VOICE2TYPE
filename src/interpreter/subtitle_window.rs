@@ -229,7 +229,7 @@ unsafe fn run_subtitle_window(
 
     let _ = SetTimer(hwnd, HOVER_TIMER_ID, 50, None);
 
-    let initial_audio_source = if super::AUDIO_SOURCE.load(Ordering::SeqCst) == super::loopback::AUDIO_SOURCE_MICROPHONE {
+    let initial_audio_source = if super::loopback::AUDIO_SOURCE.load(Ordering::SeqCst) == super::loopback::AUDIO_SOURCE_MICROPHONE {
         "microphone".to_string()
     } else {
         "speaker".to_string()
@@ -356,10 +356,10 @@ unsafe fn run_subtitle_window(
                 }
                 SubtitleMessage::ToggleAudioSource => {
                     state.audio_source = if state.audio_source == "speaker" {
-                        super::AUDIO_SOURCE.store(super::loopback::AUDIO_SOURCE_MICROPHONE, Ordering::SeqCst);
+                        super::loopback::AUDIO_SOURCE.store(super::loopback::AUDIO_SOURCE_MICROPHONE, Ordering::SeqCst);
                         "microphone".to_string()
                     } else {
-                        super::AUDIO_SOURCE.store(super::loopback::AUDIO_SOURCE_SPEAKER, Ordering::SeqCst);
+                        super::loopback::AUDIO_SOURCE.store(super::loopback::AUDIO_SOURCE_SPEAKER, Ordering::SeqCst);
                         "speaker".to_string()
                     };
                     if state.visible && !state.user_hidden {

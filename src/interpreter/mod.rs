@@ -3,15 +3,13 @@ pub mod loopback;
 pub mod pipeline;
 pub mod subtitle_window;
 
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::config::ConfigManager;
 use crate::utils::logger::{write_log, write_log_line, LogLevel};
 use chunker::AudioChunker;
 use subtitle_window::SubtitleWindow;
-
-pub static AUDIO_SOURCE: AtomicU8 = AtomicU8::new(0);
 
 pub struct InterpreterEngine {
     stop_flag: Arc<AtomicBool>,
@@ -30,9 +28,7 @@ impl InterpreterEngine {
         } else {
             loopback::AUDIO_SOURCE_SPEAKER
         };
-        AUDIO_SOURCE.store(audio_source_val, Ordering::SeqCst);
-
-        let audio_source = Arc::new(AtomicU8::new(audio_source_val));
+        loopback::AUDIO_SOURCE.store(audio_source_val, Ordering::SeqCst);
 
         let subtitle_window = SubtitleWindow::new(
             config.interpreter_subtitle_click_through(),
@@ -55,10 +51,8 @@ impl InterpreterEngine {
         let (error_tx, error_rx) = std::sync::mpsc::channel::<String>();
 
         let capture_stop = stop_flag.clone();
-        let capture_audio_source = audio_source.clone();
         let capture_handle = loopback::start_loopback_capture(
             capture_stop,
-            capture_audio_source,
             audio_tx,
             sample_rate_tx,
             error_tx,

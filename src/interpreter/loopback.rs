@@ -20,18 +20,18 @@ const AUDCLNT_STREAMFLAGS_LOOPBACK: u32 = 0x00020000;
 pub const AUDIO_SOURCE_SPEAKER: u8 = 0;
 pub const AUDIO_SOURCE_MICROPHONE: u8 = 1;
 
+pub static AUDIO_SOURCE: AtomicU8 = AtomicU8::new(AUDIO_SOURCE_SPEAKER);
 pub static CURRENT_SAMPLE_RATE: AtomicU32 = AtomicU32::new(0);
 
 #[cfg(target_os = "windows")]
 pub fn start_loopback_capture(
     stop_flag: Arc<AtomicBool>,
-    audio_source: Arc<AtomicU8>,
     audio_tx: Sender<f32>,
     sample_rate_tx: Sender<u32>,
     error_tx: Sender<String>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        if let Err(e) = capture_loop_wrapper(stop_flag, audio_source, audio_tx, sample_rate_tx) {
+        if let Err(e) = capture_loop_wrapper(stop_flag, audio_tx, sample_rate_tx) {
             let _ = error_tx.send(format!("{}", e));
             write_log(LogLevel::ERROR, &format!("[字幕] 音频捕获失败: {}", e), None);
         }
@@ -41,18 +41,17 @@ pub fn start_loopback_capture(
 #[cfg(target_os = "windows")]
 fn capture_loop_wrapper(
     stop_flag: Arc<AtomicBool>,
-    audio_source: Arc<AtomicU8>,
     audio_tx: Sender<f32>,
     sample_rate_tx: Sender<u32>,
 ) -> Result<()> {
-    let mut current_source = audio_source.load(Ordering::SeqCst);
+    let mut current_source = AUDIO_SOURCE.load(Ordering::SeqCst);
 
     loop {
         if stop_flag.load(Ordering::Relaxed) {
             return Ok(());
         }
 
-        match capture_session(&stop_flag, &audio_source, &audio_tx, &sample_rate_tx, current_source) {
+        match capture_session(&stop_flag, &audio_tx, &sample_rate_tx, current_source) {
             Ok(SessionEndReason::Stopped) => return Ok(()),
             Ok(SessionEndReason::SourceChanged(new_source)) => {
                 current_source = new_source;
@@ -78,7 +77,6 @@ enum SessionEndReason {
 #[cfg(target_os = "windows")]
 fn capture_session(
     stop_flag: &Arc<AtomicBool>,
-    audio_source: &Arc<AtomicU8>,
     audio_tx: &Sender<f32>,
     sample_rate_tx: &Sender<u32>,
     source: u8,
@@ -164,7 +162,7 @@ fn capture_session(
         let device_check_interval = std::time::Duration::from_secs(2);
 
         while !stop_flag.load(Ordering::Relaxed) {
-            let current_audio_source = audio_source.load(Ordering::SeqCst);
+            let current_audio_source = AUDIO_SOURCE.load(Ordering::SeqCst);
             if current_audio_source != source {
                 let _ = audio_client.Stop();
                 let _ = audio_client.Reset();
@@ -276,7 +274,6 @@ unsafe fn try_initialize(
 #[cfg(not(target_os = "windows"))]
 pub fn start_loopback_capture(
     _stop_flag: Arc<AtomicBool>,
-    _audio_source: Arc<AtomicU8>,
     _audio_tx: Sender<f32>,
     _sample_rate_tx: Sender<u32>,
     _error_tx: Sender<String>,
