@@ -397,7 +397,7 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnButtonClick: [Voice2TypeApp::save_custom_api_config])]
     pub custom_api_save_btn: nwg::Button,
 
-    #[nwg_control(size: (520, 320), position: (300, 300), title: "字幕模型设置", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_control(size: (520, 380), position: (300, 300), title: "字幕模型设置", flags: "WINDOW", icon: Some(&data.icon))]
     #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_subtitle_model_settings_window])]
     pub subtitle_model_window: nwg::Window,
 
@@ -448,8 +448,16 @@ pub struct Voice2TypeApp {
     #[nwg_layout_item(layout: subtitle_model_layout, row: 5, col: 1, col_span: 2)]
     pub sub_m_trans_api_url_input: nwg::TextInput,
 
+    #[nwg_control(parent: subtitle_model_window, text: "音频输入源:", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_model_layout, row: 6, col: 0)]
+    pub sub_m_audio_source_label: nwg::Label,
+
+    #[nwg_control(parent: subtitle_model_window, font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: subtitle_model_layout, row: 6, col: 1, col_span: 2)]
+    pub sub_m_audio_source_combo: nwg::ComboBox<String>,
+
     #[nwg_control(parent: subtitle_model_window, text: "保存", font: Some(&data.font_medium))]
-    #[nwg_layout_item(layout: subtitle_model_layout, row: 6, col: 1)]
+    #[nwg_layout_item(layout: subtitle_model_layout, row: 7, col: 1)]
     #[nwg_events(OnButtonClick: [Voice2TypeApp::save_subtitle_model_settings])]
     pub sub_m_save_btn: nwg::Button,
 
@@ -1181,6 +1189,12 @@ impl Voice2TypeApp {
             self.sub_m_local_whisper_item.set_check_state(if mgr.interpreter_use_local_whisper() { nwg::CheckBoxState::Checked } else { nwg::CheckBoxState::Unchecked });
             self.sub_m_trans_api_key_input.set_text(&mgr.interpreter_translation_api_key());
             self.sub_m_trans_api_url_input.set_text(&mgr.interpreter_translation_api_url());
+
+            let audio_sources = vec!["扬声器（系统音频）".to_string(), "麦克风".to_string()];
+            let current_source = mgr.interpreter_audio_source();
+            let source_idx = if current_source == "microphone" { 1 } else { 0 };
+            self.sub_m_audio_source_combo.set_collection(audio_sources);
+            self.sub_m_audio_source_combo.set_selection(Some(source_idx));
         }
         self.subtitle_model_window.set_visible(true);
         self.subtitle_model_window.set_focus();
@@ -1204,6 +1218,18 @@ impl Voice2TypeApp {
             mgr.set_interpreter_use_local_whisper(use_local);
             mgr.set_interpreter_translation_api_key(self.sub_m_trans_api_key_input.text());
             mgr.set_interpreter_translation_api_url(self.sub_m_trans_api_url_input.text());
+
+            if let Some(idx) = self.sub_m_audio_source_combo.selection() {
+                let source = if idx == 1 { "microphone" } else { "speaker" };
+                mgr.set_interpreter_audio_source(source.to_string());
+                let audio_val = if idx == 1 {
+                    crate::interpreter::loopback::AUDIO_SOURCE_MICROPHONE
+                } else {
+                    crate::interpreter::loopback::AUDIO_SOURCE_SPEAKER
+                };
+                crate::interpreter::loopback::AUDIO_SOURCE.store(audio_val, std::sync::atomic::Ordering::SeqCst);
+            }
+
             mgr.save_or_notify();
             self.update_subtitle_model_menu_checks();
             nwg::simple_message("已保存", "字幕模型设置已保存。");
