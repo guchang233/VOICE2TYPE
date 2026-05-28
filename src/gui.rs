@@ -410,6 +410,7 @@ pub struct Voice2TypeApp {
 
     #[nwg_control(parent: subtitle_model_window, font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: subtitle_model_layout, row: 0, col: 1, col_span: 2)]
+    #[nwg_events(OnComboxBoxSelection: [Voice2TypeApp::on_subtitle_provider_changed])]
     pub sub_m_provider_combo: nwg::ComboBox<String>,
 
     #[nwg_control(parent: subtitle_model_window, text: "转写模型:", font: Some(&data.font_normal))]
@@ -1229,6 +1230,40 @@ impl Voice2TypeApp {
 
     fn hide_subtitle_model_settings_window(&self) {
         self.subtitle_model_window.set_visible(false);
+    }
+
+    fn on_subtitle_provider_changed(&self) {
+        let is_siliconflow = self.sub_m_provider_combo.selection() == Some(1);
+
+        let groq_models = vec!["whisper-large-v3".to_string(), "whisper-large-v3-turbo".to_string(), "distil-whisper-large-v3-en".to_string()];
+        let sf_models = vec!["FunAudioLLM/SenseVoiceSmall".to_string(), "TeleAI/TeleSpeechASR".to_string()];
+        let models = if is_siliconflow { sf_models } else { groq_models };
+        self.sub_m_model_combo.set_collection(models);
+        self.sub_m_model_combo.set_selection(Some(0));
+
+        if is_siliconflow {
+            self.sub_m_api_url_input.set_text("https://api.siliconflow.cn/v1/audio/transcriptions");
+            self.sub_m_trans_api_url_input.set_text("https://api.siliconflow.cn/v1/chat/completions");
+            if let Some(mgr) = &*self.config_manager.borrow() {
+                if self.sub_m_api_key_input.text().is_empty() {
+                    self.sub_m_api_key_input.set_text(&mgr.get_siliconflow_api_key());
+                }
+                if self.sub_m_trans_api_key_input.text().is_empty() {
+                    self.sub_m_trans_api_key_input.set_text(&mgr.get_siliconflow_api_key());
+                }
+            }
+        } else {
+            self.sub_m_api_url_input.set_text("https://api.groq.com/openai/v1/audio/transcriptions");
+            self.sub_m_trans_api_url_input.set_text("https://api.groq.com/openai/v1/chat/completions");
+            if let Some(mgr) = &*self.config_manager.borrow() {
+                if self.sub_m_api_key_input.text().is_empty() {
+                    self.sub_m_api_key_input.set_text(&mgr.get_groq_api_key());
+                }
+                if self.sub_m_trans_api_key_input.text().is_empty() {
+                    self.sub_m_trans_api_key_input.set_text(&mgr.get_groq_api_key());
+                }
+            }
+        }
     }
 
     fn save_subtitle_model_settings(&self) {
