@@ -10,6 +10,7 @@ pub const MODEL_LOCAL_WHISPER: &str = "local-whisper";
 pub const MODEL_CUSTOM: &str = "custom";
 
 const SILICONFLOW_TRANSCRIPTIONS_URL: &str = "https://api.siliconflow.cn/v1/audio/transcriptions";
+pub const SILICONFLOW_CHAT_URL: &str = "https://api.siliconflow.cn/v1/chat/completions";
 const GROQ_TRANSCRIPTIONS_URL: &str = "https://api.groq.com/openai/v1/audio/transcriptions";
 
 #[derive(Clone)]
