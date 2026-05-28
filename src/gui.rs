@@ -164,39 +164,9 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_custom_api_window])]
     pub model_custom_item: nwg::MenuItem,
 
-    #[nwg_control(parent: model_and_key_menu, text: "实时字幕转录模型")]
-    pub subtitle_model_menu: nwg::Menu,
-
-    #[nwg_control(parent: subtitle_model_menu, text: "whisper-large-v3", check: true)]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::select_sub_model_whisper])]
-    pub sub_model_whisper_item: nwg::MenuItem,
-
-    #[nwg_control(parent: subtitle_model_menu, text: "whisper-large-v3-turbo", check: false)]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::select_sub_model_whisper_turbo])]
-    pub sub_model_whisper_turbo_item: nwg::MenuItem,
-
-    #[nwg_control(parent: subtitle_model_menu, text: "本地 Whisper（离线）", check: false)]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::select_sub_model_local])]
-    pub sub_model_local_item: nwg::MenuItem,
-
-    #[nwg_control(parent: subtitle_model_menu, text: "自定义 API", check: false)]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_sub_custom_api_window])]
-    pub sub_model_custom_item: nwg::MenuItem,
-
-    #[nwg_control(parent: model_and_key_menu, text: "实时字幕翻译模型")]
-    pub subtitle_translation_model_menu: nwg::Menu,
-
-    #[nwg_control(parent: subtitle_translation_model_menu, text: "llama-3.1-8b-instant", check: true)]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::select_sub_translation_model_llama])]
-    pub sub_translation_llama_item: nwg::MenuItem,
-
-    #[nwg_control(parent: subtitle_translation_model_menu, text: "llama-3.3-70b-versatile", check: false)]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::select_sub_translation_model_70b])]
-    pub sub_translation_70b_item: nwg::MenuItem,
-
-    #[nwg_control(parent: subtitle_translation_model_menu, text: "deepseek-r1-distill-llama-70b", check: false)]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::select_sub_translation_model_deepseek])]
-    pub sub_translation_deepseek_item: nwg::MenuItem,
+    #[nwg_control(parent: model_and_key_menu, text: "实时字幕设置")]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_subtitle_model_settings_window])]
+    pub tray_subtitle_settings_item: nwg::MenuItem,
 
     #[nwg_control(parent: model_and_key_menu, text: "API Key")]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_key_config_window])]
@@ -251,39 +221,31 @@ pub struct Voice2TypeApp {
     pub quit_item: nwg::MenuItem,
 
     // --- API Key 配置窗口 ---
-    #[nwg_control(size: (580, 240), position: (300, 300), title: "API Key 密钥配置", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_control(size: (580, 200), position: (300, 300), title: "API 密钥配置", flags: "WINDOW", icon: Some(&data.icon))]
     #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_key_config_window])]
     pub key_config_window: nwg::Window,
 
     #[nwg_layout(parent: key_config_window, spacing: 10, margin: [20, 20, 20, 20])]
     pub key_config_layout: nwg::GridLayout,
 
-    #[nwg_control(parent: key_config_window, text: "TeleSpeechASR Key:", font: Some(&data.font_normal))]
+    #[nwg_control(parent: key_config_window, text: "硅基流动 (SiliconFlow) Key:", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: key_config_layout, row: 0, col: 0)]
-    pub key_teleai_label: nwg::Label,
+    pub key_siliconflow_label: nwg::Label,
 
     #[nwg_control(parent: key_config_window, text: "", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: key_config_layout, row: 0, col: 1)]
-    pub key_teleai_input: nwg::TextInput,
+    pub key_siliconflow_input: nwg::TextInput,
 
-    #[nwg_control(parent: key_config_window, text: "SenseVoiceSmall Key (推荐):", font: Some(&data.font_normal))]
+    #[nwg_control(parent: key_config_window, text: "Groq Key:", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: key_config_layout, row: 1, col: 0)]
-    pub key_sensevoice_label: nwg::Label,
+    pub key_groq_label: nwg::Label,
 
     #[nwg_control(parent: key_config_window, text: "", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: key_config_layout, row: 1, col: 1)]
-    pub key_sensevoice_input: nwg::TextInput,
-
-    #[nwg_control(parent: key_config_window, text: "whisper-large-v3 Key:", font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: key_config_layout, row: 2, col: 0)]
-    pub key_whisper_label: nwg::Label,
-
-    #[nwg_control(parent: key_config_window, text: "", font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: key_config_layout, row: 2, col: 1)]
-    pub key_whisper_input: nwg::TextInput,
+    pub key_groq_input: nwg::TextInput,
 
     #[nwg_control(parent: key_config_window, text: "确认保存设置", font: Some(&data.font_medium))]
-    #[nwg_layout_item(layout: key_config_layout, row: 3, col: 1)]
+    #[nwg_layout_item(layout: key_config_layout, row: 2, col: 1)]
     #[nwg_events(OnButtonClick: [Voice2TypeApp::save_key_config])]
     pub key_save_btn: nwg::Button,
 
@@ -397,7 +359,7 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnButtonClick: [Voice2TypeApp::save_custom_api_config])]
     pub custom_api_save_btn: nwg::Button,
 
-    #[nwg_control(size: (520, 440), position: (300, 300), title: "字幕模型设置", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_control(size: (520, 400), position: (300, 300), title: "字幕模型设置", flags: "WINDOW", icon: Some(&data.icon))]
     #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_subtitle_model_settings_window])]
     pub subtitle_model_window: nwg::Window,
 
@@ -421,52 +383,28 @@ pub struct Voice2TypeApp {
     #[nwg_layout_item(layout: subtitle_model_layout, row: 1, col: 1, col_span: 2)]
     pub sub_m_model_combo: nwg::ComboBox<String>,
 
-    #[nwg_control(parent: subtitle_model_window, text: "转写 API Key:", font: Some(&data.font_normal))]
+    #[nwg_control(parent: subtitle_model_window, text: "翻译模型:", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: subtitle_model_layout, row: 2, col: 0)]
-    pub sub_m_api_key_label: nwg::Label,
+    pub sub_m_trans_model_label: nwg::Label,
 
     #[nwg_control(parent: subtitle_model_window, font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: subtitle_model_layout, row: 2, col: 1, col_span: 2)]
-    pub sub_m_api_key_input: nwg::TextInput,
-
-    #[nwg_control(parent: subtitle_model_window, text: "转写 API URL:", font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: subtitle_model_layout, row: 3, col: 0)]
-    pub sub_m_api_url_label: nwg::Label,
-
-    #[nwg_control(parent: subtitle_model_window, font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: subtitle_model_layout, row: 3, col: 1, col_span: 2)]
-    pub sub_m_api_url_input: nwg::TextInput,
+    pub sub_m_trans_model_combo: nwg::ComboBox<String>,
 
     #[nwg_control(parent: subtitle_model_window, text: "使用本地 Whisper（离线）", font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: subtitle_model_layout, row: 4, col: 0, col_span: 3)]
+    #[nwg_layout_item(layout: subtitle_model_layout, row: 3, col: 0, col_span: 3)]
     pub sub_m_local_whisper_item: nwg::CheckBox,
 
-    #[nwg_control(parent: subtitle_model_window, text: "翻译 API Key:", font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: subtitle_model_layout, row: 5, col: 0)]
-    pub sub_m_trans_api_key_label: nwg::Label,
-
-    #[nwg_control(parent: subtitle_model_window, font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: subtitle_model_layout, row: 5, col: 1, col_span: 2)]
-    pub sub_m_trans_api_key_input: nwg::TextInput,
-
-    #[nwg_control(parent: subtitle_model_window, text: "翻译 API URL:", font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: subtitle_model_layout, row: 6, col: 0)]
-    pub sub_m_trans_api_url_label: nwg::Label,
-
-    #[nwg_control(parent: subtitle_model_window, font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: subtitle_model_layout, row: 6, col: 1, col_span: 2)]
-    pub sub_m_trans_api_url_input: nwg::TextInput,
-
     #[nwg_control(parent: subtitle_model_window, text: "音频输入源:", font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: subtitle_model_layout, row: 7, col: 0)]
+    #[nwg_layout_item(layout: subtitle_model_layout, row: 4, col: 0)]
     pub sub_m_audio_source_label: nwg::Label,
 
     #[nwg_control(parent: subtitle_model_window, font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: subtitle_model_layout, row: 7, col: 1, col_span: 2)]
+    #[nwg_layout_item(layout: subtitle_model_layout, row: 4, col: 1, col_span: 2)]
     pub sub_m_audio_source_combo: nwg::ComboBox<String>,
 
     #[nwg_control(parent: subtitle_model_window, text: "保存", font: Some(&data.font_medium))]
-    #[nwg_layout_item(layout: subtitle_model_layout, row: 8, col: 1)]
+    #[nwg_layout_item(layout: subtitle_model_layout, row: 5, col: 1)]
     #[nwg_events(OnButtonClick: [Voice2TypeApp::save_subtitle_model_settings])]
     pub sub_m_save_btn: nwg::Button,
 
@@ -544,7 +482,7 @@ pub struct Voice2TypeApp {
     pub font_bold: nwg::Font,
 
     // --- 实时字幕设置窗口 ---
-    #[nwg_control(size: (480, 740), position: (350, 300), title: "实时字幕设置", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_control(size: (480, 660), position: (350, 300), title: "实时字幕设置", flags: "WINDOW", icon: Some(&data.icon))]
     #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_subtitle_settings_window])]
     pub subtitle_settings_window: nwg::Window,
 
@@ -616,64 +554,48 @@ pub struct Voice2TypeApp {
     #[nwg_layout_item(layout: subtitle_settings_layout, row: 8, col: 1, col_span: 2)]
     pub sub_model_combo: nwg::ComboBox<String>,
 
-    #[nwg_control(parent: subtitle_settings_window, text: "API Key:", font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: subtitle_settings_layout, row: 9, col: 0)]
-    pub sub_api_key_label: nwg::Label,
-
-    #[nwg_control(parent: subtitle_settings_window, font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: subtitle_settings_layout, row: 9, col: 1, col_span: 2)]
-    pub sub_api_key_input: nwg::TextInput,
-
-    #[nwg_control(parent: subtitle_settings_window, text: "API URL:", font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: subtitle_settings_layout, row: 10, col: 0)]
-    pub sub_api_url_label: nwg::Label,
-
-    #[nwg_control(parent: subtitle_settings_window, font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: subtitle_settings_layout, row: 10, col: 1, col_span: 2)]
-    pub sub_api_url_input: nwg::TextInput,
-
     #[nwg_control(parent: subtitle_settings_window, text: "译文颜色:", font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: subtitle_settings_layout, row: 12, col: 0)]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 9, col: 0)]
     pub sub_translated_color_label: nwg::Label,
 
     #[nwg_control(parent: subtitle_settings_window, text: "#FFFFFF", font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: subtitle_settings_layout, row: 12, col: 1, col_span: 2)]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 9, col: 1, col_span: 2)]
     pub sub_translated_color_input: nwg::TextInput,
 
     #[nwg_control(parent: subtitle_settings_window, text: "译文大小:", font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: subtitle_settings_layout, row: 13, col: 0)]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 10, col: 0)]
     pub sub_translated_font_size_label: nwg::Label,
 
     #[nwg_control(parent: subtitle_settings_window, text: "24", font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: subtitle_settings_layout, row: 13, col: 1, col_span: 2)]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 10, col: 1, col_span: 2)]
     pub sub_translated_font_size_input: nwg::TextInput,
 
     #[nwg_control(parent: subtitle_settings_window, text: "原文颜色:", font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: subtitle_settings_layout, row: 14, col: 0)]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 11, col: 0)]
     pub sub_original_color_label: nwg::Label,
 
     #[nwg_control(parent: subtitle_settings_window, text: "#AAAAAA", font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: subtitle_settings_layout, row: 14, col: 1, col_span: 2)]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 11, col: 1, col_span: 2)]
     pub sub_original_color_input: nwg::TextInput,
 
     #[nwg_control(parent: subtitle_settings_window, text: "原文大小:", font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: subtitle_settings_layout, row: 15, col: 0)]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 12, col: 0)]
     pub sub_original_font_size_label: nwg::Label,
 
     #[nwg_control(parent: subtitle_settings_window, text: "18", font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: subtitle_settings_layout, row: 15, col: 1, col_span: 2)]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 12, col: 1, col_span: 2)]
     pub sub_original_font_size_input: nwg::TextInput,
 
     #[nwg_control(parent: subtitle_settings_window, text: "翻译模型:", font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: subtitle_settings_layout, row: 16, col: 0)]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 13, col: 0)]
     pub sub_translation_model_label: nwg::Label,
 
     #[nwg_control(parent: subtitle_settings_window, font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: subtitle_settings_layout, row: 16, col: 1, col_span: 2)]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 13, col: 1, col_span: 2)]
     pub sub_translation_model_combo: nwg::ComboBox<String>,
 
     #[nwg_control(parent: subtitle_settings_window, text: "翻译上下文", font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: subtitle_settings_layout, row: 17, col: 0, col_span: 3)]
+    #[nwg_layout_item(layout: subtitle_settings_layout, row: 14, col: 0, col_span: 3)]
     pub sub_translation_context_item: nwg::CheckBox,
 
     pub update_info: RefCell<Option<update::UpdateInfo>>,
@@ -866,8 +788,6 @@ impl Voice2TypeApp {
 
         // 启动自动检测
         app.update_model_menu_checks();
-        app.update_subtitle_model_menu_checks();
-        app.update_subtitle_translation_model_menu_checks();
         app.do_check_update();
 
         if config_manager.interpreter_enabled() {
@@ -1073,19 +993,17 @@ impl Voice2TypeApp {
             self.sub_chunk_ms_input.set_text(&chunk_ms.to_string());
             self.sub_click_through_item.set_check_state(if click_through { nwg::CheckBoxState::Checked } else { nwg::CheckBoxState::Unchecked });
 
-            let models = vec!["whisper-large-v3".to_string(), "whisper-large-v3-turbo".to_string(), "distil-whisper-large-v3-en".to_string()];
+            let models = mgr.interpreter_transcription_models();
             let current_model = mgr.interpreter_model_name();
             let model_idx = models.iter().position(|m| m == &current_model).unwrap_or(0);
             self.sub_model_combo.set_collection(models);
             self.sub_model_combo.set_selection(Some(model_idx));
 
-            self.sub_api_key_input.set_text(&mgr.interpreter_api_key());
-            self.sub_api_url_input.set_text(&mgr.interpreter_api_url());
             self.sub_translated_color_input.set_text(&mgr.interpreter_translated_color());
             self.sub_translated_font_size_input.set_text(&mgr.interpreter_translated_font_size().to_string());
             self.sub_original_color_input.set_text(&mgr.interpreter_original_color());
             self.sub_original_font_size_input.set_text(&mgr.interpreter_original_font_size().to_string());
-            let translation_models = vec!["llama-3.1-8b-instant".to_string(), "llama-3.3-70b-versatile".to_string(), "deepseek-r1-distill-llama-70b".to_string()];
+            let translation_models = mgr.interpreter_translation_models();
             let current_tm = mgr.interpreter_translation_model();
             let tm_idx = translation_models.iter().position(|m| m == &current_tm).unwrap_or(0);
             self.sub_translation_model_combo.set_collection(translation_models);
@@ -1136,16 +1054,12 @@ impl Voice2TypeApp {
                     mgr.set_interpreter_chunk_ms(ms);
                 }
             }
-            let models = vec!["whisper-large-v3".to_string(), "whisper-large-v3-turbo".to_string(), "distil-whisper-large-v3-en".to_string()];
+            let models = mgr.interpreter_transcription_models();
             if let Some(idx) = self.sub_model_combo.selection() {
                 if idx < models.len() {
                     mgr.set_interpreter_model_name(models[idx].clone());
                 }
             }
-            let api_key = self.sub_api_key_input.text();
-            mgr.set_interpreter_api_key(api_key);
-            let api_url = self.sub_api_url_input.text();
-            mgr.set_interpreter_api_url(api_url);
             let translated_color = self.sub_translated_color_input.text();
             if !translated_color.is_empty() {
                 mgr.set_interpreter_translated_color(translated_color);
@@ -1164,7 +1078,7 @@ impl Voice2TypeApp {
                     mgr.set_interpreter_original_font_size(size);
                 }
             }
-            let translation_models = vec!["llama-3.1-8b-instant".to_string(), "llama-3.3-70b-versatile".to_string(), "deepseek-r1-distill-llama-70b".to_string()];
+            let translation_models = mgr.interpreter_translation_models();
             if let Some(idx) = self.sub_translation_model_combo.selection() {
                 if idx < translation_models.len() {
                     mgr.set_interpreter_translation_model(translation_models[idx].clone());
@@ -1189,34 +1103,24 @@ impl Voice2TypeApp {
     fn show_subtitle_model_settings_window(&self) {
         if let Some(mgr) = &*self.config_manager.borrow() {
             let providers = vec!["Groq".to_string(), "硅基流动 (SiliconFlow)".to_string()];
-            let api_url = mgr.interpreter_api_url();
-            let provider_idx = if api_url.contains("siliconflow") { 1 } else { 0 };
+            let provider = mgr.interpreter_provider();
+            let provider_idx = if provider == "siliconflow" { 1 } else { 0 };
             self.sub_m_provider_combo.set_collection(providers);
             self.sub_m_provider_combo.set_selection(Some(provider_idx));
 
-            let groq_models = vec!["whisper-large-v3".to_string(), "whisper-large-v3-turbo".to_string(), "distil-whisper-large-v3-en".to_string()];
-            let sf_models = vec!["FunAudioLLM/SenseVoiceSmall".to_string(), "TeleAI/TeleSpeechASR".to_string()];
-            let models = if provider_idx == 1 { sf_models } else { groq_models };
+            let models = mgr.interpreter_transcription_models();
             let current_model = mgr.interpreter_model_name();
             let model_idx = models.iter().position(|m| m == &current_model).unwrap_or(0);
             self.sub_m_model_combo.set_collection(models);
             self.sub_m_model_combo.set_selection(Some(model_idx));
 
-            let api_key = mgr.interpreter_api_key();
-            let display_key = if api_key.is_empty() {
-                if provider_idx == 1 { mgr.get_siliconflow_api_key() } else { mgr.get_groq_api_key() }
-            } else { api_key };
-            self.sub_m_api_key_input.set_text(&display_key);
+            let trans_models = mgr.interpreter_translation_models();
+            let current_trans_model = mgr.interpreter_translation_model();
+            let trans_idx = trans_models.iter().position(|m| m == &current_trans_model).unwrap_or(0);
+            self.sub_m_trans_model_combo.set_collection(trans_models);
+            self.sub_m_trans_model_combo.set_selection(Some(trans_idx));
 
-            self.sub_m_api_url_input.set_text(&api_url);
             self.sub_m_local_whisper_item.set_check_state(if mgr.interpreter_use_local_whisper() { nwg::CheckBoxState::Checked } else { nwg::CheckBoxState::Unchecked });
-
-            let trans_api_key = mgr.interpreter_translation_api_key();
-            let trans_display_key = if trans_api_key.is_empty() {
-                if provider_idx == 1 { mgr.get_siliconflow_api_key() } else { mgr.get_groq_api_key() }
-            } else { trans_api_key };
-            self.sub_m_trans_api_key_input.set_text(&trans_display_key);
-            self.sub_m_trans_api_url_input.set_text(&mgr.interpreter_translation_api_url());
 
             let audio_sources = vec!["扬声器（系统音频）".to_string(), "麦克风".to_string()];
             let current_source = mgr.interpreter_audio_source();
@@ -1235,88 +1139,60 @@ impl Voice2TypeApp {
     fn on_subtitle_provider_changed(&self) {
         let is_siliconflow = self.sub_m_provider_combo.selection() == Some(1);
 
-        let groq_models = vec!["whisper-large-v3".to_string(), "whisper-large-v3-turbo".to_string(), "distil-whisper-large-v3-en".to_string()];
-        let sf_models = vec!["FunAudioLLM/SenseVoiceSmall".to_string(), "TeleAI/TeleSpeechASR".to_string()];
-        let models = if is_siliconflow { sf_models } else { groq_models };
-        self.sub_m_model_combo.set_collection(models);
+        let transcription_models = if is_siliconflow {
+            vec![
+                "FunAudioLLM/SenseVoiceSmall".to_string(),
+                "TeleAI/TeleSpeechASR".to_string(),
+            ]
+        } else {
+            vec![
+                "whisper-large-v3".to_string(),
+                "whisper-large-v3-turbo".to_string(),
+                "distil-whisper-large-v3-en".to_string(),
+            ]
+        };
+        self.sub_m_model_combo.set_collection(transcription_models);
         self.sub_m_model_combo.set_selection(Some(0));
 
-        if is_siliconflow {
-            self.sub_m_api_url_input.set_text("https://api.siliconflow.cn/v1/audio/transcriptions");
-            self.sub_m_trans_api_url_input.set_text("https://api.siliconflow.cn/v1/chat/completions");
-            if let Some(mgr) = &*self.config_manager.borrow() {
-                if self.sub_m_api_key_input.text().is_empty() {
-                    self.sub_m_api_key_input.set_text(&mgr.get_siliconflow_api_key());
-                }
-                if self.sub_m_trans_api_key_input.text().is_empty() {
-                    self.sub_m_trans_api_key_input.set_text(&mgr.get_siliconflow_api_key());
-                }
-            }
+        let translation_models = if is_siliconflow {
+            vec![
+                "Qwen/Qwen2.5-7B-Instruct".to_string(),
+                "Qwen/Qwen2.5-72B-Instruct".to_string(),
+                "deepseek-ai/DeepSeek-V3".to_string(),
+            ]
         } else {
-            self.sub_m_api_url_input.set_text("https://api.groq.com/openai/v1/audio/transcriptions");
-            self.sub_m_trans_api_url_input.set_text("https://api.groq.com/openai/v1/chat/completions");
-            if let Some(mgr) = &*self.config_manager.borrow() {
-                if self.sub_m_api_key_input.text().is_empty() {
-                    self.sub_m_api_key_input.set_text(&mgr.get_groq_api_key());
-                }
-                if self.sub_m_trans_api_key_input.text().is_empty() {
-                    self.sub_m_trans_api_key_input.set_text(&mgr.get_groq_api_key());
-                }
-            }
-        }
+            vec![
+                "llama-3.1-8b-instant".to_string(),
+                "llama-3.3-70b-versatile".to_string(),
+                "deepseek-r1-distill-llama-70b".to_string(),
+            ]
+        };
+        self.sub_m_trans_model_combo.set_collection(translation_models);
+        self.sub_m_trans_model_combo.set_selection(Some(0));
     }
 
     fn save_subtitle_model_settings(&self) {
         if let Some(mgr) = &*self.config_manager.borrow() {
             let is_siliconflow = self.sub_m_provider_combo.selection() == Some(1);
+            let provider = if is_siliconflow { "siliconflow" } else { "groq" };
+            mgr.set_interpreter_provider(provider.to_string());
 
-            let groq_models = vec!["whisper-large-v3".to_string(), "whisper-large-v3-turbo".to_string(), "distil-whisper-large-v3-en".to_string()];
-            let sf_models = vec!["FunAudioLLM/SenseVoiceSmall".to_string(), "TeleAI/TeleSpeechASR".to_string()];
-            let models = if is_siliconflow { sf_models } else { groq_models };
+            let models = mgr.interpreter_transcription_models();
             if let Some(idx) = self.sub_m_model_combo.selection() {
                 if idx < models.len() {
                     mgr.set_interpreter_model_name(models[idx].clone());
                 }
             }
 
-            let api_key = self.sub_m_api_key_input.text();
-            mgr.set_interpreter_api_key(api_key);
-
-            if is_siliconflow {
-                mgr.set_interpreter_api_url("https://api.siliconflow.cn/v1/audio/transcriptions".to_string());
-                if self.sub_m_api_key_input.text().is_empty() {
-                    mgr.set_interpreter_api_key(mgr.get_siliconflow_api_key());
-                }
-            } else {
-                mgr.set_interpreter_api_url("https://api.groq.com/openai/v1/audio/transcriptions".to_string());
-                if self.sub_m_api_key_input.text().is_empty() {
-                    mgr.set_interpreter_api_key(mgr.get_groq_api_key());
+            let trans_models = mgr.interpreter_translation_models();
+            if let Some(idx) = self.sub_m_trans_model_combo.selection() {
+                if idx < trans_models.len() {
+                    mgr.set_interpreter_translation_model(trans_models[idx].clone());
                 }
             }
 
             let use_local = self.sub_m_local_whisper_item.check_state() == nwg::CheckBoxState::Checked;
             mgr.set_interpreter_use_local_whisper(use_local);
-            mgr.set_interpreter_translation_api_key(self.sub_m_trans_api_key_input.text());
-
-            if is_siliconflow {
-                mgr.set_interpreter_translation_api_url(crate::config::SILICONFLOW_CHAT_URL.to_string());
-                if self.sub_m_trans_api_key_input.text().is_empty() {
-                    mgr.set_interpreter_translation_api_key(mgr.get_siliconflow_api_key());
-                }
-                let current_trans_model = mgr.interpreter_translation_model();
-                if current_trans_model.contains("groq") || current_trans_model.contains("llama-3") {
-                    mgr.set_interpreter_translation_model("Qwen/Qwen2.5-7B-Instruct".to_string());
-                }
-            } else {
-                mgr.set_interpreter_translation_api_url("https://api.groq.com/openai/v1/chat/completions".to_string());
-                if self.sub_m_trans_api_key_input.text().is_empty() {
-                    mgr.set_interpreter_translation_api_key(mgr.get_groq_api_key());
-                }
-                let current_trans_model = mgr.interpreter_translation_model();
-                if current_trans_model.contains("Qwen") {
-                    mgr.set_interpreter_translation_model("llama-3.1-8b-instant".to_string());
-                }
-            }
 
             if let Some(idx) = self.sub_m_audio_source_combo.selection() {
                 let source = if idx == 1 { "microphone" } else { "speaker" };
@@ -1330,91 +1206,9 @@ impl Voice2TypeApp {
             }
 
             mgr.save_or_notify();
-            self.update_subtitle_model_menu_checks();
             nwg::simple_message("已保存", "字幕模型设置已保存。");
         }
         self.subtitle_model_window.set_visible(false);
-    }
-
-    fn select_sub_model_whisper(&self) {
-        if let Some(mgr) = &*self.config_manager.borrow() {
-            mgr.set_interpreter_model_name("whisper-large-v3".to_string());
-            mgr.set_interpreter_use_local_whisper(false);
-            mgr.set_interpreter_api_url("https://api.groq.com/openai/v1/audio/transcriptions".to_string());
-            mgr.save_or_notify();
-            self.update_subtitle_model_menu_checks();
-        }
-    }
-
-    fn select_sub_model_whisper_turbo(&self) {
-        if let Some(mgr) = &*self.config_manager.borrow() {
-            mgr.set_interpreter_model_name("whisper-large-v3-turbo".to_string());
-            mgr.set_interpreter_use_local_whisper(false);
-            mgr.set_interpreter_api_url("https://api.groq.com/openai/v1/audio/transcriptions".to_string());
-            mgr.save_or_notify();
-            self.update_subtitle_model_menu_checks();
-        }
-    }
-
-    fn select_sub_model_local(&self) {
-        if let Some(mgr) = &*self.config_manager.borrow() {
-            if !mgr.has_local_whisper_dir() {
-                nwg::simple_message("本地 Whisper", "请先设置 Whisper 根目录。");
-                self.show_whisper_window();
-                return;
-            }
-            mgr.set_interpreter_use_local_whisper(true);
-            mgr.save_or_notify();
-            self.update_subtitle_model_menu_checks();
-        }
-    }
-
-    fn show_sub_custom_api_window(&self) {
-        self.show_subtitle_model_settings_window();
-    }
-
-    fn update_subtitle_model_menu_checks(&self) {
-        if let Some(mgr) = &*self.config_manager.borrow() {
-            let use_local = mgr.interpreter_use_local_whisper();
-            let model = mgr.interpreter_model_name();
-            self.sub_model_whisper_item.set_checked(!use_local && model == "whisper-large-v3");
-            self.sub_model_whisper_turbo_item.set_checked(!use_local && model == "whisper-large-v3-turbo");
-            self.sub_model_local_item.set_checked(use_local);
-            self.sub_model_custom_item.set_checked(!use_local && model != "whisper-large-v3" && model != "whisper-large-v3-turbo");
-        }
-    }
-
-    fn update_subtitle_translation_model_menu_checks(&self) {
-        if let Some(mgr) = &*self.config_manager.borrow() {
-            let tm = mgr.interpreter_translation_model();
-            self.sub_translation_llama_item.set_checked(tm == "llama-3.1-8b-instant");
-            self.sub_translation_70b_item.set_checked(tm == "llama-3.3-70b-versatile");
-            self.sub_translation_deepseek_item.set_checked(tm == "deepseek-r1-distill-llama-70b");
-        }
-    }
-
-    fn select_sub_translation_model_llama(&self) {
-        if let Some(mgr) = &*self.config_manager.borrow() {
-            mgr.set_interpreter_translation_model("llama-3.1-8b-instant".to_string());
-            mgr.save_or_notify();
-            self.update_subtitle_translation_model_menu_checks();
-        }
-    }
-
-    fn select_sub_translation_model_70b(&self) {
-        if let Some(mgr) = &*self.config_manager.borrow() {
-            mgr.set_interpreter_translation_model("llama-3.3-70b-versatile".to_string());
-            mgr.save_or_notify();
-            self.update_subtitle_translation_model_menu_checks();
-        }
-    }
-
-    fn select_sub_translation_model_deepseek(&self) {
-        if let Some(mgr) = &*self.config_manager.borrow() {
-            mgr.set_interpreter_translation_model("deepseek-r1-distill-llama-70b".to_string());
-            mgr.save_or_notify();
-            self.update_subtitle_translation_model_menu_checks();
-        }
     }
 
     fn set_trigger_hold(&self) {
@@ -1685,12 +1479,9 @@ impl Voice2TypeApp {
     // API Key 配置窗口方法
     fn show_key_config_window(&self) {
         if let Some(mgr) = &*self.config_manager.borrow() {
-            let sf_key = mgr.get_siliconflow_api_key();
-            self.key_teleai_input.set_text(&sf_key);
-            self.key_sensevoice_input.set_text(&sf_key);
-            self.key_whisper_input.set_text(&mgr.get_groq_api_key());
+            self.key_siliconflow_input.set_text(&mgr.get_siliconflow_api_key());
+            self.key_groq_input.set_text(&mgr.get_groq_api_key());
         }
-
         self.key_config_window.set_visible(true);
         self.key_config_window.set_focus();
     }
@@ -1701,16 +1492,8 @@ impl Voice2TypeApp {
 
     fn save_key_config(&self) {
         if let Some(mgr) = &*self.config_manager.borrow() {
-            let teleai_key = self.key_teleai_input.text();
-            let sensevoice_key = self.key_sensevoice_input.text();
-            let sf_key = if teleai_key.is_empty() {
-                sensevoice_key
-            } else {
-                teleai_key
-            };
-            mgr.set_siliconflow_api_key(sf_key);
-            mgr.set_groq_api_key(self.key_whisper_input.text());
-
+            mgr.set_siliconflow_api_key(self.key_siliconflow_input.text());
+            mgr.set_groq_api_key(self.key_groq_input.text());
             mgr.save_or_notify();
             nwg::simple_message("已保存", "API Key 已保存。");
         }

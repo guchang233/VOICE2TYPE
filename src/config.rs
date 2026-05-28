@@ -9,9 +9,9 @@ pub const MODEL_WHISPER: &str = "whisper-large-v3";
 pub const MODEL_LOCAL_WHISPER: &str = "local-whisper";
 pub const MODEL_CUSTOM: &str = "custom";
 
-const SILICONFLOW_TRANSCRIPTIONS_URL: &str = "https://api.siliconflow.cn/v1/audio/transcriptions";
+pub const SILICONFLOW_TRANSCRIPTIONS_URL: &str = "https://api.siliconflow.cn/v1/audio/transcriptions";
 pub const SILICONFLOW_CHAT_URL: &str = "https://api.siliconflow.cn/v1/chat/completions";
-const GROQ_TRANSCRIPTIONS_URL: &str = "https://api.groq.com/openai/v1/audio/transcriptions";
+pub const GROQ_TRANSCRIPTIONS_URL: &str = "https://api.groq.com/openai/v1/audio/transcriptions";
 
 #[derive(Clone)]
 pub struct ConfigManager {
@@ -159,11 +159,8 @@ pub struct InterpreterConfig {
     pub translation_model: String,
     pub translation_context: bool,
     pub use_local_whisper: bool,
-    pub api_url: String,
-    pub api_key: String,
+    pub provider: String,
     pub model_name: String,
-    pub translation_api_url: String,
-    pub translation_api_key: String,
     pub audio_source: String,
 }
 
@@ -186,11 +183,8 @@ impl Default for InterpreterConfig {
             translation_model: "llama-3.1-8b-instant".to_string(),
             translation_context: true,
             use_local_whisper: false,
-            api_url: "https://api.groq.com/openai/v1/audio/transcriptions".to_string(),
-            api_key: String::new(),
+            provider: "groq".to_string(),
             model_name: "whisper-large-v3-turbo".to_string(),
-            translation_api_url: "https://api.groq.com/openai/v1/chat/completions".to_string(),
-            translation_api_key: String::new(),
             audio_source: "speaker".to_string(),
         }
     }
@@ -792,20 +786,71 @@ impl ConfigManager {
         self.config.lock().unwrap().interpreter.use_local_whisper = enabled;
     }
 
-    pub fn interpreter_api_url(&self) -> String {
-        self.config.lock().unwrap().interpreter.api_url.clone()
+    pub fn interpreter_provider(&self) -> String {
+        self.config.lock().unwrap().interpreter.provider.clone()
     }
 
-    pub fn set_interpreter_api_url(&self, url: String) {
-        self.config.lock().unwrap().interpreter.api_url = url;
+    pub fn set_interpreter_provider(&self, provider: String) {
+        self.config.lock().unwrap().interpreter.provider = provider;
+    }
+
+    pub fn interpreter_transcription_api_url(&self) -> String {
+        let cfg = self.config.lock().unwrap();
+        match cfg.interpreter.provider.as_str() {
+            "siliconflow" => SILICONFLOW_TRANSCRIPTIONS_URL.to_string(),
+            _ => GROQ_TRANSCRIPTIONS_URL.to_string(),
+        }
+    }
+
+    pub fn interpreter_translation_api_url(&self) -> String {
+        let cfg = self.config.lock().unwrap();
+        match cfg.interpreter.provider.as_str() {
+            "siliconflow" => SILICONFLOW_CHAT_URL.to_string(),
+            _ => "https://api.groq.com/openai/v1/chat/completions".to_string(),
+        }
     }
 
     pub fn interpreter_api_key(&self) -> String {
-        self.config.lock().unwrap().interpreter.api_key.clone()
+        let cfg = self.config.lock().unwrap();
+        match cfg.interpreter.provider.as_str() {
+            "siliconflow" => cfg.model.siliconflow_api_key.clone(),
+            _ => cfg.model.groq_api_key.clone(),
+        }
     }
 
-    pub fn set_interpreter_api_key(&self, key: String) {
-        self.config.lock().unwrap().interpreter.api_key = key;
+    pub fn interpreter_translation_api_key(&self) -> String {
+        self.interpreter_api_key()
+    }
+
+    pub fn interpreter_transcription_models(&self) -> Vec<String> {
+        let cfg = self.config.lock().unwrap();
+        match cfg.interpreter.provider.as_str() {
+            "siliconflow" => vec![
+                "FunAudioLLM/SenseVoiceSmall".to_string(),
+                "TeleAI/TeleSpeechASR".to_string(),
+            ],
+            _ => vec![
+                "whisper-large-v3".to_string(),
+                "whisper-large-v3-turbo".to_string(),
+                "distil-whisper-large-v3-en".to_string(),
+            ],
+        }
+    }
+
+    pub fn interpreter_translation_models(&self) -> Vec<String> {
+        let cfg = self.config.lock().unwrap();
+        match cfg.interpreter.provider.as_str() {
+            "siliconflow" => vec![
+                "Qwen/Qwen2.5-7B-Instruct".to_string(),
+                "Qwen/Qwen2.5-72B-Instruct".to_string(),
+                "deepseek-ai/DeepSeek-V3".to_string(),
+            ],
+            _ => vec![
+                "llama-3.1-8b-instant".to_string(),
+                "llama-3.3-70b-versatile".to_string(),
+                "deepseek-r1-distill-llama-70b".to_string(),
+            ],
+        }
     }
 
     pub fn interpreter_model_name(&self) -> String {
@@ -814,22 +859,6 @@ impl ConfigManager {
 
     pub fn set_interpreter_model_name(&self, model: String) {
         self.config.lock().unwrap().interpreter.model_name = model;
-    }
-
-    pub fn interpreter_translation_api_url(&self) -> String {
-        self.config.lock().unwrap().interpreter.translation_api_url.clone()
-    }
-
-    pub fn set_interpreter_translation_api_url(&self, url: String) {
-        self.config.lock().unwrap().interpreter.translation_api_url = url;
-    }
-
-    pub fn interpreter_translation_api_key(&self) -> String {
-        self.config.lock().unwrap().interpreter.translation_api_key.clone()
-    }
-
-    pub fn set_interpreter_translation_api_key(&self, key: String) {
-        self.config.lock().unwrap().interpreter.translation_api_key = key;
     }
 
     pub fn interpreter_audio_source(&self) -> String {

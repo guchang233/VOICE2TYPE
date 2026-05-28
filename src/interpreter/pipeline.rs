@@ -169,21 +169,11 @@ async fn transcribe(wav_data: &[u8], config: &ConfigManager) -> Option<String> {
         }
     } else {
         let api_key = config.interpreter_api_key();
-        let api_key = if api_key.is_empty() {
-            let api_url = config.interpreter_api_url();
-            if api_url.contains("siliconflow") {
-                config.get_siliconflow_api_key()
-            } else {
-                config.get_groq_api_key()
-            }
-        } else {
-            api_key
-        };
         if api_key.is_empty() {
             write_log(LogLevel::ERROR, "[字幕] 转写 API Key 未配置", None);
             return None;
         }
-        let api_url = config.interpreter_api_url();
+        let api_url = config.interpreter_transcription_api_url();
         let model = config.interpreter_model_name();
 
         let mut form = reqwest::multipart::Form::new()
@@ -252,16 +242,6 @@ async fn translate(
     context: &[(String, String)],
 ) -> Result<String, String> {
     let api_key = config.interpreter_translation_api_key();
-    let api_key = if api_key.is_empty() {
-        let api_url = config.interpreter_translation_api_url();
-        if api_url.contains("siliconflow") {
-            config.get_siliconflow_api_key()
-        } else {
-            config.get_groq_api_key()
-        }
-    } else {
-        api_key
-    };
     if api_key.is_empty() {
         return Err("翻译 API Key 未配置".to_string());
     }
