@@ -1,31 +1,45 @@
 # Voice2Type
 
-Voice2Type 是一个 Windows 托盘语音输入工具：按下热键录音，松开后自动转写并输入到当前光标位置。
+Windows 托盘语音输入工具：按住热键说话，松开后自动转写并输入到当前光标位置。
 
-## 主要功能
+> **建议下载 [v0.0.51 稳定版](https://github.com/guchang233/VOICE2TYPE/releases/tag/v0.0.51-the-last-pure-vision) 使用。**
+> 本版本为预发布版，包含实验性的实时字幕功能，体验尚不完善。
 
-- 全局热键录音，支持按住说话和按一下开始/结束两种模式
-- 支持剪贴板粘贴和键盘注入两种输出方式
-- 支持 SiliconFlow / Groq / 自定义 API 转写接口
-- 可选本地 Whisper（whisper.cpp），离线转写，根目录由用户自行选择
-- 可保留或过滤标点、表情符号
-- 托盘菜单配置 API Key、模型、热键、麦克风、状态浮窗和日志
-- 转写进行中自动阻止重复录音，避免重叠输入
-- 支持重新粘贴上一条识别结果
-- 支持开机自动启动、更新检查和日志窗口
+## 核心功能
 
-## 使用方式
+- 全局热键录音，支持按住说话和点击切换两种模式
+- 剪贴板粘贴 / 键盘注入两种输出方式
+- SiliconFlow / Groq / 本地 Whisper 三种转写引擎
+- 可选过滤标点和表情符号
+- 支持重新粘贴上一条结果
+- 开机自启、更新检查、日志窗口
 
-1. 启动程序后，在托盘图标中打开 `配置 -> API Key`。
-2. 按所选模型填写对应 API Key。
-3. 选中目标输入框，按住默认热键 `F2` 说话。
-4. 松开热键后，识别结果会自动输入到目标窗口。
+## 实时字幕（实验性）
 
-## 推荐设置
+> ⚠️ 此功能尚在早期开发中，体验不够流畅，转写延迟和文字跳动较明显。如需稳定使用语音转文字，请下载 [v0.0.51](https://github.com/guchang233/VOICE2TYPE/releases/tag/v0.0.51-the-last-pure-vision)。
 
-- 输出方式优先使用 `剪贴板粘贴（推荐）`，兼容性通常更好。
-- 若识别结果未粘贴到目标窗口，可用托盘「重新粘贴上一条」恢复。
-- 如果要在管理员权限程序或游戏中输入，建议以管理员权限启动 Voice2Type。
+- 实时捕获扬声器或麦克风音频，边说边出字幕
+- 支持双语字幕：原文 + 机器翻译（Groq / SiliconFlow LLM）
+- 浮窗可拖动、可锁定穿透、可切换音源
+- 字幕窗口常驻显示可开关
+
+## 快速开始
+
+1. 启动后在托盘图标打开 **配置 → API Key**，填写对应 Key。
+2. 选中目标输入框，按住 `F2` 说话，松开后自动输入。
+3. 输出方式优先选 **剪贴板粘贴**，兼容性更好。
+
+## 本地 Whisper（可选）
+
+1. 托盘 **设置 → 配置 → 设置本地 Whisper 目录**，选择一个空文件夹。
+2. 将 `whisper-cli.exe` 放入 `bin/`，模型放入 `models/`。
+3. 在模型选择中切换为 **本地 Whisper（离线）**。
+
+无需 API Key，转写在本地执行。
+
+## 配置文件
+
+优先读取当前目录 `voice2type_config.json`，否则使用系统配置目录 `settings.json`。日志位于配置目录 `logs/app.log`。
 
 ## 开发
 
@@ -35,30 +49,14 @@ cargo check
 cargo run
 ```
 
-开发调试默认不要求管理员（manifest 为 `asInvoker`）。发布构建或需要测试管理员场景时使用：
-
-```powershell
-cargo build --release
-cargo run --features admin
-```
-
 发布构建：
 
 ```powershell
 cargo build --release
 ```
 
-## 配置文件
+管理员场景：
 
-程序优先读取当前目录下的 `voice2type_config.json`，否则使用系统配置目录中的 `settings.json`。日志文件位于配置目录下的 `logs/app.log`。
-
-## 本地 Whisper（可选）
-
-1. 托盘 **设置 → 配置 → 设置本地 Whisper 目录**，选择或新建一个文件夹作为根目录（保存后会自动创建 `bin/`、`models/`、`tmp/`）。
-2. 将 [whisper.cpp](https://github.com/ggml-org/whisper.cpp/releases) 的 `whisper-cli.exe`（或 `main.exe`）放入该目录下的 `bin/`。
-3. 将 `ggml-base.bin` 等模型放入 `models/`（详见目录内 `README.txt`）。
-4. 在 **设置 → 配置 → 模型选择** 中选用 **本地 Whisper（离线）**。
-
-路径保存在 `settings.json` 的 `model.local_whisper_dir`。若你曾使用旧版默认目录 `{配置目录}/whisper`，首次升级会自动迁移该路径。
-
-无需 API Key；转写在本地执行，按需启动 whisper-cli。
+```powershell
+cargo run --features admin
+```
