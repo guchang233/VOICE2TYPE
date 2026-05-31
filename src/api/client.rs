@@ -81,7 +81,7 @@ impl ApiClient {
         if config.get_speech_service() == "groq" {
             form = form
                 .text("temperature", "0")
-                .text("response_format", "verbose_json");
+                .text("response_format", "json");
         } else if config.output_language() != "auto" {
             form = form.text("language", config.output_language());
         }
