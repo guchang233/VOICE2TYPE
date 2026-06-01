@@ -12,7 +12,6 @@ mod update;
 mod utils;
 mod whisper_local;
 mod win_utils;
-mod interpreter;
 
 /// 单次录音最长秒数，超出后自动结束并转写。
 const MAX_RECORDING_SECS: u32 = 90;
@@ -64,18 +63,6 @@ static IS_RECORDING: AtomicBool = AtomicBool::new(false);
 static CONFIG_GLOBAL: OnceCell<Arc<ConfigManager>> = OnceCell::new();
 
 #[cfg(target_os = "windows")]
-static INTERPRETER: once_cell::sync::Lazy<std::sync::Mutex<Option<interpreter::InterpreterEngine>>> =
-    once_cell::sync::Lazy::new(|| std::sync::Mutex::new(None));
-
-#[cfg(target_os = "windows")]
-pub fn toggle_subtitle_visibility() {
-    let guard = INTERPRETER.lock().unwrap();
-    if let Some(engine) = guard.as_ref() {
-        engine.subtitle_window.toggle_visibility();
-    }
-}
-
-#[cfg(target_os = "windows")]
 static LOG_MENU_NEEDS_UNCHECK: AtomicBool = AtomicBool::new(false);
 
 #[cfg(target_os = "windows")]
@@ -108,51 +95,6 @@ pub fn release_app_mutex() {
     }
 }
 
-#[cfg(target_os = "windows")]
-pub fn start_interpreter(config: Arc<ConfigManager>) {
-    let config_clone = config.clone();
-    std::thread::spawn(move || {
-        crate::utils::logger::write_log_line("[字幕] start_interpreter 线程已启动", None);
-        match interpreter::InterpreterEngine::start(config_clone.clone()) {
-            Ok(engine) => {
-                let mut guard = INTERPRETER.lock().unwrap();
-                *guard = Some(engine);
-                notify::queue_tray_message("实时字幕", "实时字幕已启动");
-                crate::utils::logger::write_log_line("[字幕] 实时字幕引擎启动成功", None);
-                config_clone.set_interpreter_enabled(true);
-                config_clone.save_or_notify();
-            }
-            Err(e) => {
-                config_clone.set_interpreter_enabled(false);
-                config_clone.save_or_notify();
-                notify::queue_tray_message("启动失败", &format!("实时字幕启动失败: {}", e));
-                crate::utils::logger::write_log(crate::utils::logger::LogLevel::ERROR, &format!("[字幕] 实时字幕引擎启动失败: {}", e), None);
-            }
-        }
-    });
-}
-
-#[cfg(target_os = "windows")]
-pub fn stop_interpreter() {
-    let mut guard = INTERPRETER.lock().unwrap();
-    if let Some(mut engine) = guard.take() {
-        engine.stop();
-    }
-    if let Some(cfg) = CONFIG_GLOBAL.get() {
-        cfg.set_interpreter_enabled(false);
-        cfg.save_or_notify();
-    }
-    notify::queue_tray_message("实时字幕", "实时字幕已停止");
-}
-
-#[cfg(target_os = "windows")]
-pub fn update_interpreter_subtitle_config(config: &ConfigManager) {
-    let guard = INTERPRETER.lock().unwrap();
-    if let Some(engine) = guard.as_ref() {
-        engine.update_subtitle_config(config);
-    }
-}
-
 fn main() -> Result<()> {
     #[cfg(target_os = "windows")]
     {
@@ -162,12 +104,10 @@ fn main() -> Result<()> {
             return Ok(());
         }
 
-        // 如果是更新重启，先等待旧进程退出
         if args.iter().any(|a| a == "--restart") {
             std::thread::sleep(std::time::Duration::from_millis(1500));
         }
 
-        // 清理旧版本备份文件 (*.old)
         if let Ok(exe_path) = std::env::current_exe() {
             if let Some(dir) = exe_path.parent() {
                 if let Ok(entries) = std::fs::read_dir(dir) {

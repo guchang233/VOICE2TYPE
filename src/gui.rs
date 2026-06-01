@@ -37,35 +37,6 @@ pub struct Voice2TypeApp {
     #[nwg_control(popup: true)]
     pub tray_menu: nwg::Menu,
 
-    #[nwg_control(parent: tray_menu, text: "实时字幕")]
-    pub subtitle_menu: nwg::Menu,
-
-    #[nwg_control(parent: subtitle_menu, text: "开启实时字幕", check: true)]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_subtitle])]
-    pub subtitle_item: nwg::MenuItem,
-
-    #[nwg_control(parent: subtitle_menu, text: "启用翻译", check: true)]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_subtitle_translation])]
-    pub subtitle_translation_item: nwg::MenuItem,
-
-    #[nwg_control(parent: subtitle_menu, text: "窗口常驻显示", check: true)]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_subtitle_always_visible])]
-    pub subtitle_always_visible_item: nwg::MenuItem,
-
-    #[nwg_control(parent: subtitle_menu, text: "音源")]
-    pub audio_source_menu: nwg::Menu,
-
-    #[nwg_control(parent: audio_source_menu, text: "扬声器", check: true)]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_audio_source_speaker])]
-    pub audio_source_speaker_item: nwg::MenuItem,
-
-    #[nwg_control(parent: audio_source_menu, text: "麦克风", check: false)]
-    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_audio_source_microphone])]
-    pub audio_source_microphone_item: nwg::MenuItem,
-
-    #[nwg_control(parent: tray_menu)]
-    pub sep_subtitle: nwg::MenuSeparator,
-
     #[nwg_control(parent: tray_menu, text: "语音转文字")]
     pub voice_menu: nwg::Menu,
 
@@ -375,7 +346,7 @@ pub struct Voice2TypeApp {
     #[nwg_resource(family: "DengXian", size: 26, weight: 700)]
     pub font_bold: nwg::Font,
 
-    #[nwg_control(size: (520, 280), position: (350, 300), title: "模型设置", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_control(size: (520, 160), position: (350, 300), title: "模型设置", flags: "WINDOW", icon: Some(&data.icon))]
     #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_model_settings_window])]
     pub model_settings_window: nwg::Window,
 
@@ -390,24 +361,8 @@ pub struct Voice2TypeApp {
     #[nwg_layout_item(layout: model_settings_layout, row: 0, col: 1, col_span: 2)]
     pub voice_model_combo: nwg::ComboBox<String>,
 
-    #[nwg_control(parent: model_settings_window, text: "实时字幕识别模型:", font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: model_settings_layout, row: 1, col: 0)]
-    pub sub_stt_model_label: nwg::Label,
-
-    #[nwg_control(parent: model_settings_window, font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: model_settings_layout, row: 1, col: 1, col_span: 2)]
-    pub sub_stt_model_combo: nwg::ComboBox<String>,
-
-    #[nwg_control(parent: model_settings_window, text: "实时字幕翻译模型:", font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: model_settings_layout, row: 2, col: 0)]
-    pub sub_trans_model_label: nwg::Label,
-
-    #[nwg_control(parent: model_settings_window, font: Some(&data.font_normal))]
-    #[nwg_layout_item(layout: model_settings_layout, row: 2, col: 1, col_span: 2)]
-    pub sub_trans_model_combo: nwg::ComboBox<String>,
-
     #[nwg_control(parent: model_settings_window, text: "保存", font: Some(&data.font_medium))]
-    #[nwg_layout_item(layout: model_settings_layout, row: 3, col: 1)]
+    #[nwg_layout_item(layout: model_settings_layout, row: 1, col: 1)]
     #[nwg_events(OnButtonClick: [Voice2TypeApp::save_model_settings])]
     pub model_settings_save_btn: nwg::Button,
 
@@ -428,9 +383,7 @@ pub struct Voice2TypeApp {
 
     // 状态
     pub config_manager: RefCell<Option<Arc<ConfigManager>>>,
-    pub needs_auto_start: RefCell<bool>,
 
-    // UI 线程轮询同步日志菜单状态
     #[nwg_control(interval: std::time::Duration::from_millis(100), active: false)]
     #[nwg_events( OnTimerTick: [Voice2TypeApp::on_tick] )]
     pub timer: nwg::AnimationTimer,
@@ -505,20 +458,6 @@ impl Voice2TypeApp {
         app.indicator_item
             .set_checked(config_manager.enable_indicator());
 
-        app.subtitle_item
-            .set_checked(config_manager.interpreter_enabled());
-
-        app.subtitle_translation_item
-            .set_checked(config_manager.interpreter_use_translation());
-
-        app.subtitle_always_visible_item
-            .set_checked(config_manager.interpreter_always_visible());
-
-        let is_mic = config_manager.interpreter_audio_source() == "microphone";
-        app.audio_source_speaker_item.set_checked(!is_mic);
-        app.audio_source_microphone_item.set_checked(is_mic);
-
-        // 设置触发模式初始状态
         let trigger_mode = config_manager.trigger_mode();
         if trigger_mode == "hold" {
             app.trigger_hold_item.set_checked(true);
@@ -607,10 +546,6 @@ impl Voice2TypeApp {
 
         // 启动自动检测
         app.do_check_update();
-
-        if config_manager.interpreter_enabled() {
-            *app.needs_auto_start.borrow_mut() = true;
-        }
 
         app_ui
     }
@@ -736,71 +671,6 @@ impl Voice2TypeApp {
                 }
             }
         }
-    }
-
-    fn toggle_subtitle(&self) {
-        let new_state = !self.subtitle_item.checked();
-        self.subtitle_item.set_checked(new_state);
-        if let Some(mgr) = &*self.config_manager.borrow() {
-            mgr.set_interpreter_enabled(new_state);
-            mgr.save_or_notify();
-        }
-
-        #[cfg(target_os = "windows")]
-        {
-            if new_state {
-                if let Some(mgr) = &*self.config_manager.borrow() {
-                    crate::start_interpreter(mgr.clone());
-                }
-            } else {
-                crate::stop_interpreter();
-            }
-        }
-    }
-
-    fn toggle_subtitle_translation(&self) {
-        let new_state = !self.subtitle_translation_item.checked();
-        self.subtitle_translation_item.set_checked(new_state);
-        if let Some(mgr) = &*self.config_manager.borrow() {
-            mgr.set_interpreter_use_translation(new_state);
-            mgr.save_or_notify();
-        }
-    }
-
-    fn toggle_subtitle_always_visible(&self) {
-        let new_state = !self.subtitle_always_visible_item.checked();
-        self.subtitle_always_visible_item.set_checked(new_state);
-        if let Some(mgr) = &*self.config_manager.borrow() {
-            mgr.set_interpreter_always_visible(new_state);
-            mgr.save_or_notify();
-        }
-        crate::interpreter::subtitle_window::SUBTITLE_ALWAYS_VISIBLE.store(new_state, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    fn set_audio_source_speaker(&self) {
-        self.audio_source_speaker_item.set_checked(true);
-        self.audio_source_microphone_item.set_checked(false);
-        if let Some(mgr) = &*self.config_manager.borrow() {
-            mgr.set_interpreter_audio_source("speaker".to_string());
-            mgr.save_or_notify();
-        }
-        crate::interpreter::AUDIO_SOURCE.store(
-            crate::interpreter::loopback::AUDIO_SOURCE_SPEAKER,
-            std::sync::atomic::Ordering::SeqCst,
-        );
-    }
-
-    fn set_audio_source_microphone(&self) {
-        self.audio_source_speaker_item.set_checked(false);
-        self.audio_source_microphone_item.set_checked(true);
-        if let Some(mgr) = &*self.config_manager.borrow() {
-            mgr.set_interpreter_audio_source("microphone".to_string());
-            mgr.save_or_notify();
-        }
-        crate::interpreter::AUDIO_SOURCE.store(
-            crate::interpreter::loopback::AUDIO_SOURCE_MICROPHONE,
-            std::sync::atomic::Ordering::SeqCst,
-        );
     }
 
     fn set_trigger_hold(&self) {
@@ -1031,46 +901,6 @@ impl Voice2TypeApp {
             let voice_idx = voice_model_ids.iter().position(|m| *m == current_voice).unwrap_or(0);
             self.voice_model_combo.set_collection(voice_models);
             self.voice_model_combo.set_selection(Some(voice_idx));
-
-            let stt_models = vec![
-                "Groq - whisper-large-v3".to_string(),
-                "Groq - whisper-large-v3-turbo".to_string(),
-                "SiliconFlow - FunAudioLLM/SenseVoiceSmall".to_string(),
-                "SiliconFlow - TeleAI/TeleSpeechASR".to_string(),
-                "SiliconFlow - openai/whisper-large-v3-turbo".to_string(),
-                "本地 Whisper (离线)".to_string(),
-            ];
-            let stt_model_ids = vec![
-                "whisper-large-v3",
-                "whisper-large-v3-turbo",
-                "FunAudioLLM/SenseVoiceSmall",
-                "TeleAI/TeleSpeechASR",
-                "openai/whisper-large-v3-turbo",
-                "local-whisper",
-            ];
-            let current_stt = mgr.interpreter_model_name();
-            let stt_idx = stt_model_ids.iter().position(|m| *m == current_stt).unwrap_or(0);
-            self.sub_stt_model_combo.set_collection(stt_models);
-            self.sub_stt_model_combo.set_selection(Some(stt_idx));
-
-            let trans_models = vec![
-                "Groq - llama-3.1-8b-instant".to_string(),
-                "Groq - llama-3.3-70b-versatile".to_string(),
-                "SiliconFlow - Qwen/Qwen2.5-7B-Instruct".to_string(),
-                "SiliconFlow - Qwen/Qwen2.5-72B-Instruct".to_string(),
-                "SiliconFlow - deepseek-ai/DeepSeek-V3".to_string(),
-            ];
-            let trans_model_ids = vec![
-                "llama-3.1-8b-instant",
-                "llama-3.3-70b-versatile",
-                "Qwen/Qwen2.5-7B-Instruct",
-                "Qwen/Qwen2.5-72B-Instruct",
-                "deepseek-ai/DeepSeek-V3",
-            ];
-            let current_trans = mgr.interpreter_translation_model();
-            let trans_idx = trans_model_ids.iter().position(|m| *m == current_trans).unwrap_or(0);
-            self.sub_trans_model_combo.set_collection(trans_models);
-            self.sub_trans_model_combo.set_selection(Some(trans_idx));
         }
         self.model_settings_window.set_visible(true);
         self.model_settings_window.set_focus();
@@ -1102,61 +932,7 @@ impl Voice2TypeApp {
                 }
             }
 
-            let stt_model_ids = vec![
-                "whisper-large-v3",
-                "whisper-large-v3-turbo",
-                "FunAudioLLM/SenseVoiceSmall",
-                "TeleAI/TeleSpeechASR",
-                "openai/whisper-large-v3-turbo",
-                "local-whisper",
-            ];
-            if let Some(idx) = self.sub_stt_model_combo.selection() {
-                if idx < stt_model_ids.len() {
-                    let model_id = stt_model_ids[idx];
-                    mgr.set_interpreter_model_name(model_id.to_string());
-                    if model_id == "local-whisper" {
-                        mgr.set_interpreter_use_local_whisper(true);
-                    } else {
-                        mgr.set_interpreter_use_local_whisper(false);
-                    }
-                    mgr.set_interpreter_api_url(String::new());
-                    mgr.set_interpreter_api_key(String::new());
-                    if model_id == "whisper-large-v3" || model_id == "whisper-large-v3-turbo" {
-                        mgr.set_interpreter_transcription_provider("groq".to_string());
-                    } else if model_id != "local-whisper" {
-                        mgr.set_interpreter_transcription_provider("siliconflow".to_string());
-                    }
-                }
-            }
-
-            let trans_model_ids = vec![
-                "llama-3.1-8b-instant",
-                "llama-3.3-70b-versatile",
-                "Qwen/Qwen2.5-7B-Instruct",
-                "Qwen/Qwen2.5-72B-Instruct",
-                "deepseek-ai/DeepSeek-V3",
-            ];
-            if let Some(idx) = self.sub_trans_model_combo.selection() {
-                if idx < trans_model_ids.len() {
-                    let model_id = trans_model_ids[idx];
-                    mgr.set_interpreter_translation_model(model_id.to_string());
-                    mgr.set_interpreter_translation_api_url(String::new());
-                    mgr.set_interpreter_translation_api_key(String::new());
-                    if model_id.starts_with("llama") {
-                        mgr.set_interpreter_translation_provider("groq".to_string());
-                    } else {
-                        mgr.set_interpreter_translation_provider("siliconflow".to_string());
-                    }
-                }
-            }
-
             mgr.save_or_notify();
-
-            #[cfg(target_os = "windows")]
-            {
-                crate::update_interpreter_subtitle_config(&mgr);
-            }
-
             nwg::simple_message("已保存", "模型设置已保存。");
         }
     }
@@ -1469,29 +1245,12 @@ impl Voice2TypeApp {
     fn on_tick(&self) {
         #[cfg(target_os = "windows")]
         {
-            if *self.needs_auto_start.borrow() {
-                *self.needs_auto_start.borrow_mut() = false;
-                if let Some(mgr) = &*self.config_manager.borrow() {
-                    crate::start_interpreter(mgr.clone());
-                }
-            }
-
             if crate::should_uncheck_log_menu_and_reset() {
                 self.log_item.set_checked(false);
                 if let Some(mgr) = &*self.config_manager.borrow() {
                     mgr.set_show_log(false);
                     mgr.save_or_notify();
                 }
-            }
-
-            let subtitle_checked = self.subtitle_item.checked();
-            let config_enabled = if let Some(mgr) = &*self.config_manager.borrow() {
-                mgr.interpreter_enabled()
-            } else {
-                false
-            };
-            if subtitle_checked != config_enabled {
-                self.subtitle_item.set_checked(config_enabled);
             }
 
             let messages: Vec<(String, String)> = PENDING_TRAY_MESSAGES
@@ -1505,11 +1264,6 @@ impl Voice2TypeApp {
                         crate::win_utils::show_tray_balloon(hwnd, &title, &body);
                     }
                 }
-            }
-
-            if crate::interpreter::subtitle_window::SETTINGS_REQUESTED.load(std::sync::atomic::Ordering::SeqCst) {
-                crate::interpreter::subtitle_window::SETTINGS_REQUESTED.store(false, std::sync::atomic::Ordering::SeqCst);
-                self.show_model_settings_window();
             }
         }
     }

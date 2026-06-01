@@ -42,7 +42,6 @@ pub fn start_hotkey_listener(tx: mpsc::Sender<InputMessage>, config: Arc<ConfigM
 
             if f6_down && !f6_pressed {
                 f6_pressed = true;
-                crate::toggle_subtitle_visibility();
             } else if !f6_down {
                 f6_pressed = false;
             }

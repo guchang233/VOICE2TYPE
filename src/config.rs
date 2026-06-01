@@ -141,68 +141,6 @@ impl Default for IndicatorConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
-pub struct InterpreterConfig {
-    pub enabled: bool,
-    pub target_language: String,
-    pub source_language: String,
-    pub subtitle_font_size: u32,
-    pub subtitle_opacity: f32,
-    pub subtitle_position: String,
-    pub subtitle_click_through: bool,
-    pub use_translation: bool,
-    pub chunk_ms: u64,
-    pub original_font_size: u32,
-    pub original_color: String,
-    pub translated_font_size: u32,
-    pub translated_color: String,
-    pub translation_model: String,
-    pub translation_context: bool,
-    pub use_local_whisper: bool,
-    pub api_url: String,
-    pub api_key: String,
-    pub model_name: String,
-    pub translation_api_url: String,
-    pub translation_api_key: String,
-    pub audio_source: String,
-    pub transcription_provider: String,
-    pub translation_provider: String,
-    pub always_visible: bool,
-}
-
-impl Default for InterpreterConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            target_language: "zh".to_string(),
-            source_language: "auto".to_string(),
-            subtitle_font_size: 22,
-            subtitle_opacity: 0.85,
-            subtitle_position: "bottom".to_string(),
-            subtitle_click_through: true,
-            use_translation: true,
-            chunk_ms: 1500,
-            original_font_size: 18,
-            original_color: "#AAAAAA".to_string(),
-            translated_font_size: 24,
-            translated_color: "#FFFFFF".to_string(),
-            translation_model: "llama-3.1-8b-instant".to_string(),
-            translation_context: true,
-            use_local_whisper: false,
-            api_url: "https://api.groq.com/openai/v1/audio/transcriptions".to_string(),
-            api_key: String::new(),
-            model_name: "whisper-large-v3-turbo".to_string(),
-            translation_api_url: "https://api.groq.com/openai/v1/chat/completions".to_string(),
-            translation_api_key: String::new(),
-            audio_source: "speaker".to_string(),
-            transcription_provider: "groq".to_string(),
-            translation_provider: "groq".to_string(),
-            always_visible: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
 pub struct AppConfig {
     pub basic: BasicConfig,
     pub features: FeatureConfig,
@@ -210,9 +148,7 @@ pub struct AppConfig {
     pub update: UpdateConfig,
     pub model: ModelConfig,
     pub indicator: IndicatorConfig,
-    pub interpreter: InterpreterConfig,
 
-    // 旧版平铺字段，读取后会迁移到上面的分组结构。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -264,7 +200,6 @@ impl Default for AppConfig {
             update: UpdateConfig::default(),
             model: ModelConfig::default(),
             indicator: IndicatorConfig::default(),
-            interpreter: InterpreterConfig::default(),
             model_name: None,
             output_language: None,
             output_mode: None,
@@ -669,213 +604,12 @@ impl ConfigManager {
         self.config.lock().unwrap().indicator.success_duration = duration;
     }
 
-    pub fn interpreter_enabled(&self) -> bool {
-        self.config.lock().unwrap().interpreter.enabled
-    }
-
-    pub fn set_interpreter_enabled(&self, enabled: bool) {
-        self.config.lock().unwrap().interpreter.enabled = enabled;
-    }
-
-    pub fn interpreter_target_language(&self) -> String {
-        self.config.lock().unwrap().interpreter.target_language.clone()
-    }
-
-    pub fn set_interpreter_target_language(&self, lang: String) {
-        self.config.lock().unwrap().interpreter.target_language = lang;
-    }
-
-    pub fn interpreter_source_language(&self) -> String {
-        self.config.lock().unwrap().interpreter.source_language.clone()
-    }
-
-    pub fn set_interpreter_source_language(&self, lang: String) {
-        self.config.lock().unwrap().interpreter.source_language = lang;
-    }
-
-    pub fn interpreter_subtitle_font_size(&self) -> u32 {
-        self.config.lock().unwrap().interpreter.subtitle_font_size
-    }
-
-    pub fn set_interpreter_subtitle_font_size(&self, size: u32) {
-        self.config.lock().unwrap().interpreter.subtitle_font_size = size;
-    }
-
-    pub fn interpreter_subtitle_opacity(&self) -> f32 {
-        self.config.lock().unwrap().interpreter.subtitle_opacity
-    }
-
-    pub fn set_interpreter_subtitle_opacity(&self, opacity: f32) {
-        self.config.lock().unwrap().interpreter.subtitle_opacity = opacity;
-    }
-
-    pub fn interpreter_subtitle_position(&self) -> String {
-        self.config.lock().unwrap().interpreter.subtitle_position.clone()
-    }
-
-    pub fn set_interpreter_subtitle_position(&self, pos: String) {
-        self.config.lock().unwrap().interpreter.subtitle_position = pos;
-    }
-
-    pub fn interpreter_subtitle_click_through(&self) -> bool {
-        self.config.lock().unwrap().interpreter.subtitle_click_through
-    }
-
-    pub fn set_interpreter_subtitle_click_through(&self, click_through: bool) {
-        self.config.lock().unwrap().interpreter.subtitle_click_through = click_through;
-    }
-
-    pub fn interpreter_use_translation(&self) -> bool {
-        self.config.lock().unwrap().interpreter.use_translation
-    }
-
-    pub fn set_interpreter_use_translation(&self, use_translation: bool) {
-        self.config.lock().unwrap().interpreter.use_translation = use_translation;
-    }
-
-    pub fn interpreter_chunk_ms(&self) -> u64 {
-        self.config.lock().unwrap().interpreter.chunk_ms
-    }
-
-    pub fn set_interpreter_chunk_ms(&self, ms: u64) {
-        self.config.lock().unwrap().interpreter.chunk_ms = ms;
-    }
-
-    pub fn interpreter_original_font_size(&self) -> u32 {
-        self.config.lock().unwrap().interpreter.original_font_size
-    }
-
-    pub fn set_interpreter_original_font_size(&self, size: u32) {
-        self.config.lock().unwrap().interpreter.original_font_size = size;
-    }
-
-    pub fn interpreter_original_color(&self) -> String {
-        self.config.lock().unwrap().interpreter.original_color.clone()
-    }
-
-    pub fn set_interpreter_original_color(&self, color: String) {
-        self.config.lock().unwrap().interpreter.original_color = color;
-    }
-
-    pub fn interpreter_translated_font_size(&self) -> u32 {
-        self.config.lock().unwrap().interpreter.translated_font_size
-    }
-
-    pub fn set_interpreter_translated_font_size(&self, size: u32) {
-        self.config.lock().unwrap().interpreter.translated_font_size = size;
-    }
-
-    pub fn interpreter_translated_color(&self) -> String {
-        self.config.lock().unwrap().interpreter.translated_color.clone()
-    }
-
-    pub fn set_interpreter_translated_color(&self, color: String) {
-        self.config.lock().unwrap().interpreter.translated_color = color;
-    }
-
-    pub fn interpreter_translation_model(&self) -> String {
-        self.config.lock().unwrap().interpreter.translation_model.clone()
-    }
-
-    pub fn set_interpreter_translation_model(&self, model: String) {
-        self.config.lock().unwrap().interpreter.translation_model = model;
-    }
-
-    pub fn interpreter_translation_context(&self) -> bool {
-        self.config.lock().unwrap().interpreter.translation_context
-    }
-
-    pub fn set_interpreter_translation_context(&self, enabled: bool) {
-        self.config.lock().unwrap().interpreter.translation_context = enabled;
-    }
-
-    pub fn interpreter_use_local_whisper(&self) -> bool {
-        self.config.lock().unwrap().interpreter.use_local_whisper
-    }
-
-    pub fn set_interpreter_use_local_whisper(&self, enabled: bool) {
-        self.config.lock().unwrap().interpreter.use_local_whisper = enabled;
-    }
-
-    pub fn interpreter_api_url(&self) -> String {
-        self.config.lock().unwrap().interpreter.api_url.clone()
-    }
-
-    pub fn set_interpreter_api_url(&self, url: String) {
-        self.config.lock().unwrap().interpreter.api_url = url;
-    }
-
-    pub fn interpreter_api_key(&self) -> String {
-        self.config.lock().unwrap().interpreter.api_key.clone()
-    }
-
-    pub fn set_interpreter_api_key(&self, key: String) {
-        self.config.lock().unwrap().interpreter.api_key = key;
-    }
-
-    pub fn interpreter_model_name(&self) -> String {
-        self.config.lock().unwrap().interpreter.model_name.clone()
-    }
-
-    pub fn set_interpreter_model_name(&self, model: String) {
-        self.config.lock().unwrap().interpreter.model_name = model;
-    }
-
-    pub fn interpreter_translation_api_url(&self) -> String {
-        self.config.lock().unwrap().interpreter.translation_api_url.clone()
-    }
-
-    pub fn set_interpreter_translation_api_url(&self, url: String) {
-        self.config.lock().unwrap().interpreter.translation_api_url = url;
-    }
-
-    pub fn interpreter_translation_api_key(&self) -> String {
-        self.config.lock().unwrap().interpreter.translation_api_key.clone()
-    }
-
-    pub fn set_interpreter_translation_api_key(&self, key: String) {
-        self.config.lock().unwrap().interpreter.translation_api_key = key;
-    }
-
-    pub fn interpreter_audio_source(&self) -> String {
-        self.config.lock().unwrap().interpreter.audio_source.clone()
-    }
-
-    pub fn set_interpreter_audio_source(&self, source: String) {
-        self.config.lock().unwrap().interpreter.audio_source = source;
-    }
-
-    pub fn interpreter_transcription_provider(&self) -> String {
-        self.config.lock().unwrap().interpreter.transcription_provider.clone()
-    }
-
-    pub fn set_interpreter_transcription_provider(&self, v: String) {
-        self.config.lock().unwrap().interpreter.transcription_provider = v;
-    }
-
-    pub fn interpreter_translation_provider(&self) -> String {
-        self.config.lock().unwrap().interpreter.translation_provider.clone()
-    }
-
-    pub fn set_interpreter_translation_provider(&self, v: String) {
-        self.config.lock().unwrap().interpreter.translation_provider = v;
-    }
-
-    pub fn interpreter_always_visible(&self) -> bool {
-        self.config.lock().unwrap().interpreter.always_visible
-    }
-
-    pub fn set_interpreter_always_visible(&self, v: bool) {
-        self.config.lock().unwrap().interpreter.always_visible = v;
-    }
-
     pub fn reset_ai_config(&self) {
         let mut cfg = self.config.lock().unwrap();
         cfg.basic.model_name = MODEL_SENSEVOICE.to_string();
         cfg.model = ModelConfig::default();
         cfg.advanced.trigger_mode = AdvancedConfig::default().trigger_mode;
         cfg.indicator = IndicatorConfig::default();
-        cfg.interpreter = InterpreterConfig::default();
     }
 
     pub fn save(&self) -> anyhow::Result<()> {
