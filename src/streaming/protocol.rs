@@ -151,9 +151,9 @@ pub fn decode_server_message(data: &[u8]) -> Result<Option<AsrResponse>> {
         if data.len() < offset + 8 {
             bail!("error frame too short");
         }
-        let code = u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap());
+        let code = read_u32_be(data, offset)?;
         offset += 4;
-        let msg_len = u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
+        let msg_len = read_u32_be(data, offset)? as usize;
         offset += 4;
         let msg_bytes = &data[offset..offset.saturating_add(msg_len).min(data.len())];
         let msg = String::from_utf8_lossy(msg_bytes).into_owned();
@@ -168,7 +168,7 @@ pub fn decode_server_message(data: &[u8]) -> Result<Option<AsrResponse>> {
         return Ok(None);
     }
 
-    let payload_len = u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
+    let payload_len = read_u32_be(data, offset)? as usize;
     offset += 4;
 
     if data.len() < offset + payload_len {
@@ -219,6 +219,16 @@ fn extract_result_text(v: &Value) -> String {
         .and_then(|t| t.as_str())
         .unwrap_or("")
         .to_string()
+}
+
+fn read_u32_be(data: &[u8], offset: usize) -> Result<u32> {
+    let end = offset
+        .checked_add(4)
+        .filter(|&e| e <= data.len())
+        .ok_or_else(|| anyhow!("frame too short at offset {}", offset))?;
+    Ok(u32::from_be_bytes(data[offset..end].try_into().map_err(|_| {
+        anyhow!("invalid u32 at offset {}", offset)
+    })?))
 }
 
 pub fn build_start_json(

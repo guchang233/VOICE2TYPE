@@ -1,4 +1,4 @@
-//! 流式识别结果注入：选区替换覆盖本会话已输出内容（不碰输入框原有文字）
+//! Streaming ASR output: replace session text without touching pre-existing content.
 
 use std::sync::{Arc, Mutex};
 
@@ -10,9 +10,7 @@ use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::Controls::{EM_GETSEL, EM_REPLACESEL, EM_SETSEL};
 #[cfg(target_os = "windows")]
-use windows::Win32::UI::Input::KeyboardAndMouse::GetFocus;
-#[cfg(target_os = "windows")]
-use windows::Win32::UI::WindowsAndMessaging::SendMessageW;
+use windows::Win32::UI::WindowsAndMessaging::{GetClassNameW, IsWindow, SendMessageW};
 
 #[cfg(target_os = "windows")]
 #[derive(Clone, Copy)]
@@ -41,12 +39,18 @@ impl StreamingOutput {
     }
 
     pub fn reset(&self) {
-        *self.last_displayed.lock().unwrap() = String::new();
-        *self.last_raw.lock().unwrap() = String::new();
-        *self.last_ai_polished_src.lock().unwrap() = String::new();
+        if let Ok(mut last) = self.last_displayed.lock() {
+            *last = String::new();
+        }
+        if let Ok(mut last) = self.last_raw.lock() {
+            *last = String::new();
+        }
+        if let Ok(mut last) = self.last_ai_polished_src.lock() {
+            *last = String::new();
+        }
         #[cfg(target_os = "windows")]
-        {
-            *self.anchor.lock().unwrap() = None;
+        if let Ok(mut anchor) = self.anchor.lock() {
+            *anchor = None;
         }
     }
 
@@ -54,24 +58,26 @@ impl StreamingOutput {
         #[cfg(target_os = "windows")]
         {
             if let Some(a) = capture_edit_anchor() {
-                *self.anchor.lock().unwrap() = Some(a);
+                if let Ok(mut anchor) = self.anchor.lock() {
+                    *anchor = Some(a);
+                }
             }
         }
     }
 
-    /// 服务端全量文本 → 按后处理模式显示；AI 模式在结束时异步润色并覆盖
     pub fn apply_full_text(self: &Arc<Self>, raw_text: &str, config: &Arc<ConfigManager>, is_final: bool) {
         let trimmed = raw_text.trim();
         if trimmed.is_empty() {
             return;
         }
 
-        {
-            let mut last_raw = self.last_raw.lock().unwrap();
+        if let Ok(mut last_raw) = self.last_raw.lock() {
             if *last_raw == trimmed && !is_final {
                 return;
             }
             *last_raw = trimmed.to_string();
+        } else {
+            return;
         }
 
         let display = post_process::process_streaming_text(trimmed, config);
@@ -82,12 +88,14 @@ impl StreamingOutput {
         }
     }
 
-    /// 会话结束时补一次 AI 润色（防止未收到 is_final 尾包）
     pub fn finalize_ai_polish(self: &Arc<Self>, config: &Arc<ConfigManager>) {
         if config.streaming_post_process_mode() != STREAMING_POST_AI {
             return;
         }
-        let raw = self.last_raw.lock().unwrap().clone();
+        let raw = match self.last_raw.lock() {
+            Ok(g) => g.clone(),
+            Err(_) => return,
+        };
         if raw.is_empty() {
             return;
         }
@@ -96,7 +104,9 @@ impl StreamingOutput {
 
     fn spawn_ai_polish(self: &Arc<Self>, raw: &str, config: Arc<ConfigManager>) {
         {
-            let mut guard = self.last_ai_polished_src.lock().unwrap();
+            let Ok(mut guard) = self.last_ai_polished_src.lock() else {
+                return;
+            };
             if *guard == raw {
                 return;
             }
@@ -114,7 +124,7 @@ impl StreamingOutput {
                 Err(e) => {
                     crate::utils::logger::write_log(
                         crate::utils::logger::LogLevel::WARN,
-                        &format!("AI 润色失败，保留原文: {}", e),
+                        &format!("AI polish failed, keeping raw: {}", e),
                         Some(&config),
                     );
                 }
@@ -123,7 +133,9 @@ impl StreamingOutput {
     }
 
     fn replace_display(&self, display: &str) {
-        let mut last = self.last_displayed.lock().unwrap();
+        let Ok(mut last) = self.last_displayed.lock() else {
+            return;
+        };
         if *last == display {
             return;
         }
@@ -139,13 +151,16 @@ impl StreamingOutput {
 }
 
 fn utf16_len(s: &str) -> u32 {
-    s.encode_utf16().count() as u32
+    s.encode_utf16().count().min(16_384) as u32
 }
 
 fn replace_session_text(prev_utf16: u32, new_text: &str, output: &StreamingOutput) -> bool {
     #[cfg(target_os = "windows")]
     {
-        let anchor = output.anchor.lock().unwrap().clone();
+        let anchor = match output.anchor.lock() {
+            Ok(g) => g.clone(),
+            Err(_) => return false,
+        };
         if let Some(a) = anchor {
             return replace_via_edit(&a, prev_utf16, new_text);
         }
@@ -157,8 +172,8 @@ fn replace_session_text(prev_utf16: u32, new_text: &str, output: &StreamingOutpu
 #[cfg(target_os = "windows")]
 fn capture_edit_anchor() -> Option<EditAnchor> {
     unsafe {
-        let hwnd = GetFocus();
-        if hwnd.0 == 0 {
+        let hwnd = crate::win_utils::get_focused_hwnd_cross_thread()?;
+        if !IsWindow(hwnd).as_bool() || !is_edit_like(hwnd) {
             return None;
         }
         let ret = SendMessageW(hwnd, EM_GETSEL, WPARAM(0), LPARAM(0));
@@ -168,8 +183,27 @@ fn capture_edit_anchor() -> Option<EditAnchor> {
 }
 
 #[cfg(target_os = "windows")]
+fn is_edit_like(hwnd: HWND) -> bool {
+    unsafe {
+        let mut buf = [0u16; 64];
+        let len = GetClassNameW(hwnd, &mut buf);
+        if len == 0 {
+            return false;
+        }
+        let name = String::from_utf16_lossy(&buf[..len as usize]);
+        name == "Edit"
+            || name.starts_with("RichEdit")
+            || name == "RICHEDIT50W"
+            || name.contains("Edit")
+    }
+}
+
+#[cfg(target_os = "windows")]
 fn replace_via_edit(anchor: &EditAnchor, prev_utf16: u32, new_text: &str) -> bool {
     unsafe {
+        if !IsWindow(anchor.hwnd).as_bool() {
+            return false;
+        }
         let end = anchor.start.saturating_add(prev_utf16);
         SendMessageW(
             anchor.hwnd,
@@ -178,13 +212,13 @@ fn replace_via_edit(anchor: &EditAnchor, prev_utf16: u32, new_text: &str) -> boo
             LPARAM(end as isize),
         );
         let wide: Vec<u16> = new_text.encode_utf16().chain(std::iter::once(0)).collect();
-        SendMessageW(
+        let replaced = SendMessageW(
             anchor.hwnd,
             EM_REPLACESEL,
             WPARAM(1),
             LPARAM(wide.as_ptr() as isize),
         );
-        true
+        replaced.0 != 0
     }
 }
 

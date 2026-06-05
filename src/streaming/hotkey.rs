@@ -66,12 +66,17 @@ fn run_hook_thread(
             return CallNextHookEx(None, code, wparam, lparam);
         }
 
-        let cfg = CFG.get().expect("cfg");
+        let Some(cfg) = CFG.get() else {
+            return CallNextHookEx(None, code, wparam, lparam);
+        };
         let tx = TX
             .get()
             .and_then(|m| m.lock().ok())
             .and_then(|g| g.clone());
 
+        if lparam.0 == 0 {
+            return CallNextHookEx(None, code, wparam, lparam);
+        }
         let kb = *(lparam.0 as *const KBDLLHOOKSTRUCT);
         let vk = kb.vkCode;
         let target = cfg.streaming_hotkey();

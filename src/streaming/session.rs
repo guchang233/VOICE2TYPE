@@ -110,12 +110,17 @@ impl StreamingSession {
                 }
 
                 let chunk_f32 = {
-                    let mut buf = pcm_buf.lock().unwrap();
+                    let Ok(mut buf) = pcm_buf.lock() else {
+                        break;
+                    };
                     if buf.is_empty() {
                         continue;
                     }
-                    let take = ((buf.len() as u64 * TARGET_RATE as u64) / rate as u64)
-                        .max(1) as usize;
+                    let take = if rate == 0 {
+                        buf.len()
+                    } else {
+                        ((buf.len() as u64 * TARGET_RATE as u64) / rate as u64).max(1) as usize
+                    };
                     let take = take.min(buf.len());
                     buf.drain(..take).collect::<Vec<_>>()
                 };
@@ -134,7 +139,9 @@ impl StreamingSession {
                     .collect();
 
                 let seq = {
-                    let mut s = seq_arc.lock().unwrap();
+                    let Ok(mut s) = seq_arc.lock() else {
+                        break;
+                    };
                     let cur = *s;
                     *s += 1;
                     cur

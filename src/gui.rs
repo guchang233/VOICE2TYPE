@@ -76,11 +76,11 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_streaming_post_ai])]
     pub streaming_post_ai_item: nwg::MenuItem,
 
-    #[nwg_control(parent: streaming_post_menu, text: "本地轻量修正", check: true)]
+    #[nwg_control(parent: streaming_post_menu, text: "本地轻量修正", check: false)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_streaming_post_local])]
     pub streaming_post_local_item: nwg::MenuItem,
 
-    #[nwg_control(parent: streaming_post_menu, text: "关闭后处理", check: false)]
+    #[nwg_control(parent: streaming_post_menu, text: "关闭后处理", check: true)]
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_streaming_post_none])]
     pub streaming_post_none_item: nwg::MenuItem,
 

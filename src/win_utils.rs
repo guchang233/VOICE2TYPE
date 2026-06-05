@@ -36,11 +36,16 @@ pub fn is_admin() -> bool {
     false
 }
 
+/// 单次 SendInput 事件上限，避免长文本/大量退格时 Vec 过大导致 OOM（release 下 panic=abort 会直接闪退）
+#[cfg(target_os = "windows")]
+const SENDINPUT_CHUNK: usize = 64;
+
 #[cfg(target_os = "windows")]
 pub unsafe fn send_backspaces(count: usize) {
     if count == 0 {
         return;
     }
+    let count = count.min(16_384);
     let vk_back = VIRTUAL_KEY(0x08);
     for _ in 0..count {
         let down = INPUT {
@@ -73,42 +78,70 @@ pub unsafe fn send_backspaces(count: usize) {
 
 #[cfg(target_os = "windows")]
 pub unsafe fn send_unicode_text(text: &str) {
-    let mut inputs = Vec::with_capacity(text.len() * 2);
-
-    for c in text.encode_utf16() {
-        // Key Down
-        let input_down = INPUT {
-            r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 {
-                ki: KEYBDINPUT {
-                    wVk: VIRTUAL_KEY(0),
-                    wScan: c,
-                    dwFlags: KEYEVENTF_UNICODE,
-                    time: 0,
-                    dwExtraInfo: 0,
-                },
-            },
-        };
-        inputs.push(input_down);
-
-        // Key Up
-        let input_up = INPUT {
-            r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 {
-                ki: KEYBDINPUT {
-                    wVk: VIRTUAL_KEY(0),
-                    wScan: c,
-                    dwFlags: KEYEVENTF_UNICODE | KEYEVENTF_KEYUP,
-                    time: 0,
-                    dwExtraInfo: 0,
-                },
-            },
-        };
-        inputs.push(input_up);
+    if text.is_empty() {
+        return;
     }
-
-    if !inputs.is_empty() {
+    let chars: Vec<u16> = text.encode_utf16().collect();
+    for chunk in chars.chunks(SENDINPUT_CHUNK) {
+        let mut inputs = Vec::with_capacity(chunk.len() * 2);
+        for &c in chunk {
+            inputs.push(INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: VIRTUAL_KEY(0),
+                        wScan: c,
+                        dwFlags: KEYEVENTF_UNICODE,
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
+            });
+            inputs.push(INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: VIRTUAL_KEY(0),
+                        wScan: c,
+                        dwFlags: KEYEVENTF_UNICODE | KEYEVENTF_KEYUP,
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
+            });
+        }
         SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+    }
+}
+
+/// 从当前前台窗口所属线程获取键盘焦点（跨线程 GetFocus 在 tokio 上会返回 NULL）
+#[cfg(target_os = "windows")]
+pub unsafe fn get_focused_hwnd_cross_thread() -> Option<windows::Win32::Foundation::HWND> {
+    use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+    use windows::Win32::UI::Input::KeyboardAndMouse::GetFocus;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowThreadProcessId,
+    };
+
+    let fg = GetForegroundWindow();
+    if fg.0 == 0 {
+        return None;
+    }
+    let fg_tid = GetWindowThreadProcessId(fg, None);
+    let cur_tid = GetCurrentThreadId();
+    let attached = if fg_tid != cur_tid {
+        AttachThreadInput(cur_tid, fg_tid, true).as_bool()
+    } else {
+        false
+    };
+    let focused = GetFocus();
+    if attached {
+        let _ = AttachThreadInput(cur_tid, fg_tid, false);
+    }
+    if focused.0 != 0 {
+        Some(focused)
+    } else {
+        None
     }
 }
 

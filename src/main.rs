@@ -338,7 +338,8 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
 
     let audio_buffer: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
     let audio_buffer_writer = audio_buffer.clone();
-    let channels_usize = channels as usize;
+    let channels_usize = channels.max(1) as usize;
+    let sample_rate = sample_rate.max(1);
 
     let mut streaming_session = streaming::StreamingSession::new(sample_rate);
     let streaming_pcm = streaming_session.pcm_buffer();
@@ -354,7 +355,7 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
                 return;
             }
 
-            let mono: Vec<f32> = if channels_usize > 1 {
+            let mono: Vec<f32> = if channels_usize > 1 && channels > 1 {
                 let scale = 1.0 / channels as f32;
                 data.chunks(channels_usize)
                     .map(|frame| frame.iter().sum::<f32>() * scale)

@@ -162,7 +162,7 @@ impl Default for StreamingConfig {
             allow_emoji: true,
             allow_punctuation: true,
             enable_indicator: true,
-            post_process_mode: STREAMING_POST_LOCAL.to_string(),
+            post_process_mode: STREAMING_POST_NONE.to_string(),
         }
     }
 }
@@ -341,7 +341,7 @@ impl AppConfig {
     fn normalize_streaming_post_process_mode(mode: &str) -> String {
         match mode {
             STREAMING_POST_AI | STREAMING_POST_LOCAL | STREAMING_POST_NONE => mode.to_string(),
-            _ => STREAMING_POST_LOCAL.to_string(),
+            _ => STREAMING_POST_NONE.to_string(),
         }
     }
 }
