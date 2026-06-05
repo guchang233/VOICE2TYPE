@@ -37,6 +37,41 @@ pub fn is_admin() -> bool {
 }
 
 #[cfg(target_os = "windows")]
+pub unsafe fn send_backspaces(count: usize) {
+    if count == 0 {
+        return;
+    }
+    let vk_back = VIRTUAL_KEY(0x08);
+    for _ in 0..count {
+        let down = INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: vk_back,
+                    wScan: 0,
+                    dwFlags: KEYBD_EVENT_FLAGS(0),
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        };
+        let up = INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: vk_back,
+                    wScan: 0,
+                    dwFlags: KEYEVENTF_KEYUP,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        };
+        SendInput(&[down, up], std::mem::size_of::<INPUT>() as i32);
+    }
+}
+
+#[cfg(target_os = "windows")]
 pub unsafe fn send_unicode_text(text: &str) {
     let mut inputs = Vec::with_capacity(text.len() * 2);
 

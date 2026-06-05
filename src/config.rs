@@ -9,6 +9,18 @@ pub const MODEL_WHISPER: &str = "whisper-large-v3";
 pub const MODEL_LOCAL_WHISPER: &str = "local-whisper";
 pub const MODEL_CUSTOM: &str = "custom";
 
+/// 豆包大模型流式语音识别 WebSocket 路径（双向流式）
+pub const STREAMING_ASR_URI: &str = "/api/v3/sauc/bigmodel";
+pub const STREAMING_RESOURCE_BIGASR_DURATION: &str = "volc.bigasr.sauc.duration";
+pub const STREAMING_RESOURCE_SEEDASR_DURATION: &str = "volc.seedasr.sauc.duration";
+
+/// 流式后处理：AI 润色（硅基流动 / Groq）
+pub const STREAMING_POST_AI: &str = "ai";
+/// 流式后处理：本地轻量规则
+pub const STREAMING_POST_LOCAL: &str = "local";
+/// 流式后处理：关闭
+pub const STREAMING_POST_NONE: &str = "none";
+
 const SILICONFLOW_TRANSCRIPTIONS_URL: &str = "https://api.siliconflow.cn/v1/audio/transcriptions";
 const GROQ_TRANSCRIPTIONS_URL: &str = "https://api.groq.com/openai/v1/audio/transcriptions";
 
@@ -98,6 +110,7 @@ impl Default for UpdateConfig {
 pub struct ModelConfig {
     pub siliconflow_api_key: String,
     pub groq_api_key: String,
+    pub doubao_api_key: String,
     pub custom_api_key: String,
     pub custom_api_url: String,
     pub custom_model_name: String,
@@ -112,11 +125,44 @@ impl Default for ModelConfig {
         Self {
             siliconflow_api_key: String::new(),
             groq_api_key: String::new(),
+            doubao_api_key: String::new(),
             custom_api_key: String::new(),
             custom_api_url: SILICONFLOW_TRANSCRIPTIONS_URL.to_string(),
             custom_model_name: "自定义模型".to_string(),
             local_whisper_model: "ggml-base.bin".to_string(),
             local_whisper_dir: String::new(),
+        }
+    }
+}
+
+/// 流式语音识别（豆包）独立配置，与录音文件识别模式隔离。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct StreamingConfig {
+    pub hotkey: u32,
+    pub trigger_mode: String,
+    pub resource_id: String,
+    pub model_name: String,
+    pub output_language: String,
+    pub allow_emoji: bool,
+    pub allow_punctuation: bool,
+    pub enable_indicator: bool,
+    /// ai | local | none
+    pub post_process_mode: String,
+}
+
+impl Default for StreamingConfig {
+    fn default() -> Self {
+        Self {
+            hotkey: 0x75, // F6
+            trigger_mode: "hold".to_string(),
+            resource_id: STREAMING_RESOURCE_BIGASR_DURATION.to_string(),
+            model_name: "bigmodel".to_string(),
+            output_language: String::new(),
+            allow_emoji: true,
+            allow_punctuation: true,
+            enable_indicator: true,
+            post_process_mode: STREAMING_POST_LOCAL.to_string(),
         }
     }
 }
@@ -147,6 +193,7 @@ pub struct AppConfig {
     pub advanced: AdvancedConfig,
     pub update: UpdateConfig,
     pub model: ModelConfig,
+    pub streaming: StreamingConfig,
     pub indicator: IndicatorConfig,
 
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -199,6 +246,7 @@ impl Default for AppConfig {
             advanced: AdvancedConfig::default(),
             update: UpdateConfig::default(),
             model: ModelConfig::default(),
+            streaming: StreamingConfig::default(),
             indicator: IndicatorConfig::default(),
             model_name: None,
             output_language: None,
@@ -285,6 +333,15 @@ impl AppConfig {
         }
         if let Some(value) = self.indicator_success_duration.take() {
             self.indicator.success_duration = value;
+        }
+        self.streaming.post_process_mode =
+            Self::normalize_streaming_post_process_mode(&self.streaming.post_process_mode);
+    }
+
+    fn normalize_streaming_post_process_mode(mode: &str) -> String {
+        match mode {
+            STREAMING_POST_AI | STREAMING_POST_LOCAL | STREAMING_POST_NONE => mode.to_string(),
+            _ => STREAMING_POST_LOCAL.to_string(),
         }
     }
 }
@@ -401,6 +458,82 @@ impl ConfigManager {
 
     pub fn set_groq_api_key(&self, key: String) {
         self.config.lock().unwrap().model.groq_api_key = key;
+    }
+
+    pub fn get_doubao_api_key(&self) -> String {
+        self.config.lock().unwrap().model.doubao_api_key.clone()
+    }
+
+    pub fn set_doubao_api_key(&self, key: String) {
+        self.config.lock().unwrap().model.doubao_api_key = key;
+    }
+
+    pub fn streaming_hotkey(&self) -> u32 {
+        self.config.lock().unwrap().streaming.hotkey
+    }
+
+    pub fn set_streaming_hotkey(&self, vk: u32) {
+        self.config.lock().unwrap().streaming.hotkey = vk;
+    }
+
+    pub fn streaming_trigger_mode(&self) -> String {
+        self.config.lock().unwrap().streaming.trigger_mode.clone()
+    }
+
+    pub fn set_streaming_trigger_mode(&self, mode: String) {
+        self.config.lock().unwrap().streaming.trigger_mode = mode;
+    }
+
+    pub fn streaming_resource_id(&self) -> String {
+        self.config.lock().unwrap().streaming.resource_id.clone()
+    }
+
+    pub fn set_streaming_resource_id(&self, id: String) {
+        self.config.lock().unwrap().streaming.resource_id = id;
+    }
+
+    pub fn streaming_model_name(&self) -> String {
+        self.config.lock().unwrap().streaming.model_name.clone()
+    }
+
+    pub fn streaming_output_language(&self) -> String {
+        self.config.lock().unwrap().streaming.output_language.clone()
+    }
+
+    pub fn set_streaming_output_language(&self, lang: String) {
+        self.config.lock().unwrap().streaming.output_language = lang;
+    }
+
+    pub fn streaming_allow_emoji(&self) -> bool {
+        self.config.lock().unwrap().streaming.allow_emoji
+    }
+
+    pub fn set_streaming_allow_emoji(&self, allow: bool) {
+        self.config.lock().unwrap().streaming.allow_emoji = allow;
+    }
+
+    pub fn streaming_allow_punctuation(&self) -> bool {
+        self.config.lock().unwrap().streaming.allow_punctuation
+    }
+
+    pub fn set_streaming_allow_punctuation(&self, allow: bool) {
+        self.config.lock().unwrap().streaming.allow_punctuation = allow;
+    }
+
+    pub fn streaming_enable_indicator(&self) -> bool {
+        self.config.lock().unwrap().streaming.enable_indicator
+    }
+
+    pub fn set_streaming_enable_indicator(&self, enable: bool) {
+        self.config.lock().unwrap().streaming.enable_indicator = enable;
+    }
+
+    pub fn streaming_post_process_mode(&self) -> String {
+        self.config.lock().unwrap().streaming.post_process_mode.clone()
+    }
+
+    pub fn set_streaming_post_process_mode(&self, mode: String) {
+        self.config.lock().unwrap().streaming.post_process_mode = mode;
     }
 
     pub fn get_api_url(&self) -> String {

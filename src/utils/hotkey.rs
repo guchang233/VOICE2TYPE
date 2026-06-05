@@ -25,10 +25,8 @@ pub enum InputMessage {
 pub fn start_hotkey_listener(tx: mpsc::Sender<InputMessage>, config: Arc<ConfigManager>) {
     thread::spawn(move || {
         let vk_esc = VIRTUAL_KEY(0x1B);
-        let vk_f6 = VIRTUAL_KEY(0x75);
         let mut is_pressed = false;
         let mut is_recording = false;
-        let mut f6_pressed = false;
         let mut last_stop_time: Option<Instant> = None;
 
         loop {
@@ -38,14 +36,6 @@ pub fn start_hotkey_listener(tx: mpsc::Sender<InputMessage>, config: Arc<ConfigM
 
             let main_down = unsafe { (GetAsyncKeyState(vk_main.0 as i32) as u16 & 0x8000) != 0 };
             let esc_down = unsafe { (GetAsyncKeyState(vk_esc.0 as i32) as u16 & 0x8000) != 0 };
-            let f6_down = unsafe { (GetAsyncKeyState(vk_f6.0 as i32) as u16 & 0x8000) != 0 };
-
-            if f6_down && !f6_pressed {
-                f6_pressed = true;
-            } else if !f6_down {
-                f6_pressed = false;
-            }
-
             if trigger_mode == "hold" {
                 // 按住输入模式
                 if main_down {

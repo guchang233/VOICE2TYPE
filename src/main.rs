@@ -8,6 +8,7 @@ mod history;
 mod indicator;
 mod notify;
 mod output;
+mod streaming;
 mod update;
 mod utils;
 mod whisper_local;
@@ -51,7 +52,7 @@ use utils::logger::{
 use once_cell::sync::{Lazy, OnceCell};
 
 #[cfg(target_os = "windows")]
-static INDICATOR: OnceCell<StatusIndicator> = OnceCell::new();
+pub static INDICATOR: OnceCell<StatusIndicator> = OnceCell::new();
 
 #[cfg(target_os = "windows")]
 use std::sync::Mutex as StdMutex;
@@ -301,6 +302,10 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
         " 选中目标输入框，按住热键说话，松开后文字将自动输入",
         Some(&config),
     );
+    write_log_line(
+        " 流式识别：默认按住 F6 边说边出字（菜单「流式语音识别」可改）",
+        Some(&config),
+    );
     write_log_line(" 若想取消录音，在按住热键时按下 ESC 即可", Some(&config));
     write_log_line(
         &format!(" 当前版本: {}", env!("CARGO_PKG_VERSION")),
@@ -335,26 +340,40 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
     let audio_buffer_writer = audio_buffer.clone();
     let channels_usize = channels as usize;
 
+    let mut streaming_session = streaming::StreamingSession::new(sample_rate);
+    let streaming_pcm = streaming_session.pcm_buffer();
+
     // 创建输入流
     let config_clone = config.clone();
     let input_stream = device.build_input_stream(
         &stream_config,
         move |data: &[f32], _: &_| {
-            if !IS_RECORDING.load(Ordering::Relaxed) {
+            let streaming = streaming::IS_STREAMING.load(Ordering::Relaxed);
+            let recording = IS_RECORDING.load(Ordering::Relaxed);
+            if !streaming && !recording {
+                return;
+            }
+
+            let mono: Vec<f32> = if channels_usize > 1 {
+                let scale = 1.0 / channels as f32;
+                data.chunks(channels_usize)
+                    .map(|frame| frame.iter().sum::<f32>() * scale)
+                    .collect()
+            } else {
+                data.to_vec()
+            };
+
+            if streaming {
+                if let Ok(mut buffer) = streaming_pcm.lock() {
+                    buffer.extend_from_slice(&mono);
+                }
+            }
+
+            if !recording {
                 return;
             }
             if let Ok(mut buffer) = audio_buffer_writer.lock() {
-                if channels_usize > 1 {
-                    // 混音到单声道，直接写入缓冲区，避免每帧分配临时 Vec
-                    buffer.reserve(data.len() / channels_usize);
-                    let scale = 1.0 / channels as f32;
-                    for frame in data.chunks(channels_usize) {
-                        let sum: f32 = frame.iter().sum();
-                        buffer.push(sum * scale);
-                    }
-                } else {
-                    buffer.extend_from_slice(data);
-                }
+                buffer.extend_from_slice(&mono);
             }
         },
         move |err| {
@@ -372,10 +391,14 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
     // 通信通道
     let (tx, mut rx) = mpsc::channel(100);
 
-    // 启动热键监听线程
+    // 启动热键监听线程（录音文件识别）
     let tx_clone = tx.clone();
     let config_for_hotkey = config.clone();
     utils::hotkey::start_hotkey_listener(tx_clone, config_for_hotkey);
+
+    // 流式识别热键与事件
+    let (stream_tx, mut stream_rx) = mpsc::channel(32);
+    streaming::start_streaming_hotkey_listener(stream_tx, config.clone());
 
     // 异步事件循环
     let app_state = Arc::new(Mutex::new(AppState::Idle));
@@ -386,9 +409,44 @@ async fn async_main(config: Arc<ConfigManager>) -> Result<()> {
 
     loop {
         tokio::select! {
+            Some(stream_msg) = stream_rx.recv() => {
+                use streaming::StreamingInputMessage;
+                match stream_msg {
+                    StreamingInputMessage::Start => {
+                        let file_busy = {
+                            let st = app_state.lock().unwrap();
+                            *st == AppState::Recording || *st == AppState::Processing
+                        };
+                        if file_busy {
+                            notify::queue_tray_message(
+                                "流式识别",
+                                "录音文件识别进行中，请结束后再使用流式识别。",
+                            );
+                            continue;
+                        }
+                        if let Err(e) = streaming_session.start(config.clone()).await {
+                            write_log(LogLevel::ERROR, &format!("流式启动失败: {}", e), Some(&config));
+                            notify::queue_tray_message("流式识别", &e.to_string());
+                        }
+                    }
+                    StreamingInputMessage::Stop => {
+                        streaming_session.stop(&config).await;
+                    }
+                    StreamingInputMessage::Cancel => {
+                        streaming_session.cancel(&config).await;
+                    }
+                }
+            }
             Some(msg) = rx.recv() => {
                 match msg {
                     InputMessage::StartRecording => {
+                        if streaming::IS_STREAMING.load(Ordering::Relaxed) {
+                            notify::queue_tray_message(
+                                "Voice2Type",
+                                "流式识别进行中，请结束后再录音。",
+                            );
+                            continue;
+                        }
                         let is_processing = {
                             let st = app_state.lock().unwrap();
                             *st == AppState::Processing

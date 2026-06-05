@@ -37,8 +37,78 @@ pub struct Voice2TypeApp {
     #[nwg_control(popup: true)]
     pub tray_menu: nwg::Menu,
 
-    #[nwg_control(parent: tray_menu, text: "语音转文字")]
+    #[nwg_control(parent: tray_menu, text: "语音转文字（录音识别）")]
     pub voice_menu: nwg::Menu,
+
+    #[nwg_control(parent: tray_menu, text: "流式语音识别")]
+    pub streaming_menu: nwg::Menu,
+
+    #[nwg_control(parent: streaming_menu, text: "触发模式")]
+    pub streaming_trigger_menu: nwg::Menu,
+
+    #[nwg_control(parent: streaming_trigger_menu, text: "按住说话", check: true)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_streaming_trigger_hold])]
+    pub streaming_trigger_hold_item: nwg::MenuItem,
+
+    #[nwg_control(parent: streaming_trigger_menu, text: "按一下开始/结束", check: false)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_streaming_trigger_toggle])]
+    pub streaming_trigger_toggle_item: nwg::MenuItem,
+
+    #[nwg_control(parent: streaming_menu, text: "通用设置")]
+    pub streaming_general_menu: nwg::Menu,
+
+    #[nwg_control(parent: streaming_general_menu, text: "状态浮窗", check: true)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_streaming_indicator])]
+    pub streaming_indicator_item: nwg::MenuItem,
+
+    #[nwg_control(parent: streaming_general_menu, text: "保留标点", check: true)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_streaming_punctuation])]
+    pub streaming_allow_punct_item: nwg::MenuItem,
+
+    #[nwg_control(parent: streaming_general_menu, text: "保留表情符号", check: true)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::toggle_streaming_emoji])]
+    pub streaming_allow_emoji_item: nwg::MenuItem,
+
+    #[nwg_control(parent: streaming_menu, text: "后处理模式")]
+    pub streaming_post_menu: nwg::Menu,
+
+    #[nwg_control(parent: streaming_post_menu, text: "AI 润色（硅基流动/Groq）", check: false)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_streaming_post_ai])]
+    pub streaming_post_ai_item: nwg::MenuItem,
+
+    #[nwg_control(parent: streaming_post_menu, text: "本地轻量修正", check: true)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_streaming_post_local])]
+    pub streaming_post_local_item: nwg::MenuItem,
+
+    #[nwg_control(parent: streaming_post_menu, text: "关闭后处理", check: false)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_streaming_post_none])]
+    pub streaming_post_none_item: nwg::MenuItem,
+
+    #[nwg_control(parent: streaming_menu, text: "识别语言")]
+    pub streaming_lang_menu: nwg::Menu,
+
+    #[nwg_control(parent: streaming_lang_menu, text: "自动", check: true)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_streaming_lang_auto])]
+    pub streaming_lang_auto_item: nwg::MenuItem,
+
+    #[nwg_control(parent: streaming_lang_menu, text: "中文", check: false)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_streaming_lang_zh])]
+    pub streaming_lang_zh_item: nwg::MenuItem,
+
+    #[nwg_control(parent: streaming_lang_menu, text: "English", check: false)]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::set_streaming_lang_en])]
+    pub streaming_lang_en_item: nwg::MenuItem,
+
+    #[nwg_control(parent: streaming_menu)]
+    pub sep_streaming: nwg::MenuSeparator,
+
+    #[nwg_control(parent: streaming_menu, text: "流式热键绑定...")]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_streaming_hotkey_window])]
+    pub streaming_hotkey_item: nwg::MenuItem,
+
+    #[nwg_control(parent: streaming_menu, text: "资源 ID...")]
+    #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::show_streaming_resource_window])]
+    pub streaming_resource_item: nwg::MenuItem,
 
     #[nwg_control(parent: voice_menu, text: "触发模式")]
     pub trigger_menu: nwg::Menu,
@@ -172,7 +242,7 @@ pub struct Voice2TypeApp {
     #[nwg_events(OnMenuItemSelected: [Voice2TypeApp::quit])]
     pub quit_item: nwg::MenuItem,
 
-    #[nwg_control(size: (580, 200), position: (300, 300), title: "API 密钥配置", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_control(size: (580, 260), position: (300, 300), title: "API 密钥配置", flags: "WINDOW", icon: Some(&data.icon))]
     #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_key_config_window])]
     pub key_config_window: nwg::Window,
 
@@ -195,8 +265,16 @@ pub struct Voice2TypeApp {
     #[nwg_layout_item(layout: key_config_layout, row: 1, col: 1)]
     pub key_groq_input: nwg::TextInput,
 
-    #[nwg_control(parent: key_config_window, text: "确认保存", font: Some(&data.font_medium))]
+    #[nwg_control(parent: key_config_window, text: "豆包流式 API Key:", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: key_config_layout, row: 2, col: 0)]
+    pub key_doubao_label: nwg::Label,
+
+    #[nwg_control(parent: key_config_window, text: "", font: Some(&data.font_normal))]
     #[nwg_layout_item(layout: key_config_layout, row: 2, col: 1)]
+    pub key_doubao_input: nwg::TextInput,
+
+    #[nwg_control(parent: key_config_window, text: "确认保存", font: Some(&data.font_medium))]
+    #[nwg_layout_item(layout: key_config_layout, row: 3, col: 1)]
     #[nwg_events(OnButtonClick: [Voice2TypeApp::save_key_config])]
     pub key_save_btn: nwg::Button,
 
@@ -220,6 +298,46 @@ pub struct Voice2TypeApp {
     #[nwg_layout_item(layout: hotkey_layout, row: 1, col: 1)]
     #[nwg_events(OnButtonClick: [Voice2TypeApp::save_hotkey_config])]
     pub hotkey_save_btn: nwg::Button,
+
+    #[nwg_control(size: (420, 160), position: (360, 360), title: "流式语音识别热键", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_streaming_hotkey_window])]
+    pub streaming_hotkey_window: nwg::Window,
+
+    #[nwg_layout(parent: streaming_hotkey_window, spacing: 10, margin: [20, 20, 20, 20])]
+    pub streaming_hotkey_layout: nwg::GridLayout,
+
+    #[nwg_control(parent: streaming_hotkey_window, text: "流式识别热键:", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: streaming_hotkey_layout, row: 0, col: 0)]
+    pub streaming_hotkey_label: nwg::Label,
+
+    #[nwg_control(parent: streaming_hotkey_window, font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: streaming_hotkey_layout, row: 0, col: 1, col_span: 2)]
+    pub streaming_hotkey_combo: nwg::ComboBox<String>,
+
+    #[nwg_control(parent: streaming_hotkey_window, text: "保存", font: Some(&data.font_medium))]
+    #[nwg_layout_item(layout: streaming_hotkey_layout, row: 1, col: 1)]
+    #[nwg_events(OnButtonClick: [Voice2TypeApp::save_streaming_hotkey_config])]
+    pub streaming_hotkey_save_btn: nwg::Button,
+
+    #[nwg_control(size: (480, 160), position: (340, 340), title: "流式识别资源 ID", flags: "WINDOW", icon: Some(&data.icon))]
+    #[nwg_events(OnWindowClose: [Voice2TypeApp::hide_streaming_resource_window])]
+    pub streaming_resource_window: nwg::Window,
+
+    #[nwg_layout(parent: streaming_resource_window, spacing: 10, margin: [20, 20, 20, 20])]
+    pub streaming_resource_layout: nwg::GridLayout,
+
+    #[nwg_control(parent: streaming_resource_window, text: "X-Api-Resource-Id:", font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: streaming_resource_layout, row: 0, col: 0)]
+    pub streaming_resource_label: nwg::Label,
+
+    #[nwg_control(parent: streaming_resource_window, font: Some(&data.font_normal))]
+    #[nwg_layout_item(layout: streaming_resource_layout, row: 0, col: 1)]
+    pub streaming_resource_combo: nwg::ComboBox<String>,
+
+    #[nwg_control(parent: streaming_resource_window, text: "保存", font: Some(&data.font_medium))]
+    #[nwg_layout_item(layout: streaming_resource_layout, row: 1, col: 1)]
+    #[nwg_events(OnButtonClick: [Voice2TypeApp::save_streaming_resource_config])]
+    pub streaming_resource_save_btn: nwg::Button,
 
     // --- 麦克风选择窗口 ---
     #[nwg_control(size: (480, 150), position: (350, 350), title: "选择麦克风", flags: "WINDOW", icon: Some(&data.icon))]
@@ -471,8 +589,69 @@ impl Voice2TypeApp {
             app.trigger_toggle_item.set_checked(false);
         }
 
+        let st_mode = config_manager.streaming_trigger_mode();
+        if st_mode == "toggle" {
+            app.streaming_trigger_hold_item.set_checked(false);
+            app.streaming_trigger_toggle_item.set_checked(true);
+        } else {
+            app.streaming_trigger_hold_item.set_checked(true);
+            app.streaming_trigger_toggle_item.set_checked(false);
+        }
+        app.streaming_indicator_item
+            .set_checked(config_manager.streaming_enable_indicator());
+        app.streaming_allow_punct_item
+            .set_checked(config_manager.streaming_allow_punctuation());
+        app.streaming_allow_emoji_item
+            .set_checked(config_manager.streaming_allow_emoji());
+        let st_lang = config_manager.streaming_output_language();
+        app.streaming_lang_auto_item.set_checked(st_lang.is_empty() || st_lang == "auto");
+        app.streaming_lang_zh_item.set_checked(st_lang == "zh");
+        app.streaming_lang_en_item.set_checked(st_lang == "en");
+
+        match config_manager.streaming_post_process_mode().as_str() {
+            crate::config::STREAMING_POST_AI => {
+                app.streaming_post_ai_item.set_checked(true);
+                app.streaming_post_local_item.set_checked(false);
+                app.streaming_post_none_item.set_checked(false);
+            }
+            crate::config::STREAMING_POST_NONE => {
+                app.streaming_post_ai_item.set_checked(false);
+                app.streaming_post_local_item.set_checked(false);
+                app.streaming_post_none_item.set_checked(true);
+            }
+            _ => {
+                app.streaming_post_ai_item.set_checked(false);
+                app.streaming_post_local_item.set_checked(true);
+                app.streaming_post_none_item.set_checked(false);
+            }
+        }
+
+        Voice2TypeApp::populate_hotkey_combo(
+            &app.streaming_hotkey_combo,
+            config_manager.streaming_hotkey(),
+            5,
+        );
+
+        let resources = [
+            ("豆包 ASR 1.0 小时版", crate::config::STREAMING_RESOURCE_BIGASR_DURATION),
+            ("豆包 ASR 1.0 并发版", "volc.bigasr.sauc.concurrent"),
+            ("豆包 ASR 2.0 小时版", crate::config::STREAMING_RESOURCE_SEEDASR_DURATION),
+            ("豆包 ASR 2.0 并发版", "volc.seedasr.sauc.concurrent"),
+        ];
+        let current_rid = config_manager.streaming_resource_id();
+        let mut rid_idx = 0usize;
+        for (i, (label, id)) in resources.iter().enumerate() {
+            app.streaming_resource_combo.push(label.to_string());
+            if *id == current_rid.as_str() {
+                rid_idx = i;
+            }
+        }
+        app.streaming_resource_combo.set_selection(Some(rid_idx));
+
         // 初始隐藏窗口
         app.hotkey_window.set_visible(false);
+        app.streaming_hotkey_window.set_visible(false);
+        app.streaming_resource_window.set_visible(false);
         app.whisper_window.set_visible(false);
         app.about_window.set_visible(false);
         app.current_ver_val.set_text(CURRENT_VERSION);
@@ -691,6 +870,211 @@ impl Voice2TypeApp {
         }
     }
 
+    fn populate_hotkey_combo(combo: &nwg::ComboBox<String>, current_vk: u32, default_index: usize) {
+        let hotkeys = [
+            ("F1", 0x70_u32),
+            ("F2", 0x71),
+            ("F3", 0x72),
+            ("F4", 0x73),
+            ("F5", 0x74),
+            ("F6", 0x75),
+            ("F7", 0x76),
+            ("F8", 0x77),
+            ("F9", 0x78),
+            ("F10", 0x79),
+            ("F11", 0x7A),
+            ("F12", 0x7B),
+            ("CAPS LOCK", 0x14),
+            ("LEFT CTRL", 0xA2),
+            ("RIGHT CTRL", 0xA3),
+            ("LEFT ALT", 0xA4),
+            ("RIGHT ALT", 0xA5),
+            ("V", 0x56),
+        ];
+        let mut selected = default_index;
+        for (i, (name, vk)) in hotkeys.iter().enumerate() {
+            combo.push(name.to_string());
+            if *vk == current_vk {
+                selected = i;
+            }
+        }
+        combo.set_selection(Some(selected));
+    }
+
+    fn hotkey_vk_list() -> Vec<u32> {
+        vec![
+            0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7A, 0x7B, 0x14, 0xA2,
+            0xA3, 0xA4, 0xA5, 0x56,
+        ]
+    }
+
+    fn set_streaming_trigger_hold(&self) {
+        self.streaming_trigger_hold_item.set_checked(true);
+        self.streaming_trigger_toggle_item.set_checked(false);
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            mgr.set_streaming_trigger_mode("hold".to_string());
+            mgr.save_or_notify();
+        }
+    }
+
+    fn set_streaming_trigger_toggle(&self) {
+        self.streaming_trigger_hold_item.set_checked(false);
+        self.streaming_trigger_toggle_item.set_checked(true);
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            mgr.set_streaming_trigger_mode("toggle".to_string());
+            mgr.save_or_notify();
+        }
+    }
+
+    fn toggle_streaming_indicator(&self) {
+        let new_state = !self.streaming_indicator_item.checked();
+        self.streaming_indicator_item.set_checked(new_state);
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            mgr.set_streaming_enable_indicator(new_state);
+            mgr.save_or_notify();
+        }
+    }
+
+    fn toggle_streaming_punctuation(&self) {
+        let new_state = !self.streaming_allow_punct_item.checked();
+        self.streaming_allow_punct_item.set_checked(new_state);
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            mgr.set_streaming_allow_punctuation(new_state);
+            mgr.save_or_notify();
+        }
+    }
+
+    fn toggle_streaming_emoji(&self) {
+        let new_state = !self.streaming_allow_emoji_item.checked();
+        self.streaming_allow_emoji_item.set_checked(new_state);
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            mgr.set_streaming_allow_emoji(new_state);
+            mgr.save_or_notify();
+        }
+    }
+
+    fn set_streaming_post_ai(&self) {
+        self.streaming_post_ai_item.set_checked(true);
+        self.streaming_post_local_item.set_checked(false);
+        self.streaming_post_none_item.set_checked(false);
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            mgr.set_streaming_post_process_mode(crate::config::STREAMING_POST_AI.to_string());
+            mgr.save_or_notify();
+        }
+    }
+
+    fn set_streaming_post_local(&self) {
+        self.streaming_post_ai_item.set_checked(false);
+        self.streaming_post_local_item.set_checked(true);
+        self.streaming_post_none_item.set_checked(false);
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            mgr.set_streaming_post_process_mode(crate::config::STREAMING_POST_LOCAL.to_string());
+            mgr.save_or_notify();
+        }
+    }
+
+    fn set_streaming_post_none(&self) {
+        self.streaming_post_ai_item.set_checked(false);
+        self.streaming_post_local_item.set_checked(false);
+        self.streaming_post_none_item.set_checked(true);
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            mgr.set_streaming_post_process_mode(crate::config::STREAMING_POST_NONE.to_string());
+            mgr.save_or_notify();
+        }
+    }
+
+    fn set_streaming_lang_auto(&self) {
+        if !self.streaming_lang_auto_item.checked() {
+            self.streaming_lang_auto_item.set_checked(true);
+            self.streaming_lang_zh_item.set_checked(false);
+            self.streaming_lang_en_item.set_checked(false);
+            if let Some(mgr) = &*self.config_manager.borrow() {
+                mgr.set_streaming_output_language("auto".to_string());
+                mgr.save_or_notify();
+            }
+        }
+    }
+
+    fn set_streaming_lang_zh(&self) {
+        if !self.streaming_lang_zh_item.checked() {
+            self.streaming_lang_zh_item.set_checked(true);
+            self.streaming_lang_auto_item.set_checked(false);
+            self.streaming_lang_en_item.set_checked(false);
+            if let Some(mgr) = &*self.config_manager.borrow() {
+                mgr.set_streaming_output_language("zh".to_string());
+                mgr.save_or_notify();
+            }
+        }
+    }
+
+    fn set_streaming_lang_en(&self) {
+        if !self.streaming_lang_en_item.checked() {
+            self.streaming_lang_en_item.set_checked(true);
+            self.streaming_lang_auto_item.set_checked(false);
+            self.streaming_lang_zh_item.set_checked(false);
+            if let Some(mgr) = &*self.config_manager.borrow() {
+                mgr.set_streaming_output_language("en".to_string());
+                mgr.save_or_notify();
+            }
+        }
+    }
+
+    fn show_streaming_hotkey_window(&self) {
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            Self::populate_hotkey_combo(
+                &self.streaming_hotkey_combo,
+                mgr.streaming_hotkey(),
+                5,
+            );
+        }
+        self.streaming_hotkey_window.set_visible(true);
+        self.streaming_hotkey_window.set_focus();
+    }
+
+    fn hide_streaming_hotkey_window(&self) {
+        self.streaming_hotkey_window.set_visible(false);
+    }
+
+    fn save_streaming_hotkey_config(&self) {
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            let vks = Self::hotkey_vk_list();
+            if let Some(idx) = self.streaming_hotkey_combo.selection() {
+                if idx < vks.len() {
+                    mgr.set_streaming_hotkey(vks[idx]);
+                    mgr.save_or_notify();
+                }
+            }
+        }
+        nwg::simple_message("已保存", "流式识别热键已保存，请重启程序后生效。");
+    }
+
+    fn show_streaming_resource_window(&self) {
+        self.streaming_resource_window.set_visible(true);
+        self.streaming_resource_window.set_focus();
+    }
+
+    fn hide_streaming_resource_window(&self) {
+        self.streaming_resource_window.set_visible(false);
+    }
+
+    fn save_streaming_resource_config(&self) {
+        let ids = [
+            crate::config::STREAMING_RESOURCE_BIGASR_DURATION,
+            "volc.bigasr.sauc.concurrent",
+            crate::config::STREAMING_RESOURCE_SEEDASR_DURATION,
+            "volc.seedasr.sauc.concurrent",
+        ];
+        if let Some(mgr) = &*self.config_manager.borrow() {
+            if let Some(idx) = self.streaming_resource_combo.selection() {
+                if idx < ids.len() {
+                    mgr.set_streaming_resource_id(ids[idx].to_string());
+                    mgr.save_or_notify();
+                }
+            }
+        }
+        nwg::simple_message("已保存", "流式识别资源 ID 已保存。");
+    }
+
     fn open_config_dir(&self) {
         if let Some(mgr) = &*self.config_manager.borrow() {
             let path = mgr.config_path();
@@ -865,6 +1249,7 @@ impl Voice2TypeApp {
         if let Some(mgr) = &*self.config_manager.borrow() {
             self.key_siliconflow_input.set_text(&mgr.get_siliconflow_api_key());
             self.key_groq_input.set_text(&mgr.get_groq_api_key());
+            self.key_doubao_input.set_text(&mgr.get_doubao_api_key());
         }
         self.key_config_window.set_visible(true);
         self.key_config_window.set_focus();
@@ -878,6 +1263,7 @@ impl Voice2TypeApp {
         if let Some(mgr) = &*self.config_manager.borrow() {
             mgr.set_siliconflow_api_key(self.key_siliconflow_input.text());
             mgr.set_groq_api_key(self.key_groq_input.text());
+            mgr.set_doubao_api_key(self.key_doubao_input.text());
             mgr.save_or_notify();
             nwg::simple_message("已保存", "API 密钥已保存。");
         }
