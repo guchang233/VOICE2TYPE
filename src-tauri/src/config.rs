@@ -120,6 +120,8 @@ pub struct ModelConfig {
     pub custom_model_name: String,
     pub local_whisper_model: String,
     pub local_whisper_dir: String,
+    /// 用户自定义的模型下载目录（为空时使用默认目录）
+    pub custom_models_dir: String,
 }
 
 impl Default for ModelConfig {
@@ -133,6 +135,7 @@ impl Default for ModelConfig {
             custom_model_name: "自定义模型".to_string(),
             local_whisper_model: "ggml-base.bin".to_string(),
             local_whisper_dir: String::new(),
+            custom_models_dir: String::new(),
         }
     }
 }
@@ -563,6 +566,11 @@ impl ConfigManager {
     }
 
     pub fn models_dir(&self) -> PathBuf {
+        // 优先使用用户自定义目录
+        let custom = self.config.lock().unwrap().model.custom_models_dir.clone();
+        if !custom.is_empty() && PathBuf::from(&custom).is_dir() {
+            return PathBuf::from(custom);
+        }
         if Self::is_e_drive_available() {
             PathBuf::from("E:\\Voice2Type\\models")
         } else {
@@ -572,6 +580,21 @@ impl ConfigManager {
                 .join("models");
             data_dir
         }
+    }
+
+    /// 获取当前生效的模型目录（只读，用于前端展示）
+    pub fn current_models_dir(&self) -> String {
+        self.models_dir().to_string_lossy().into_owned()
+    }
+
+    /// 设置自定义模型目录
+    pub fn set_custom_models_dir(&self, dir: String) {
+        self.config.lock().unwrap().model.custom_models_dir = dir;
+    }
+
+    /// 清除自定义模型目录（恢复默认）
+    pub fn clear_custom_models_dir(&self) {
+        self.config.lock().unwrap().model.custom_models_dir = String::new();
     }
 
     pub fn ensure_models_dir(&self) -> anyhow::Result<PathBuf> {

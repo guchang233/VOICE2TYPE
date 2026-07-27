@@ -21,9 +21,6 @@
                 <span class="app-title">Voice2Type</span>
             </div>
             <div class="titlebar-right">
-                <button class="icon-btn" id="btn-settings" title="设置">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                </button>
             </div>
         </div>
 
@@ -44,6 +41,10 @@
                 <div class="nav-item" data-view="logs">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
                     <span class="nav-label">日志</span>
+                </div>
+                <div class="nav-item" data-view="settings">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    <span class="nav-label">设置</span>
                 </div>
                 <div class="sidebar-toggle" id="sidebar-toggle" title="展开/收起侧边栏">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
@@ -99,10 +100,8 @@
                     <div class="view-header">
                         <h2>实时字幕</h2>
                         <div class="view-header-actions">
-                            <button class="primary-btn" id="toggle-subtitle-btn">
-                                <span class="btn-indicator"></span>
-                                开启实时字幕
-                            </button>
+                            <button class="primary-btn" id="btn-apply-subtitle" title="保存并应用到字幕窗口">应用设置</button>
+                            <button class="primary-btn" id="toggle-subtitle-btn"><span class="btn-indicator"></span>开启实时字幕</button>
                         </div>
                     </div>
 
@@ -278,6 +277,40 @@
                             </div>
                         </div>
 
+                        <div class="subtitle-cards subtitle-cards-full">
+                            <div class="subtitle-card">
+                                <h4 class="subtitle-card-title">窗口控制</h4>
+                                <p class="subtitle-tip subtitle-tip-left">需先开启实时字幕显示窗口后这些控制才会生效。OBS 捕捉兼容模式会关闭窗口透明，使 OBS 等录屏软件能稳定捕捉字幕内容。</p>
+                                <div class="subtitle-grid subtitle-grid-window-ctrl">
+                                    <div class="control-group">
+                                        <label>窗口置顶</label>
+                                        <div class="switch" id="subtitle-always-on-top" data-on="true">
+                                            <div class="switch-knob"></div>
+                                        </div>
+                                    </div>
+                                    <div class="control-group">
+                                        <label>点击穿透</label>
+                                        <div class="switch" id="subtitle-click-through" data-on="false">
+                                            <div class="switch-knob"></div>
+                                        </div>
+                                    </div>
+                                    <div class="control-group">
+                                        <label>OBS 捕捉兼容模式（关闭透明）</label>
+                                        <div class="switch" id="subtitle-obs-mode" data-on="false">
+                                            <div class="switch-knob"></div>
+                                        </div>
+                                    </div>
+                                    <div class="control-group subtitle-action-row">
+                                        <label>字幕窗口显示</label>
+                                        <div class="window-ctrl-buttons">
+                                            <button class="secondary-btn" id="btn-show-subtitle-window">显示字幕窗口</button>
+                                            <button class="secondary-btn" id="btn-hide-subtitle-window">隐藏字幕窗口</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="subtitle-toggle-section">
                             <p class="subtitle-tip">点击右上角「开启实时字幕」按钮开始 / 停止</p>
                         </div>
@@ -324,10 +357,10 @@
 
                 <div class="view" id="view-settings">
                     <div class="view-header">
-                        <button class="back-btn" id="btn-back">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
-                        </button>
                         <h2>设置</h2>
+                        <div class="view-header-actions">
+                            <button class="primary-btn" id="btn-save-settings">保存设置</button>
+                        </div>
                     </div>
                     <div class="settings-content">
                         <div class="settings-section">
@@ -445,14 +478,18 @@
 
                         <div class="settings-section">
                             <h3>模型管理</h3>
-                            <div class="setting-row">
+                            <div class="setting-row setting-row-vertical">
                                 <label>模型目录</label>
-                                <div class="path-display" id="models-dir-path">加载中...</div>
+                                <div class="models-dir-row">
+                                    <div class="path-display" id="models-dir-path">加载中...</div>
+                                    <button class="secondary-btn" id="btn-change-models-dir" title="更改模型下载目录">更改目录</button>
+                                    <button class="solid-btn" id="btn-reset-models-dir" title="恢复默认目录">恢复默认</button>
+                                </div>
                             </div>
                             <div class="setting-row">
                                 <label>下载 Whisper 模型</label>
-                                <div style="display: flex; gap: 8px; align-items: center;">
-                                    <select class="select-input" id="whisper-model-select" style="min-width: 120px;">
+                                <div class="download-model-row">
+                                    <select class="select-input download-model-select" id="whisper-model-select">
                                         <option value="tiny">Tiny (快速)</option>
                                         <option value="base" selected>Base (推荐)</option>
                                         <option value="small">Small (准确)</option>
@@ -463,24 +500,53 @@
                             </div>
                             <div class="setting-row" id="download-progress-row" style="display: none;">
                                 <label>下载进度</label>
-                                <div style="flex: 1; margin-left: 12px;">
+                                <div class="progress-row-inner">
                                     <div class="progress-bar-container">
                                         <div class="progress-bar" id="download-progress-bar" style="width: 0%"></div>
                                     </div>
                                     <div class="progress-text" id="download-progress-text">0%</div>
                                 </div>
                             </div>
-                            <div class="setting-row" style="flex-direction: column; align-items: flex-start;">
-                                <label style="margin-bottom: 8px;">已下载模型</label>
+                            <div class="setting-row setting-row-vertical">
+                                <label>已下载模型</label>
                                 <div class="downloaded-models-list" id="downloaded-models-list">
-                                    <span style="color: var(--text-tertiary); font-size: 12px;">加载中...</span>
+                                    <span class="empty-hint">加载中...</span>
                                 </div>
                             </div>
                         </div>
 
-                    </div>
-                    <div class="settings-actions">
-                        <button class="primary-btn" id="btn-save-settings">保存设置</button>
+                        <div class="settings-section">
+                            <h3>关于与更新</h3>
+                            <div class="setting-row">
+                                <label>当前版本</label>
+                                <span id="app-version-text" class="version-text">-</span>
+                            </div>
+                            <div class="setting-row">
+                                <label>最新版本</label>
+                                <span id="latest-version-text" class="version-text">-</span>
+                            </div>
+                            <div class="setting-row" id="update-status-row" style="display: none;">
+                                <label>更新状态</label>
+                                <span id="update-status-text" class="update-status-text">-</span>
+                            </div>
+                            <div class="setting-row setting-row-vertical" id="update-progress-row" style="display: none;">
+                                <label>下载进度</label>
+                                <div class="progress-container progress-container-full">
+                                    <div class="progress-bar" id="update-progress-bar" style="width: 0%"></div>
+                                </div>
+                                <div class="progress-text" id="update-progress-text">0%</div>
+                            </div>
+                            <div class="setting-row update-actions-row" id="update-actions-row">
+                                <button class="secondary-btn" id="btn-check-update">检查更新</button>
+                                <button class="primary-btn" id="btn-download-update" style="display: none;">下载并安装</button>
+                                <button class="primary-btn" id="btn-restart-app" style="display: none;">重启应用</button>
+                            </div>
+                            <div class="setting-row setting-row-vertical" id="update-notes-row" style="display: none;">
+                                <label>更新内容</label>
+                                <div id="update-notes-content" class="update-notes-box"></div>
+                            </div>
+                        </div>
+
                     </div>
                 </div>
             </main>

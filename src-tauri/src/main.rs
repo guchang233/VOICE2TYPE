@@ -35,6 +35,17 @@ pub static LOG_MENU_NEEDS_UNCHECK: AtomicBool = AtomicBool::new(false);
 pub fn request_uncheck_log_menu() {}
 
 fn main() {
+    // 必须在任何 WebView2 初始化之前设置环境变量
+    // 禁用 DirectComposition 后，WebView2 回退到 GDI 合成，OBS 等录屏软件的
+    // Window Capture (BitBlt) 才能正常捕捉窗口内容（否则会捕捉到纯黑画面）。
+    // 副作用：Tauri 透明窗口效果失效，因此 tauri.conf.json 中窗口 transparent 必须为 false。
+    if std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").is_err() {
+        std::env::set_var(
+            "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+            "--disable-direct-composition",
+        );
+    }
+
     let _ = env_logger::try_init();
 
     let config_manager = Arc::new(ConfigManager::new());
@@ -56,6 +67,8 @@ fn main() {
             commands::get_config,
             commands::save_config,
             commands::get_models_dir,
+            commands::pick_models_directory,
+            commands::reset_models_directory,
             commands::start_recording,
             commands::stop_recording,
             commands::cancel_recording,
@@ -71,6 +84,16 @@ fn main() {
             commands::toggle_subtitle,
             commands::download_whisper_model,
             commands::list_available_models,
+            commands::check_update,
+            commands::download_and_install_update,
+            commands::restart_app,
+            commands::get_app_version,
+            commands::set_subtitle_always_on_top,
+            commands::set_subtitle_click_through,
+            commands::show_subtitle_window,
+            commands::push_subtitle_config,
+            commands::get_subtitle_window_status,
+            commands::set_subtitle_obs_mode,
         ])
         .setup(move |app| {
             let app_handle = app.handle();

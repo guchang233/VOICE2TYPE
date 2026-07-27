@@ -10,10 +10,20 @@
             height: 100%;
             width: 100%;
             overflow: hidden;
-            background: transparent;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+            /* 窗口已设为 transparent: false + DComp 已禁用，
+               这里用黑色作为窗口底色，让字幕窗口"融入"深色桌面背景，
+               同时保证 OBS 捕捉时不会显示为白色窗口。 */
+            background: #000;
+            font-family: "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont,
+                         "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
             -webkit-user-select: none;
             user-select: none;
+        }
+        /* OBS 捕捉兼容模式：保留语义标记（实际视觉与默认一致，因窗口本身已不透明且为黑色）。
+           保留此类用于未来扩展或保持 UI 开关状态与 CSS 联动。 */
+        body.obs-mode #subtitle-container {
+            -webkit-app-region: no-drag;
+            app-region: no-drag;
         }
         #subtitle-container {
             height: 100%;
@@ -166,6 +176,12 @@
         listen('subtitle-config', (event) => {
             const cfg = event.payload;
             applyConfig(cfg);
+        });
+
+        // OBS 捕捉兼容模式：切换 body 透明背景
+        listen('subtitle-obs-mode', (event) => {
+            const { enabled } = event.payload;
+            document.body.classList.toggle('obs-mode', !!enabled);
         });
     </script>
 </body>

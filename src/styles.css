@@ -9,6 +9,7 @@
     --text-primary: #fafafa;
     --text-secondary: #a1a1aa;
     --text-tertiary: #52525b;
+    --text-tertiary-strong: #6b6b73;
     --accent: #3b82f6;
     --accent-hover: #60a5fa;
     --accent-active: #2563eb;
@@ -19,10 +20,22 @@
     --accent-red: #ef4444;
     --accent-yellow: #eab308;
     --accent-green: #22c55e;
+    --accent-cyan: #06b6d4;
+    --accent-cyan-soft: rgba(6, 182, 212, 0.15);
+    --accent-purple: #a855f7;
+    --accent-purple-soft: rgba(168, 85, 247, 0.15);
     --radius-sm: 4px;
     --radius-md: 6px;
     --radius-lg: 8px;
     --transition: 0.15s ease;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
+    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.4);
+    --shadow-glow-blue: 0 0 0 3px rgba(59, 130, 246, 0.25);
+    --font-sans: "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont,
+                 "Helvetica Neue", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei",
+                 sans-serif;
+    --font-mono: "JetBrains Mono", "Cascadia Code", "SF Mono", "Consolas", Menlo, monospace;
 }
 
 * {
@@ -36,7 +49,7 @@ html, body {
     width: 100%;
     overflow: hidden;
     background: var(--bg-primary);
-    font-family: "SF Pro Display", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Roboto, sans-serif;
+    font-family: var(--font-sans);
     font-size: 13px;
     color: var(--text-primary);
     -webkit-font-smoothing: antialiased;
@@ -58,8 +71,9 @@ html, body {
     align-items: center;
     justify-content: space-between;
     padding: 0 12px;
-    background: var(--bg-secondary);
+    background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-secondary) 100%);
     border-bottom: 1px solid var(--border-color);
+    box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.02);
     flex-shrink: 0;
 }
 
@@ -169,11 +183,16 @@ html, body {
     align-items: center;
     justify-content: flex-start;
     gap: 10px;
+    /* 展开时 padding 12px；收起时过渡到 9px 让图标居中 */
+    /* 收起计算：侧边栏 56px - sidebar padding 16px - border 2px = 38px 内容区，图标 20px，(38-20)/2 = 9px */
     padding: 10px 12px;
     border-radius: var(--radius-md);
     cursor: pointer;
     color: var(--text-secondary);
-    transition: padding 0.28s cubic-bezier(0.4, 0, 0.2, 1), gap 0.28s cubic-bezier(0.4, 0, 0.2, 1), background 0.15s ease, color 0.15s ease;
+    transition: padding 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+                gap 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+                background 0.15s ease,
+                color 0.15s ease;
     border: 1px solid transparent;
     white-space: nowrap;
     overflow: hidden;
@@ -187,9 +206,10 @@ html, body {
 }
 
 .nav-item.active {
-    background: var(--accent-blue);
+    background: linear-gradient(180deg, var(--accent-blue-hover) 0%, var(--accent-blue) 100%);
     color: white;
     border-color: transparent;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1) inset, 0 2px 8px rgba(59, 130, 246, 0.25);
 }
 
 .nav-item svg {
@@ -201,19 +221,30 @@ html, body {
     font-size: 12px;
     font-weight: 500;
     opacity: 1;
-    transition: opacity 0.18s ease 0.05s, transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+    /* 明确的起始 max-width，使过渡到 0 能平滑进行（auto/none 无法过渡） */
+    max-width: 120px;
+    overflow: hidden;
+    white-space: nowrap;
     transform: translateX(0);
+    transition: opacity 0.2s ease 0.08s,
+                transform 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+                max-width 0.28s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 #sidebar.collapsed .nav-label {
     opacity: 0;
-    transform: translateX(-12px);
+    transform: translateX(-8px);
     pointer-events: none;
-    transition: opacity 0.12s ease, transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+    max-width: 0;
+    transition: opacity 0.15s ease,
+                transform 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+                max-width 0.28s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 #sidebar.collapsed .nav-item {
-    padding: 10px;
+    /* 收起时 padding 9px 让图标在 38px 内容区内居中（图标 20px） */
+    /* padding 是长度值，可以从 12px 平滑过渡到 9px，不会瞬移 */
+    padding: 10px 9px;
     gap: 0;
 }
 
@@ -523,21 +554,42 @@ html, body {
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
+    padding: 18px 24px 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
 }
 
 .subtitle-preview-section {
-    padding: 16px 20px 8px;
+    padding: 0;
 }
 
 .subtitle-preview {
-    padding: 24px;
-    background: #000;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
+    padding: 36px 28px;
+    background:
+        radial-gradient(ellipse at top, rgba(59, 130, 246, 0.06), transparent 60%),
+        #000;
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: 100px;
+    min-height: 120px;
+    position: relative;
+    overflow: hidden;
+}
+
+.subtitle-preview::after {
+    content: 'PREVIEW';
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    font-size: 9px;
+    color: var(--text-tertiary);
+    letter-spacing: 1.5px;
+    font-weight: 600;
+    opacity: 0.7;
+    font-family: var(--font-mono);
 }
 
 .subtitle-line {
@@ -551,34 +603,56 @@ html, body {
 }
 
 .subtitle-cards {
-    padding: 8px 20px 16px;
+    padding: 0;
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 12px;
 }
 
 .subtitle-card {
-    background: var(--bg-secondary);
+    background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-secondary) 100%);
     border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    padding: 14px 16px;
+    border-radius: 10px;
+    padding: 14px 18px 16px;
+    transition: border-color 0.2s ease;
+}
+
+.subtitle-card:hover {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-md);
 }
 
 .subtitle-card-title {
-    font-size: 12px;
-    font-weight: 600;
+    font-size: 11px;
+    font-weight: 700;
     color: var(--text-tertiary);
     text-transform: uppercase;
-    letter-spacing: 0.6px;
-    margin-bottom: 12px;
-    padding-bottom: 8px;
+    letter-spacing: 0.8px;
+    margin-bottom: 14px;
+    padding-bottom: 10px;
     border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.subtitle-card-title::before {
+    content: '';
+    width: 3px;
+    height: 11px;
+    background: var(--accent-blue);
+    border-radius: 2px;
+    transition: background 0.2s ease;
+}
+
+.subtitle-card:hover .subtitle-card-title::before {
+    background: var(--accent-cyan);
 }
 
 .subtitle-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 10px 14px;
+    gap: 12px 16px;
 }
 
 .subtitle-card .control-group {
@@ -590,6 +664,7 @@ html, body {
 .subtitle-card .control-group label {
     font-size: 11px;
     color: var(--text-secondary);
+    font-weight: 500;
 }
 
 .control-group-inline {
@@ -607,6 +682,40 @@ html, body {
     user-select: none;
     font-size: 12px;
     color: var(--text-secondary);
+}
+
+/* 窗口控制卡片：独占整行 */
+.subtitle-cards-full {
+    grid-template-columns: 1fr;
+}
+
+/* 窗口控制网格：4 列布局，让开关与按钮分行 */
+.subtitle-grid-window-ctrl {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px 20px;
+}
+
+.subtitle-action-row {
+    grid-column: span 2;
+    flex-direction: row !important;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding-top: 10px;
+    margin-top: 4px;
+    border-top: 1px dashed var(--border-color);
+}
+
+.subtitle-action-row label {
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-weight: 500;
+    flex-shrink: 0;
+}
+
+.window-ctrl-buttons {
+    display: flex;
+    gap: 8px;
 }
 
 /* iOS 风格开关 - 共享样式 */
@@ -649,6 +758,15 @@ html, body {
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
 }
 
+.switch[data-on]:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 2px;
+}
+
+.switch[data-on] {
+    outline: none;
+}
+
 /* 颜色选择器 */
 .color-input {
     width: 100%;
@@ -667,6 +785,18 @@ html, body {
 .color-input::-webkit-color-swatch {
     border: none;
     border-radius: 4px;
+}
+
+.color-input:hover {
+    border-color: var(--border-strong);
+    transform: translateY(-1px);
+    transition: var(--transition);
+}
+
+.color-input:focus-visible {
+    border-color: var(--accent-blue);
+    outline: none;
+    box-shadow: var(--shadow-glow-blue);
 }
 
 .subtitle-card .slider {
@@ -694,17 +824,12 @@ html, body {
     font-size: 11px;
 }
 
-.subtitle-toggle-section {
-    padding: 12px 20px 20px;
-    display: flex;
-    justify-content: center;
-}
-
 .subtitle-tip {
-    font-size: 12px;
+    font-size: 11px;
     color: var(--text-tertiary);
     text-align: center;
     margin: 0;
+    letter-spacing: 0.2px;
 }
 
 .control-group label {
@@ -717,7 +842,7 @@ html, body {
     width: 100%;
     -webkit-appearance: none;
     height: 4px;
-    background: var(--bg-tertiary);
+    background: linear-gradient(to right, var(--accent-blue) 0%, var(--accent-blue) var(--fill, 0%), var(--bg-tertiary) var(--fill, 0%));
     border-radius: 2px;
     outline: none;
 }
@@ -730,17 +855,27 @@ html, body {
     background: var(--accent-blue);
     cursor: pointer;
     border: 2px solid var(--bg-primary);
-    transition: var(--transition);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
 .control-group input[type="range"]::-webkit-slider-thumb:hover {
-    transform: scale(1.15);
+    transform: scale(1.2);
+    box-shadow: 0 2px 6px rgba(59, 130, 246, 0.4);
+}
+
+.control-group input[type="range"]:active::-webkit-slider-thumb {
+    transform: scale(1.1);
+}
+
+.control-group input[type="range"]:focus-visible::-webkit-slider-thumb {
+    box-shadow: var(--shadow-glow-blue), 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
 .value-display {
     font-size: 11px;
     color: var(--text-tertiary);
-    font-family: "SF Mono", Menlo, monospace;
+    font-family: var(--font-mono);
 }
 
 .subtitle-toggle-section {
@@ -762,11 +897,13 @@ html, body {
     font-size: 13px;
     font-weight: 600;
     cursor: pointer;
-    display: flex;
+    display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 8px;
     transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+    white-space: nowrap;
 }
 
 .primary-btn:hover {
@@ -779,6 +916,7 @@ html, body {
     background: var(--accent-blue-active);
     border-color: var(--accent-blue-active);
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+    transform: translateY(1px);
 }
 
 .btn-indicator {
@@ -814,6 +952,65 @@ html, body {
 
 .solid-btn:active {
     background: var(--bg-active);
+    transform: translateY(1px);
+}
+
+/* 次要操作按钮：用于视图头部、窗口控制、更新检查等场景 */
+.secondary-btn {
+    padding: 7px 14px;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.secondary-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-strong);
+    color: var(--text-primary);
+}
+
+.secondary-btn:active {
+    background: var(--bg-active);
+    border-color: var(--border-strong);
+    transform: translateY(1px);
+}
+
+.secondary-btn:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 2px;
+}
+
+.secondary-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* 视图头部中的次要按钮：稍微突出 */
+.view-header-actions .secondary-btn {
+    padding: 8px 16px;
+    font-size: 13px;
+}
+
+/* 更新操作行内的按钮：统一高度 */
+.update-actions-row .secondary-btn {
+    padding: 8px 18px;
+    font-size: 13px;
+}
+
+/* 窗口控制按钮组：稍宽 */
+.window-ctrl-buttons .secondary-btn {
+    padding: 7px 16px;
 }
 
 .history-list {
@@ -899,7 +1096,7 @@ html, body {
     cursor: pointer;
     border-radius: 3px;
     transition: var(--transition);
-    font-family: "SF Mono", Menlo, monospace;
+    font-family: var(--font-mono);
 }
 
 .log-level-btn:hover {
@@ -923,7 +1120,7 @@ html, body {
     overflow-y: auto;
     padding: 8px 12px;
     background: #0a0a0a;
-    font-family: "SF Mono", Menlo, Consolas, "Cascadia Code", monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     line-height: 1.55;
     user-select: text;
@@ -945,7 +1142,7 @@ html, body {
 
 .log-empty p {
     font-size: 12px;
-    font-family: "SF Mono", Menlo, monospace;
+    font-family: var(--font-mono);
 }
 
 .log-line {
@@ -1069,16 +1266,28 @@ html, body {
 .settings-content {
     flex: 1;
     overflow-y: auto;
-    padding: 20px;
+    padding: 20px 24px 32px;
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    gap: 14px;
 }
 
+/* 设置页分组卡片 */
 .settings-section {
+    background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-secondary) 100%);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 14px 18px 16px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 10px;
+    position: relative;
+    transition: border-color 0.2s ease;
+}
+
+.settings-section:hover {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-md);
 }
 
 .settings-section h3 {
@@ -1086,9 +1295,26 @@ html, body {
     font-weight: 700;
     color: var(--text-tertiary);
     text-transform: uppercase;
-    letter-spacing: 0.6px;
-    padding-bottom: 6px;
+    letter-spacing: 0.8px;
+    padding-bottom: 10px;
     border-bottom: 1px solid var(--border-color);
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.settings-section h3::before {
+    content: '';
+    width: 3px;
+    height: 11px;
+    background: var(--accent-blue);
+    border-radius: 2px;
+    transition: background 0.2s ease;
+}
+
+.settings-section:hover h3::before {
+    background: var(--accent-cyan);
 }
 
 .setting-row {
@@ -1096,13 +1322,21 @@ html, body {
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    min-height: 36px;
+    min-height: 34px;
+    padding: 4px 0;
+    border-radius: var(--radius-sm);
+    transition: background 0.15s ease;
+}
+
+.setting-row:hover {
+    background: rgba(255, 255, 255, 0.015);
 }
 
 .setting-row label {
     font-size: 13px;
     color: var(--text-primary);
     flex-shrink: 0;
+    font-weight: 500;
 }
 
 .setting-row.toggle-row > label:not(.switch) {
@@ -1137,7 +1371,7 @@ html, body {
 
 .hotkey-input {
     text-align: center;
-    font-family: "SF Mono", Menlo, monospace;
+    font-family: var(--font-mono);
     font-weight: 600;
     max-width: 100px;
 }
@@ -1245,7 +1479,7 @@ html, body {
     flex: 1;
     -webkit-appearance: none;
     height: 4px;
-    background: var(--bg-tertiary);
+    background: linear-gradient(to right, var(--accent-blue) 0%, var(--accent-blue) var(--fill, 0%), var(--bg-tertiary) var(--fill, 0%));
     border-radius: 2px;
     outline: none;
 }
@@ -1258,7 +1492,21 @@ html, body {
     background: var(--accent-blue);
     cursor: pointer;
     border: 2px solid var(--bg-primary);
-    transition: var(--transition);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.setting-row input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+    box-shadow: 0 2px 6px rgba(59, 130, 246, 0.4);
+}
+
+.setting-row input[type="range"]:active::-webkit-slider-thumb {
+    transform: scale(1.1);
+}
+
+.setting-row input[type="range"]:focus-visible::-webkit-slider-thumb {
+    box-shadow: var(--shadow-glow-blue), 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
 .path-display {
@@ -1269,7 +1517,7 @@ html, body {
     border-radius: var(--radius-sm);
     color: var(--text-secondary);
     font-size: 11px;
-    font-family: "SF Mono", Menlo, monospace;
+    font-family: var(--font-mono);
     word-break: break-all;
 }
 
@@ -1293,7 +1541,7 @@ html, body {
     color: var(--text-tertiary);
     margin-top: 4px;
     text-align: right;
-    font-family: "SF Mono", Menlo, monospace;
+    font-family: var(--font-mono);
 }
 
 .downloaded-models-list {
@@ -1403,12 +1651,12 @@ html, body {
     background: var(--bg-tertiary);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
-    font-family: "SF Mono", Menlo, monospace;
+    font-family: var(--font-mono);
 }
 
 ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 10px;
+    height: 10px;
 }
 
 ::-webkit-scrollbar-track {
@@ -1417,9 +1665,145 @@ html, body {
 
 ::-webkit-scrollbar-thumb {
     background: var(--bg-active);
-    border-radius: 4px;
+    border-radius: 6px;
+    border: 2px solid transparent;
+    background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
     background: var(--border-strong);
+    background-clip: content-box;
+}
+
+/* ============================================
+ * 修复未应用样式的 UI（替换 inline style）
+ * ============================================ */
+
+/* 字幕窗口控制提示：左对齐变体 */
+.subtitle-tip-left {
+    margin-bottom: 12px;
+    text-align: left;
+}
+
+/* 下载模型选择行：select + button 横向布局 */
+.download-model-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.download-model-select {
+    min-width: 120px;
+}
+
+/* 进度行：垂直布局变体（用于下载/更新进度展示） */
+.setting-row-vertical {
+    flex-direction: column;
+    align-items: flex-start;
+}
+
+.setting-row-vertical > label {
+    margin-bottom: 8px;
+}
+
+/* 版本号文本（等宽，次要色） */
+.version-text {
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+}
+
+/* 更新状态文本 */
+.update-status-text {
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+/* 更新内容文本框 */
+.update-notes-box {
+    color: var(--text-secondary);
+    font-size: 12px;
+    max-height: 120px;
+    overflow-y: auto;
+    padding: 8px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+    width: 100%;
+    white-space: pre-wrap;
+}
+
+/* 更新操作按钮行 */
+.update-actions-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+/* 进度条容器：占满父容器宽度 */
+.progress-container-full {
+    width: 100%;
+}
+
+/* 进度行内嵌容器：进度条与文本的容器 */
+.progress-row-inner {
+    flex: 1;
+    margin-left: 12px;
+}
+
+/* 空状态占位提示（用于已下载模型列表等动态区域） */
+.empty-hint {
+    color: var(--text-tertiary);
+    font-size: 12px;
+}
+
+/* ============================================
+ * 模型目录更改行
+ * ============================================ */
+.models-dir-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    width: 100%;
+}
+
+.models-dir-row .path-display {
+    flex: 1;
+    min-width: 0;
+}
+
+.models-dir-row .secondary-btn,
+.models-dir-row .solid-btn {
+    flex-shrink: 0;
+    padding: 7px 12px;
+    font-size: 12px;
+}
+
+/* ============================================
+ * 统一视图头部样式
+ * 确保所有页面的顶部标题栏高度和内边距一致
+ * ============================================ */
+.view-header {
+    min-height: 56px;
+    padding: 14px 20px;
+}
+
+.view-header h2 {
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: -0.4px;
+    line-height: 1.2;
+}
+
+/* 视图头部按钮统一尺寸 */
+.view-header-actions .primary-btn,
+.view-header-actions .secondary-btn,
+.view-header-actions .solid-btn {
+    padding: 8px 16px;
+    font-size: 12px;
+    font-weight: 600;
+    min-height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
 }

@@ -25,10 +25,11 @@
     let getCurrentWindow = null;
 
     if (window.__TAURI__) {
-        invoke = window.__TAURI__.core.invoke;
-        listen = window.__TAURI__.event.listen;
-        if (window.__TAURI__.window) {
-            getCurrentWindow = window.__TAURI__.window.getCurrentWindow;
+        const t = window.__TAURI__;
+        invoke = (t.core && t.core.invoke) || t.invoke;
+        listen = (t.event && t.event.listen) || t.listen;
+        if (t.window) {
+            getCurrentWindow = t.window.getCurrentWindow;
         }
     }
 
@@ -57,6 +58,37 @@
             0x2e: 'Del'
         };
         return vkMap[vkCode] || String.fromCharCode(vkCode);
+    }
+
+    // 将按键名称转换为 Windows 虚拟键码（与后端 rdev::Key 的映射保持一致）
+    // 仅支持后端 rdev 监听器能识别的按键（主要是 F1-F12）
+    function nameToVirtualKey(name) {
+        if (!name) return null;
+        const keyName = String(name).trim();
+        // F1-F12
+        const fMatch = keyName.match(/^F(\d{1,2})$/i);
+        if (fMatch) {
+            const n = parseInt(fMatch[1], 10);
+            if (n >= 1 && n <= 12) return 0x6f + n; // 0x70 = F1
+        }
+        // 其他常见按键（后端 rdev 目前只处理 F1-F12，但仍提供映射以便未来扩展）
+        const map = {
+            'Backspace': 0x08,
+            'Tab': 0x09,
+            'Enter': 0x0d,
+            'Esc': 0x1b,
+            'Escape': 0x1b,
+            'Space': 0x20,
+            'Del': 0x2e,
+            'Delete': 0x2e
+        };
+        if (keyName in map) return map[keyName];
+        // 单字符：转大写后取 ASCII
+        if (keyName.length === 1) {
+            const code = keyName.toUpperCase().charCodeAt(0);
+            if (code >= 0x30 && code <= 0x5a) return code;
+        }
+        return null;
     }
 
     function setStatus(status, text) {
@@ -97,34 +129,30 @@
         const navItems = $$('.nav-item');
         navItems.forEach(n => n.classList.remove('active'));
 
-        if (viewName === 'settings') {
-            $('#view-settings').classList.add('active');
-        } else {
-            state.previousView = viewName;
-            const targetView = $(`#view-${viewName}`);
-            if (targetView) {
-                targetView.classList.add('active');
-            }
-            const targetNav = $(`.nav-item[data-view="${viewName}"]`);
-            if (targetNav) {
-                targetNav.classList.add('active');
-            }
-            state.currentView = viewName;
+        const targetView = $(`#view-${viewName}`);
+        if (targetView) {
+            targetView.classList.add('active');
+        }
+        const targetNav = $(`.nav-item[data-view="${viewName}"]`);
+        if (targetNav) {
+            targetNav.classList.add('active');
+        }
+        state.currentView = viewName;
 
-            if (viewName === 'history') {
-                loadHistory();
-            }
+        if (viewName === 'history') {
+            loadHistory();
+        } else if (viewName === 'settings') {
+            loadSettings();
+            loadDownloadedModels();
         }
     }
 
     function showSettings() {
         switchView('settings');
-        loadSettings();
-        loadDownloadedModels();
     }
 
     function hideSettings() {
-        switchView(state.previousView);
+        switchView(state.previousView || 'dictation');
     }
 
     async function startRecording() {
@@ -277,6 +305,29 @@
         if (slider && slider.nextElementSibling && slider.nextElementSibling.classList.contains('value-display')) {
             slider.nextElementSibling.textContent = text;
         }
+        // 同步更新滑块的填充进度（用于 CSS 渐变背景）
+        if (slider && slider.type === 'range') {
+            const min = parseFloat(slider.min) || 0;
+            const max = parseFloat(slider.max) || 100;
+            const val = parseFloat(slider.value);
+            const pct = max > min ? ((val - min) / (max - min)) * 100 : 0;
+            slider.style.setProperty('--fill', pct + '%');
+        }
+    }
+
+    // 初始化所有滑块的填充进度
+    function initSliderFills() {
+        $$('input[type="range"]').forEach(slider => {
+            const update = () => {
+                const min = parseFloat(slider.min) || 0;
+                const max = parseFloat(slider.max) || 100;
+                const val = parseFloat(slider.value);
+                const pct = max > min ? ((val - min) / (max - min)) * 100 : 0;
+                slider.style.setProperty('--fill', pct + '%');
+            };
+            update();
+            slider.addEventListener('input', update);
+        });
     }
 
     function hexToRgba(hex, alpha) {
@@ -335,6 +386,8 @@
             populateSettings(config);
         } catch (err) {
             console.error('Failed to load config:', err);
+            // 初始化默认配置，确保用户操作（如切换模式）能被保存
+            state.config = { basic: { dictation_mode: state.dictationMode } };
             setupDefaultSettings();
         }
 
@@ -358,7 +411,7 @@
         try {
             const models = await invoke('list_available_models');
             if (!models || models.length === 0) {
-                listEl.innerHTML = '<span style="color: var(--text-tertiary); font-size: 12px;">暂无已下载模型</span>';
+                listEl.innerHTML = '<span class="empty-hint">暂无已下载模型</span>';
                 return;
             }
 
@@ -368,7 +421,7 @@
             }).join('');
         } catch (err) {
             console.error('Failed to list models:', err);
-            listEl.innerHTML = '<span style="color: var(--text-tertiary); font-size: 12px;">加载失败</span>';
+            listEl.innerHTML = '<span class="empty-hint">加载失败</span>';
         }
     }
 
@@ -453,11 +506,15 @@
 
             const dictationMode = config.basic.dictation_mode || 'batch';
             state.dictationMode = dictationMode;
-            $$('#dictation-mode .seg-btn').forEach(btn => {
-                btn.classList.toggle('active', btn.dataset.mode === dictationMode);
-            });
             updateHotkeyHint();
         }
+
+        // 无论 config.basic 是否存在，都同步识别模式 UI
+        const dictMode = (config.basic && config.basic.dictation_mode) || 'batch';
+        state.dictationMode = dictMode;
+        $$('#dictation-mode .seg-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.mode === dictMode);
+        });
 
         if (config.streaming) {
             // 流式配置仍然保留（资源 ID、模型名等），但不再有独立热键输入
@@ -519,7 +576,8 @@
         if (config.advanced) {
             const triggerMode = config.advanced.trigger_mode || 'hold';
             state.triggerMode = triggerMode;
-            $$('.seg-btn').forEach(btn => {
+            // 仅作用于触发模式选择组，避免覆盖其他 seg-btn（如识别模式）的选中状态
+            $$('#trigger-mode .seg-btn').forEach(btn => {
                 btn.classList.toggle('active', btn.dataset.mode === triggerMode);
             });
             updateMicHint();
@@ -559,7 +617,17 @@
         const hint = $('.hotkey-hint');
         if (!hint) return;
         const modeLabel = state.dictationMode === 'stream' ? '流式' : '整段';
-        hint.textContent = `快捷键: F2 (${modeLabel})`;
+        // 从配置或设置输入框读取实际快捷键，避免硬编码 F2
+        let keyName = 'F2';
+        if (state.config && state.config.basic && state.config.basic.hotkey) {
+            const name = virtualKeyToName(state.config.basic.hotkey);
+            if (name) keyName = name;
+        }
+        const hotkeyInput = $('#setting-hotkey-batch');
+        if (hotkeyInput && hotkeyInput.value && hotkeyInput.dataset.listening !== 'true') {
+            keyName = hotkeyInput.value;
+        }
+        hint.textContent = `快捷键: ${keyName} (${modeLabel})`;
     }
 
     function updateModelBadge() {
@@ -606,6 +674,22 @@
         if (outputMode) newConfig.basic.output_mode = outputMode.value;
         if (outputLang) newConfig.basic.output_language = outputLang.value;
 
+        // 快捷键：将按键名称转换为虚拟键码后保存
+        // 后端 rdev 监听器在每次按键时都会读取 config.basic.hotkey，所以保存后立即生效
+        const hotkeyInput = $('#setting-hotkey-batch');
+        if (hotkeyInput) {
+            const vk = nameToVirtualKey(hotkeyInput.value);
+            if (vk) {
+                newConfig.basic.hotkey = vk;
+                // 同步更新 hotkey 提示文本
+                const hint = $('.hotkey-hint');
+                if (hint) {
+                    const modeLabel = state.dictationMode === 'stream' ? '流式' : '整段';
+                    hint.textContent = `快捷键: ${hotkeyInput.value} (${modeLabel})`;
+                }
+            }
+        }
+
         const punctuation = $('#setting-punctuation');
         const emoji = $('#setting-emoji');
         const indicator = $('#setting-indicator');
@@ -645,7 +729,6 @@
         if (!invoke) {
             console.log('Would save config:', newConfig);
             state.config = newConfig;
-            hideSettings();
             return;
         }
 
@@ -654,7 +737,12 @@
             state.config = newConfig;
             updateModelBadge();
             updateMicHint();
-            hideSettings();
+            // 如果字幕窗口正在显示，热推送新配置让样式立即生效
+            try {
+                await invoke('push_subtitle_config');
+            } catch (e) {
+                console.warn('Failed to push subtitle config:', e);
+            }
             setStatus('ready', '设置已保存');
             setTimeout(() => setStatus('idle', '就绪'), 2000);
         } catch (err) {
@@ -822,16 +910,6 @@
             });
         });
 
-        const settingsBtn = $('#btn-settings');
-        if (settingsBtn) {
-            settingsBtn.addEventListener('click', showSettings);
-        }
-
-        const backBtn = $('#btn-back');
-        if (backBtn) {
-            backBtn.addEventListener('click', hideSettings);
-        }
-
         const sidebarToggle = $('#sidebar-toggle');
         const sidebar = $('#sidebar');
         if (sidebarToggle && sidebar) {
@@ -925,6 +1003,11 @@
                 }
             });
         });
+
+        // 启动时根据 state.dictationMode 同步按钮选中状态
+        $$('#dictation-mode .seg-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.mode === state.dictationMode);
+        });
     }
 
     function initSubtitle() {
@@ -971,6 +1054,105 @@
                 updateSubtitlePreview();
             });
         });
+
+        // 应用到字幕窗口按钮：保存设置并推送配置
+        const applyBtn = $('#btn-apply-subtitle');
+        if (applyBtn) {
+            applyBtn.addEventListener('click', async () => {
+                if (!invoke) return;
+                applyBtn.disabled = true;
+                applyBtn.textContent = '应用中...';
+                try {
+                    const newConfig = collectSettings();
+                    if (newConfig) {
+                        await invoke('save_config', { newConfig: newConfig });
+                        state.config = newConfig;
+                    }
+                    await invoke('push_subtitle_config');
+                    setStatus('ready', '字幕配置已应用');
+                    setTimeout(() => setStatus('idle', '就绪'), 2000);
+                } catch (err) {
+                    console.error('Failed to apply subtitle config:', err);
+                    setStatus('error', '应用失败');
+                    setTimeout(() => setStatus('idle', '就绪'), 2000);
+                } finally {
+                    applyBtn.disabled = false;
+                    applyBtn.textContent = '应用到字幕窗口';
+                }
+            });
+        }
+
+        // 字幕窗口控制开关
+        const alwaysOnTopSw = $('#subtitle-always-on-top');
+        if (alwaysOnTopSw) {
+            alwaysOnTopSw.addEventListener('click', async () => {
+                const on = alwaysOnTopSw.dataset.on === 'true';
+                alwaysOnTopSw.dataset.on = on ? 'false' : 'true';
+                if (invoke) {
+                    try {
+                        await invoke('set_subtitle_always_on_top', { onTop: !on });
+                    } catch (err) {
+                        console.error('Failed to set always on top:', err);
+                    }
+                }
+            });
+        }
+
+        const clickThroughSw = $('#subtitle-click-through');
+        if (clickThroughSw) {
+            clickThroughSw.addEventListener('click', async () => {
+                const on = clickThroughSw.dataset.on === 'true';
+                clickThroughSw.dataset.on = on ? 'false' : 'true';
+                if (invoke) {
+                    try {
+                        await invoke('set_subtitle_click_through', { clickThrough: !on });
+                    } catch (err) {
+                        console.error('Failed to set click through:', err);
+                    }
+                }
+            });
+        }
+
+        const obsModeSw = $('#subtitle-obs-mode');
+        if (obsModeSw) {
+            obsModeSw.addEventListener('click', async () => {
+                const on = obsModeSw.dataset.on === 'true';
+                obsModeSw.dataset.on = on ? 'false' : 'true';
+                if (invoke) {
+                    try {
+                        await invoke('set_subtitle_obs_mode', { obsMode: !on });
+                    } catch (err) {
+                        console.error('Failed to set OBS mode:', err);
+                    }
+                }
+            });
+        }
+
+        // 显示/隐藏字幕窗口
+        const showBtn = $('#btn-show-subtitle-window');
+        if (showBtn) {
+            showBtn.addEventListener('click', async () => {
+                if (!invoke) return;
+                try {
+                    await invoke('show_subtitle_window', { show: true });
+                    // 同步推送当前配置
+                    await invoke('push_subtitle_config');
+                } catch (err) {
+                    console.error('Failed to show subtitle window:', err);
+                }
+            });
+        }
+        const hideBtn = $('#btn-hide-subtitle-window');
+        if (hideBtn) {
+            hideBtn.addEventListener('click', async () => {
+                if (!invoke) return;
+                try {
+                    await invoke('show_subtitle_window', { show: false });
+                } catch (err) {
+                    console.error('Failed to hide subtitle window:', err);
+                }
+            });
+        }
     }
 
     function initHistory() {
@@ -1015,6 +1197,79 @@
         const downloadBtn = $('#btn-download-model');
         if (downloadBtn) {
             downloadBtn.addEventListener('click', downloadModel);
+        }
+
+        // 更改模型目录
+        const changeDirBtn = $('#btn-change-models-dir');
+        if (changeDirBtn) {
+            changeDirBtn.addEventListener('click', changeModelsDirectory);
+        }
+
+        // 恢复默认模型目录
+        const resetDirBtn = $('#btn-reset-models-dir');
+        if (resetDirBtn) {
+            resetDirBtn.addEventListener('click', resetModelsDirectory);
+        }
+    }
+
+    /// 打开文件夹选择器，让用户选择新的模型下载目录
+    async function changeModelsDirectory() {
+        if (!invoke) return;
+
+        const btn = $('#btn-change-models-dir');
+        const originalText = btn ? btn.textContent : '';
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = '选择中...';
+        }
+
+        try {
+            const result = await invoke('pick_models_directory');
+            if (result) {
+                // 用户选择了新目录
+                const dirEl = $('#models-dir-path');
+                if (dirEl) dirEl.textContent = result;
+                // 重新加载已下载模型列表（新目录可能已有模型）
+                await loadDownloadedModels();
+                addLog('info', `模型目录已更改为: ${result}`, 'settings');
+            }
+        } catch (err) {
+            console.error('Failed to pick models directory:', err);
+            addLog('error', `更改模型目录失败: ${err}`, 'settings');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
+        }
+    }
+
+    /// 恢复默认模型目录
+    async function resetModelsDirectory() {
+        if (!invoke) return;
+
+        const btn = $('#btn-reset-models-dir');
+        const originalText = btn ? btn.textContent : '';
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = '恢复中...';
+        }
+
+        try {
+            const newDir = await invoke('reset_models_directory');
+            const dirEl = $('#models-dir-path');
+            if (dirEl) dirEl.textContent = newDir;
+            // 重新加载已下载模型列表
+            await loadDownloadedModels();
+            addLog('info', `模型目录已恢复为默认: ${newDir}`, 'settings');
+        } catch (err) {
+            console.error('Failed to reset models directory:', err);
+            addLog('error', `恢复默认模型目录失败: ${err}`, 'settings');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
         }
     }
 
@@ -1206,11 +1461,136 @@
                     input.value = keyName;
                     input.dataset.listening = 'false';
                     document.removeEventListener('keydown', onKeyDown);
+                    // 立即更新主界面快捷键提示
+                    updateHotkeyHint();
                 };
 
                 document.addEventListener('keydown', onKeyDown);
             });
         });
+    }
+
+    // ===== 自动更新 =====
+    const updateState = {
+        checking: false,
+        hasUpdate: false,
+        info: null,
+        downloaded: false
+    };
+
+    async function loadAppVersion() {
+        if (!invoke) return;
+        try {
+            const v = await invoke('get_app_version');
+            const el = $('#app-version-text');
+            if (el) el.textContent = 'v' + v;
+        } catch (err) {
+            console.error('Failed to get app version:', err);
+        }
+    }
+
+    async function checkForUpdate() {
+        if (!invoke || updateState.checking) return;
+        updateState.checking = true;
+        const btn = $('#btn-check-update');
+        if (btn) { btn.disabled = true; btn.textContent = '检查中...'; }
+        const statusRow = $('#update-status-row');
+        const statusText = $('#update-status-text');
+        if (statusRow) statusRow.style.display = '';
+        if (statusText) statusText.textContent = '正在检查更新...';
+
+        try {
+            const result = await invoke('check_update');
+            const latestEl = $('#latest-version-text');
+            if (latestEl) latestEl.textContent = result.version || '-';
+
+            if (result.has_update) {
+                updateState.hasUpdate = true;
+                updateState.info = result;
+                if (statusText) statusText.textContent = '发现新版本 ' + result.version;
+                const dlBtn = $('#btn-download-update');
+                if (dlBtn) dlBtn.style.display = '';
+                if (btn) btn.textContent = '重新检查';
+                // 显示更新内容
+                const notesRow = $('#update-notes-row');
+                const notesContent = $('#update-notes-content');
+                if (notesRow && notesContent && result.body) {
+                    notesContent.textContent = result.body;
+                    notesRow.style.display = '';
+                }
+            } else {
+                if (statusText) statusText.textContent = '已是最新版本';
+                if (btn) btn.textContent = '重新检查';
+                const dlBtn = $('#btn-download-update');
+                if (dlBtn) dlBtn.style.display = 'none';
+                const notesRow = $('#update-notes-row');
+                if (notesRow) notesRow.style.display = 'none';
+            }
+        } catch (err) {
+            console.error('Failed to check update:', err);
+            if (statusText) statusText.textContent = '检查失败: ' + err;
+        } finally {
+            updateState.checking = false;
+            if (btn) { btn.disabled = false; }
+        }
+    }
+
+    async function downloadAndInstallUpdate() {
+        if (!invoke || !updateState.info) return;
+        const dlBtn = $('#btn-download-update');
+        if (dlBtn) { dlBtn.disabled = true; dlBtn.textContent = '下载中...'; }
+        const progressRow = $('#update-progress-row');
+        if (progressRow) progressRow.style.display = '';
+
+        try {
+            await invoke('download_and_install_update', {
+                url: updateState.info.download_url,
+                filename: updateState.info.filename
+            });
+            updateState.downloaded = true;
+            const statusText = $('#update-status-text');
+            if (statusText) statusText.textContent = '下载完成，点击重启应用以完成安装';
+            if (dlBtn) dlBtn.style.display = 'none';
+            const restartBtn = $('#btn-restart-app');
+            if (restartBtn) restartBtn.style.display = '';
+        } catch (err) {
+            console.error('Failed to download update:', err);
+            const statusText = $('#update-status-text');
+            if (statusText) statusText.textContent = '下载失败: ' + err;
+            if (dlBtn) { dlBtn.disabled = false; dlBtn.textContent = '下载并安装'; }
+        }
+    }
+
+    function restartApp() {
+        if (!invoke) return;
+        invoke('restart_app').catch(err => console.error('Failed to restart:', err));
+    }
+
+    function initUpdateChecker() {
+        const btn = $('#btn-check-update');
+        if (btn) btn.addEventListener('click', checkForUpdate);
+        const dlBtn = $('#btn-download-update');
+        if (dlBtn) dlBtn.addEventListener('click', downloadAndInstallUpdate);
+        const restartBtn = $('#btn-restart-app');
+        if (restartBtn) restartBtn.addEventListener('click', restartApp);
+
+        // 监听下载进度
+        if (listen) {
+            listen('update-download-progress', (event) => {
+                const { downloaded, total } = event.payload;
+                const bar = $('#update-progress-bar');
+                const text = $('#update-progress-text');
+                const pct = total > 0 ? (downloaded / total * 100) : 0;
+                if (bar) bar.style.width = pct + '%';
+                if (text) {
+                    const mbDone = (downloaded / 1024 / 1024).toFixed(1);
+                    const mbTotal = (total / 1024 / 1024).toFixed(1);
+                    text.textContent = pct.toFixed(0) + '% (' + mbDone + '/' + mbTotal + ' MB)';
+                }
+            });
+        }
+
+        loadAppVersion();
     }
 
     function initOutput() {
@@ -1337,6 +1717,8 @@
         initApiKeyToggles();
         initHotkeyInputs();
         initOutput();
+        initUpdateChecker();
+        initSliderFills();
 
         // 禁用 WebView 默认右键菜单（刷新、检查、另存为等），
         // 历史记录项的 contextmenu 监听器已自行处理 preventDefault，不受影响。
@@ -1346,15 +1728,60 @@
             }
         });
 
-        // 禁用常用浏览器快捷键（F5 刷新、Ctrl+R、Ctrl+Shift+I 开发者工具等）
+        // 禁用常用浏览器快捷键，避免干扰应用使用
+        // F1-F12、F5 刷新、Ctrl+R、Ctrl+Shift+I/J/C 开发者工具、Ctrl+ +/- 缩放、Ctrl+0、Ctrl+P、Ctrl+S、Ctrl+F、Alt+方向键
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'F5' ||
-                (e.key.toLowerCase() === 'r' && e.ctrlKey) ||
-                (e.key.toLowerCase() === 'i' && e.ctrlKey && e.shiftKey) ||
-                (e.key.toLowerCase() === 'j' && e.ctrlKey && e.shiftKey)) {
+            // F1-F12：全部阻止默认行为（F1 帮助、F3 搜索、F5 刷新、F11 全屏、F12 开发者工具等）
+            if (/^F\d{1,2}$/.test(e.key)) {
                 e.preventDefault();
+                return;
+            }
+            const k = e.key.toLowerCase();
+            // Ctrl+R / Ctrl+Shift+R 刷新
+            if (k === 'r' && e.ctrlKey) {
+                e.preventDefault();
+                return;
+            }
+            // Ctrl+Shift+I / J / C 开发者工具
+            if (e.ctrlKey && e.shiftKey && (k === 'i' || k === 'j' || k === 'c')) {
+                e.preventDefault();
+                return;
+            }
+            // Ctrl++ / Ctrl+- / Ctrl+0 页面缩放
+            if (e.ctrlKey && (k === '+' || k === '-' || k === '0' || k === '=')) {
+                e.preventDefault();
+                return;
+            }
+            // Ctrl+P 打印、Ctrl+S 保存、Ctrl+F 查找
+            if (e.ctrlKey && (k === 'p' || k === 's' || k === 'f')) {
+                e.preventDefault();
+                return;
+            }
+            // Ctrl+G / F3 查找下一个（已在 F1-F12 覆盖 F3）
+            if (e.ctrlKey && k === 'g') {
+                e.preventDefault();
+                return;
+            }
+            // Alt+方向键 浏览器历史导航
+            if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+                e.preventDefault();
+                return;
+            }
+            // Backspace 浏览器后退（非输入元素时）
+            if (e.key === 'Backspace' && !isEditableTarget(e.target)) {
+                e.preventDefault();
+                return;
             }
         });
+
+        function isEditableTarget(target) {
+            if (!target) return false;
+            const tag = target.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA') return true;
+            if (tag === 'SELECT') return true;
+            if (target.isContentEditable) return true;
+            return false;
+        }
 
         setupTauriEventListeners();
 

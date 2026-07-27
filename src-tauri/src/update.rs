@@ -4,6 +4,11 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 
+/// 当前应用版本号（来自 Cargo.toml 的 version 字段）
+pub fn current_version() -> String {
+    cargo_crate_version!().to_string()
+}
+
 #[derive(Clone, Debug)]
 pub struct UpdateInfo {
     pub version: String,
@@ -22,27 +27,71 @@ struct GithubAsset {
 #[derive(serde::Deserialize, Debug, Clone)]
 struct GithubRelease {
     tag_name: String,
+    #[serde(default)]
+    name: Option<String>,
     body: Option<String>,
     published_at: Option<String>,
+    #[serde(default)]
+    prerelease: bool,
+    #[serde(default)]
+    draft: bool,
+    #[serde(default)]
     assets: Vec<GithubAsset>,
 }
 
-fn fetch_latest_release() -> Result<GithubRelease> {
-    let client = reqwest::blocking::Client::builder()
-        .user_agent("Voice2Type-App")
-        .timeout(std::time::Duration::from_secs(10))
-        .build()?;
+const GITHUB_API_BASE: &str = "https://api.github.com/repos/guchang233/VOICE2TYPE";
 
+fn build_client() -> Result<reqwest::blocking::Client> {
+    reqwest::blocking::Client::builder()
+        .user_agent("Voice2Type-App")
+        .timeout(std::time::Duration::from_secs(15))
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+        .map_err(Into::into)
+}
+
+/// 获取最新正式 release（跳过 prerelease 和 draft）
+/// 优先使用 /releases/latest，失败时回退到 /releases 列表
+fn fetch_latest_release() -> Result<GithubRelease> {
+    let client = build_client()?;
+
+    // 1. 首选 /releases/latest（仅返回最新正式发布，自动排除 prerelease 和 draft）
     let resp = client
-        .get("https://api.github.com/repos/guchang233/VOICE2TYPE/releases/latest")
+        .get(format!("{}/releases/latest", GITHUB_API_BASE))
+        .header("Accept", "application/vnd.github+json")
         .send()?;
 
-    if !resp.status().is_success() {
-        anyhow::bail!("GitHub API returned error status: {}", resp.status());
+    if resp.status().is_success() {
+        return Ok(resp.json()?);
     }
 
-    let release: GithubRelease = resp.json()?;
-    Ok(release)
+    // 如果 latest 接口返回 404（仓库还没有任何正式 release），回退到 /releases 列表
+    if resp.status().as_u16() == 404 {
+        log::warn!("No latest release found (404), falling back to /releases list");
+        let resp2 = client
+            .get(format!("{}/releases?per_page=10", GITHUB_API_BASE))
+            .header("Accept", "application/vnd.github+json")
+            .send()?;
+
+        if !resp2.status().is_success() {
+            anyhow::bail!(
+                "GitHub API returned error status: {} (fallback)",
+                resp2.status()
+            );
+        }
+
+        let releases: Vec<GithubRelease> = resp2.json()?;
+        // 过滤掉 prerelease 和 draft，取第一个（即最新）
+        return releases
+            .into_iter()
+            .find(|r| !r.prerelease && !r.draft)
+            .ok_or_else(|| anyhow::anyhow!("No stable releases found in repository"));
+    }
+
+    // 其他错误状态码
+    let status = resp.status();
+    let body = resp.text().unwrap_or_default();
+    anyhow::bail!("GitHub API returned error status: {} - {}", status, body);
 }
 
 pub fn get_latest_release_info() -> Result<UpdateInfo> {
@@ -75,7 +124,7 @@ pub fn check_update() -> Result<UpdateCheckResult> {
     let release = fetch_latest_release()?;
 
     // semver parsing
-    // Clean up version string (remove 'v' prefix if present)
+    // 清理版本字符串（去除 'v' 前缀，例如 "v0.1.1" -> "0.1.1"）
     let clean_current = cargo_crate_version!().trim_start_matches('v');
     let clean_latest = release.tag_name.trim_start_matches('v');
 
@@ -86,8 +135,8 @@ pub fn check_update() -> Result<UpdateCheckResult> {
 
     let has_update = target > current;
 
-    // Find the asset for Windows
-    // Strictly require .exe extension to avoid downloading source code zips
+    // 查找 Windows 安装包
+    // 严格匹配 .exe 扩展名，避免下载源代码压缩包
     let asset = release
         .assets
         .iter()
@@ -113,9 +162,7 @@ pub fn download_file<F>(url: &str, path: &PathBuf, on_progress: F) -> Result<()>
 where
     F: Fn(u64, u64),
 {
-    let client = reqwest::blocking::Client::builder()
-        .user_agent("Voice2Type-App")
-        .build()?;
+    let client = build_client()?;
 
     let mut resp = client
         .get(url)
@@ -123,7 +170,9 @@ where
         .send()?;
 
     if !resp.status().is_success() {
-        anyhow::bail!("Download failed with status: {}", resp.status());
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        anyhow::bail!("Download failed with status: {} - {}", status, body);
     }
 
     let total_size = resp.content_length().unwrap_or(0);
