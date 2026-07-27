@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: "Tag name for the release (e.g. v0.1.0)"
+        description: "Tag name for the release (e.g. v0.1.1)"
         required: true
-        default: v0.1.0
+        default: v0.1.1
 
 env:
   CARGO_TERM_COLOR: always
@@ -26,12 +26,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -47,9 +41,6 @@ jobs:
             src-tauri/target
           key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
 
-      - name: Install frontend dependencies
-        run: npm install
-
       - name: Determine tag name
         id: tag
         run: |
@@ -60,15 +51,49 @@ jobs:
           fi
         shell: bash
 
-      - name: Build & Publish Release
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build release binary
+        working-directory: src-tauri
+        run: cargo build --release --target x86_64-pc-windows-msvc
+
+      - name: Rename binary
+        id: binary
+        shell: bash
+        run: |
+          # 提取版本号（去掉 'v' 前缀，例如 v0.1.1 -> 0.1.1）
+          VERSION="${{ steps.tag.outputs.name }}"
+          VERSION="${VERSION#v}"
+          # 源文件路径（cargo 输出的 exe 名称来自 Cargo.toml 的 [package].name）
+          SRC="src-tauri/target/x86_64-pc-windows-msvc/release/voice2type.exe"
+          # 目标文件名带版本号和架构
+          DEST="Voice2Type_v${VERSION}_x86_64.exe"
+          cp "$SRC" "$DEST"
+          echo "path=$DEST" >> $GITHUB_OUTPUT
+          echo "Created release binary: $DEST"
+          ls -lh "$DEST"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          tagName: ${{ steps.tag.outputs.name }}
-          releaseName: "Voice2Type ${{ steps.tag.outputs.name }}"
-          releaseBody: "Voice2Type 桌面版自动构建发布。基于 Tauri 2.0，包含蓝色主题 UI 与流式语音识别。"
-          releaseDraft: false
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: "Voice2Type ${{ steps.tag.outputs.name }}"
+          body: |
+            Voice2Type 桌面版自动构建发布。
+
+            ## 安装说明
+
+            下载下方的 `Voice2Type_v*.exe` 文件即可直接运行，无需安装。
+
+            **系统要求：**
+            - Windows 10/11 (x86_64)
+            - WebView2 运行时（Windows 11 已内置，Windows 10 可能需要安装）
+
+            ## 特性
+
+            - 基于 Tauri 2.0 架构，蓝色主题 UI
+            - 支持流式语音识别与整段识别
+            - 实时字幕功能，可自定义样式
+            - 支持 OBS 捕捉
+          draft: false
           prerelease: false
-          generateReleaseNotes: true
-          args: --target x86_64-pc-windows-msvc
+          generate_release_notes: true
+          files: ${{ steps.binary.outputs.path }}
