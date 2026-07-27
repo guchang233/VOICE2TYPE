@@ -9,17 +9,19 @@ pub const MODEL_WHISPER: &str = "whisper-large-v3";
 pub const MODEL_LOCAL_WHISPER: &str = "local-whisper";
 pub const MODEL_CUSTOM: &str = "custom";
 
-/// 豆包大模型流式语音识别 WebSocket 路径（双向流式）
+pub const STREAM_MODEL_DOUBAO: &str = "doubao";
+pub const STREAM_MODEL_SHERPA: &str = "sherpa-onnx";
+
 pub const STREAMING_ASR_URI: &str = "/api/v3/sauc/bigmodel";
 pub const STREAMING_RESOURCE_BIGASR_DURATION: &str = "volc.bigasr.sauc.duration";
 pub const STREAMING_RESOURCE_SEEDASR_DURATION: &str = "volc.seedasr.sauc.duration";
 
-/// 流式后处理：AI 润色（硅基流动 / Groq）
 pub const STREAMING_POST_AI: &str = "ai";
-/// 流式后处理：本地轻量规则
 pub const STREAMING_POST_LOCAL: &str = "local";
-/// 流式后处理：关闭
 pub const STREAMING_POST_NONE: &str = "none";
+
+pub const DICTATION_MODE_BATCH: &str = "batch";
+pub const DICTATION_MODE_STREAM: &str = "stream";
 
 const SILICONFLOW_TRANSCRIPTIONS_URL: &str = "https://api.siliconflow.cn/v1/audio/transcriptions";
 const GROQ_TRANSCRIPTIONS_URL: &str = "https://api.groq.com/openai/v1/audio/transcriptions";
@@ -39,8 +41,9 @@ pub struct BasicConfig {
     pub autostart: bool,
     pub hotkey: u32,
     pub show_log: bool,
-    /// 空字符串表示系统默认麦克风
     pub input_device: String,
+    /// 语音输入页面的识别模式：`batch`（整段）或 `stream`（流式）
+    pub dictation_mode: String,
 }
 
 impl Default for BasicConfig {
@@ -50,9 +53,10 @@ impl Default for BasicConfig {
             output_language: "auto".to_string(),
             output_mode: "clipboard".to_string(),
             autostart: false,
-            hotkey: 0x71, // F2
+            hotkey: 0x71,
             show_log: false,
             input_device: String::new(),
+            dictation_mode: "batch".to_string(),
         }
     }
 }
@@ -114,9 +118,7 @@ pub struct ModelConfig {
     pub custom_api_key: String,
     pub custom_api_url: String,
     pub custom_model_name: String,
-    /// `models/` 下的 ggml 模型文件名，例如 ggml-base.bin
     pub local_whisper_model: String,
-    /// 用户自选的 Whisper 根目录（其下应有 bin/、models/）
     pub local_whisper_dir: String,
 }
 
@@ -135,7 +137,6 @@ impl Default for ModelConfig {
     }
 }
 
-/// 流式语音识别（豆包）独立配置，与录音文件识别模式隔离。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct StreamingConfig {
@@ -147,14 +148,13 @@ pub struct StreamingConfig {
     pub allow_emoji: bool,
     pub allow_punctuation: bool,
     pub enable_indicator: bool,
-    /// ai | local | none
     pub post_process_mode: String,
 }
 
 impl Default for StreamingConfig {
     fn default() -> Self {
         Self {
-            hotkey: 0x75, // F6
+            hotkey: 0x75,
             trigger_mode: "hold".to_string(),
             resource_id: STREAMING_RESOURCE_BIGASR_DURATION.to_string(),
             model_name: "bigmodel".to_string(),
@@ -187,6 +187,118 @@ impl Default for IndicatorConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+pub struct SubtitleConfig {
+    pub subtitle_hotkey: u32,
+    pub subtitle_font_size: u32,
+    pub subtitle_font_color: String,
+    pub subtitle_bg_opacity: f32,
+    pub subtitle_blur: u32,
+    pub subtitle_max_lines: u32,
+    pub subtitle_window_x: i32,
+    pub subtitle_window_y: i32,
+    pub subtitle_window_width: u32,
+    pub subtitle_window_height: u32,
+    /// 字体族，如 "Microsoft YaHei"、"SimHei"、"Arial"
+    pub subtitle_font_family: String,
+    /// 字重 100-900
+    pub subtitle_font_weight: u32,
+    pub subtitle_italic: bool,
+    /// 文字对齐：left | center | right
+    pub subtitle_text_align: String,
+    /// 字间距 px
+    pub subtitle_letter_spacing: f32,
+    /// 行高倍数，1.4 = 1.4em
+    pub subtitle_line_height: f32,
+    /// 文字阴影颜色
+    pub subtitle_text_shadow_color: String,
+    /// 文字阴影强度 0-10
+    pub subtitle_text_shadow_strength: u32,
+    /// 背景颜色 (RGB)
+    pub subtitle_bg_color: String,
+    /// 圆角 px
+    pub subtitle_border_radius: u32,
+    /// 边框颜色
+    pub subtitle_border_color: String,
+    /// 边框宽度 px
+    pub subtitle_border_width: u32,
+    /// 内边距 px
+    pub subtitle_padding_x: u32,
+    pub subtitle_padding_y: u32,
+    /// 临时（中间结果）文字颜色
+    pub subtitle_interim_color: String,
+    /// 临时文字透明度 0-1
+    pub subtitle_interim_opacity: f32,
+}
+
+impl Default for SubtitleConfig {
+    fn default() -> Self {
+        Self {
+            subtitle_hotkey: 0x76,
+            subtitle_font_size: 32,
+            subtitle_font_color: "#ffffff".to_string(),
+            subtitle_bg_opacity: 0.6,
+            subtitle_blur: 20,
+            subtitle_max_lines: 3,
+            subtitle_window_x: -1,
+            subtitle_window_y: -1,
+            subtitle_window_width: 1200,
+            subtitle_window_height: 120,
+            subtitle_font_family: "Microsoft YaHei".to_string(),
+            subtitle_font_weight: 400,
+            subtitle_italic: false,
+            subtitle_text_align: "center".to_string(),
+            subtitle_letter_spacing: 0.0,
+            subtitle_line_height: 1.4,
+            subtitle_text_shadow_color: "#000000".to_string(),
+            subtitle_text_shadow_strength: 4,
+            subtitle_bg_color: "#000000".to_string(),
+            subtitle_border_radius: 12,
+            subtitle_border_color: "#ffffff".to_string(),
+            subtitle_border_width: 0,
+            subtitle_padding_x: 24,
+            subtitle_padding_y: 12,
+            subtitle_interim_color: "#ffffff".to_string(),
+            subtitle_interim_opacity: 0.7,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VadConfig {
+    pub vad_sensitivity: f32,
+    pub vad_silence_duration_ms: u32,
+}
+
+impl Default for VadConfig {
+    fn default() -> Self {
+        Self {
+            vad_sensitivity: 0.5,
+            vad_silence_duration_ms: 800,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ModelSelectionConfig {
+    pub batch_model: String,
+    pub stream_model: String,
+    pub subtitle_model: String,
+}
+
+impl Default for ModelSelectionConfig {
+    fn default() -> Self {
+        Self {
+            batch_model: MODEL_SENSEVOICE.to_string(),
+            stream_model: STREAM_MODEL_DOUBAO.to_string(),
+            subtitle_model: STREAM_MODEL_SHERPA.to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AppConfig {
     pub basic: BasicConfig,
     pub features: FeatureConfig,
@@ -195,6 +307,10 @@ pub struct AppConfig {
     pub model: ModelConfig,
     pub streaming: StreamingConfig,
     pub indicator: IndicatorConfig,
+    pub subtitle: SubtitleConfig,
+    pub vad: VadConfig,
+    pub model_selection: ModelSelectionConfig,
+    pub theme: String,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_name: Option<String>,
@@ -248,6 +364,10 @@ impl Default for AppConfig {
             model: ModelConfig::default(),
             streaming: StreamingConfig::default(),
             indicator: IndicatorConfig::default(),
+            subtitle: SubtitleConfig::default(),
+            vad: VadConfig::default(),
+            model_selection: ModelSelectionConfig::default(),
+            theme: "auto".to_string(),
             model_name: None,
             output_language: None,
             output_mode: None,
@@ -336,6 +456,21 @@ impl AppConfig {
         }
         self.streaming.post_process_mode =
             Self::normalize_streaming_post_process_mode(&self.streaming.post_process_mode);
+        self.basic.dictation_mode = Self::normalize_dictation_mode(&self.basic.dictation_mode);
+        self.subtitle.subtitle_bg_opacity = self.subtitle.subtitle_bg_opacity.clamp(0.0, 1.0);
+        self.subtitle.subtitle_interim_opacity = self.subtitle.subtitle_interim_opacity.clamp(0.0, 1.0);
+        self.subtitle.subtitle_font_weight = self.subtitle.subtitle_font_weight.clamp(100, 900);
+        // 取整到 100 的倍数
+        self.subtitle.subtitle_font_weight = (self.subtitle.subtitle_font_weight / 100) * 100;
+        self.subtitle.subtitle_text_shadow_strength = self.subtitle.subtitle_text_shadow_strength.min(10);
+        self.subtitle.subtitle_letter_spacing = self.subtitle.subtitle_letter_spacing.clamp(-5.0, 20.0);
+        self.subtitle.subtitle_line_height = self.subtitle.subtitle_line_height.clamp(0.8, 3.0);
+        // 对齐值归一
+        self.subtitle.subtitle_text_align = match self.subtitle.subtitle_text_align.as_str() {
+            "left" | "center" | "right" => self.subtitle.subtitle_text_align.clone(),
+            _ => "center".to_string(),
+        };
+        self.vad.vad_sensitivity = self.vad.vad_sensitivity.clamp(0.0, 1.0);
     }
 
     fn normalize_streaming_post_process_mode(mode: &str) -> String {
@@ -344,24 +479,47 @@ impl AppConfig {
             _ => STREAMING_POST_NONE.to_string(),
         }
     }
+
+    fn normalize_dictation_mode(mode: &str) -> String {
+        match mode {
+            DICTATION_MODE_BATCH | DICTATION_MODE_STREAM => mode.to_string(),
+            _ => DICTATION_MODE_BATCH.to_string(),
+        }
+    }
 }
 
 impl ConfigManager {
     pub fn new() -> Self {
-        let mut path = PathBuf::from("voice2type_config.json");
-        if !path.exists() {
-            if let Some(proj_dirs) =
-                directories::ProjectDirs::from("com", "guchang233", "voice2type")
-            {
-                let config_dir = proj_dirs.config_dir();
-                let _ = fs::create_dir_all(config_dir);
-                path = config_dir.join("settings.json");
-            }
+        Self::new_with_base_dir(None)
+    }
+
+    pub fn new_with_base_dir(base_dir: Option<PathBuf>) -> Self {
+        let config_dir = if let Some(dir) = base_dir {
+            dir
+        } else if let Some(proj_dirs) = directories::ProjectDirs::from("com", "guchang233", "voice2type")
+        {
+            proj_dirs.config_dir().to_path_buf()
+        } else {
+            PathBuf::from(".")
+        };
+
+        let _ = fs::create_dir_all(&config_dir);
+        let path = config_dir.join("settings.json");
+
+        let legacy_path = PathBuf::from("voice2type_config.json");
+        let actual_path = if !path.exists() && legacy_path.exists() {
+            legacy_path
+        } else {
+            path
+        };
+
+        let mut config = Self::load_config(&actual_path).unwrap_or_default();
+
+        if !config.model_selection.batch_model.is_empty() {
+            config.basic.model_name = config.model_selection.batch_model.clone();
         }
 
-        let mut config = Self::load_config(&path).unwrap_or_default();
-
-        if !path.exists() {
+        if !actual_path.exists() {
             if let Ok(key) = std::env::var("SILICONFLOW_API_KEY") {
                 config.model.siliconflow_api_key = key;
             }
@@ -369,13 +527,67 @@ impl ConfigManager {
 
         let manager = Self {
             config: Arc::new(Mutex::new(config)),
-            config_path: path,
+            config_path: actual_path,
         };
         manager.migrate_legacy_whisper_dir();
         manager
     }
 
-    /// 若用户尚未配置目录，但旧版默认路径 `{config_dir}/whisper` 已存在，则自动迁移。
+    fn is_e_drive_available() -> bool {
+        #[cfg(windows)]
+        {
+            use std::fs;
+            let e_drive = PathBuf::from("E:\\");
+            if !e_drive.exists() {
+                return false;
+            }
+            let test_dir = e_drive.join("Voice2Type");
+            match fs::create_dir_all(&test_dir) {
+                Ok(_) => {
+                    let test_file = test_dir.join(".write_test");
+                    match fs::write(&test_file, b"test") {
+                        Ok(_) => {
+                            let _ = fs::remove_file(&test_file);
+                            true
+                        }
+                        Err(_) => false,
+                    }
+                }
+                Err(_) => false,
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            false
+        }
+    }
+
+    pub fn models_dir(&self) -> PathBuf {
+        if Self::is_e_drive_available() {
+            PathBuf::from("E:\\Voice2Type\\models")
+        } else {
+            let data_dir = dirs::data_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("Voice2Type")
+                .join("models");
+            data_dir
+        }
+    }
+
+    pub fn ensure_models_dir(&self) -> anyhow::Result<PathBuf> {
+        let dir = self.models_dir();
+        fs::create_dir_all(&dir)?;
+        Ok(dir)
+    }
+
+    pub fn whisper_models_dir(&self) -> PathBuf {
+        self.models_dir().join("whisper")
+    }
+
+    pub fn sherpa_models_dir(&self) -> PathBuf {
+        self.models_dir().join("sherpa-onnx")
+    }
+
     fn migrate_legacy_whisper_dir(&self) {
         let legacy = self.config_dir().join("whisper");
         let mut cfg = self.config.lock().unwrap();
@@ -417,17 +629,42 @@ impl ConfigManager {
         Some(config)
     }
 
+    pub fn get_config(&self) -> AppConfig {
+        self.config.lock().unwrap().clone()
+    }
+
+    pub fn set_config(&self, new_config: AppConfig) {
+        let mut cfg = self.config.lock().unwrap();
+        *cfg = new_config;
+        cfg.basic.model_name = cfg.model_selection.batch_model.clone();
+    }
+
+    fn effective_model_name(&self) -> String {
+        let cfg = self.config.lock().unwrap();
+        let batch = &cfg.model_selection.batch_model;
+        if !batch.is_empty() {
+            batch.clone()
+        } else {
+            cfg.basic.model_name.clone()
+        }
+    }
+
     pub fn is_local_whisper(&self) -> bool {
-        self.config.lock().unwrap().basic.model_name == MODEL_LOCAL_WHISPER
+        self.effective_model_name() == MODEL_LOCAL_WHISPER
     }
 
     pub fn needs_api_key(&self) -> bool {
-        self.config.lock().unwrap().basic.model_name != MODEL_LOCAL_WHISPER
+        self.effective_model_name() != MODEL_LOCAL_WHISPER
     }
 
     pub fn get_api_key(&self) -> String {
         let cfg = self.config.lock().unwrap();
-        match cfg.basic.model_name.as_str() {
+        let model = if cfg.model_selection.batch_model.is_empty() {
+            cfg.basic.model_name.clone()
+        } else {
+            cfg.model_selection.batch_model.clone()
+        };
+        match model.as_str() {
             MODEL_TELEAI | MODEL_SENSEVOICE => cfg.model.siliconflow_api_key.clone(),
             MODEL_WHISPER => cfg.model.groq_api_key.clone(),
             MODEL_LOCAL_WHISPER => String::new(),
@@ -437,7 +674,12 @@ impl ConfigManager {
 
     pub fn set_api_key(&self, key: String) {
         let mut cfg = self.config.lock().unwrap();
-        match cfg.basic.model_name.as_str() {
+        let model = if cfg.model_selection.batch_model.is_empty() {
+            cfg.basic.model_name.clone()
+        } else {
+            cfg.model_selection.batch_model.clone()
+        };
+        match model.as_str() {
             MODEL_TELEAI | MODEL_SENSEVOICE => cfg.model.siliconflow_api_key = key,
             MODEL_WHISPER => cfg.model.groq_api_key = key,
             _ => cfg.model.custom_api_key = key,
@@ -538,7 +780,12 @@ impl ConfigManager {
 
     pub fn get_api_url(&self) -> String {
         let cfg = self.config.lock().unwrap();
-        match cfg.basic.model_name.as_str() {
+        let model = if cfg.model_selection.batch_model.is_empty() {
+            cfg.basic.model_name.clone()
+        } else {
+            cfg.model_selection.batch_model.clone()
+        };
+        match model.as_str() {
             MODEL_TELEAI | MODEL_SENSEVOICE => SILICONFLOW_TRANSCRIPTIONS_URL.to_string(),
             MODEL_WHISPER => GROQ_TRANSCRIPTIONS_URL.to_string(),
             _ => cfg.model.custom_api_url.clone(),
@@ -553,14 +800,19 @@ impl ConfigManager {
     }
 
     pub fn get_model_id(&self) -> String {
-        self.config.lock().unwrap().basic.model_name.clone()
+        self.effective_model_name()
     }
 
     pub fn get_model_name(&self) -> String {
         let cfg = self.config.lock().unwrap();
-        if cfg.basic.model_name == MODEL_CUSTOM {
+        let model = if cfg.model_selection.batch_model.is_empty() {
+            cfg.basic.model_name.clone()
+        } else {
+            cfg.model_selection.batch_model.clone()
+        };
+        if model == MODEL_CUSTOM {
             cfg.model.custom_model_name.clone()
-        } else if cfg.basic.model_name == MODEL_LOCAL_WHISPER {
+        } else if model == MODEL_LOCAL_WHISPER {
             format!(
                 "本地 Whisper ({})",
                 if cfg.model.local_whisper_model.is_empty() {
@@ -570,7 +822,7 @@ impl ConfigManager {
                 }
             )
         } else {
-            cfg.basic.model_name.clone()
+            model
         }
     }
 
@@ -703,9 +955,21 @@ impl ConfigManager {
         self.config.lock().unwrap().advanced.trigger_mode = mode;
     }
 
+    pub fn dictation_mode(&self) -> String {
+        self.config.lock().unwrap().basic.dictation_mode.clone()
+    }
+
+    pub fn set_dictation_mode(&self, mode: String) {
+        self.config.lock().unwrap().basic.dictation_mode = mode;
+    }
+
+    pub fn is_stream_mode(&self) -> bool {
+        self.dictation_mode() == DICTATION_MODE_STREAM
+    }
+
     pub fn get_speech_service(&self) -> String {
-        let cfg = self.config.lock().unwrap();
-        match cfg.basic.model_name.as_str() {
+        let model = self.effective_model_name();
+        match model.as_str() {
             MODEL_TELEAI | MODEL_SENSEVOICE => "siliconflow".to_string(),
             MODEL_WHISPER => "groq".to_string(),
             MODEL_LOCAL_WHISPER => "local".to_string(),
@@ -737,6 +1001,134 @@ impl ConfigManager {
         self.config.lock().unwrap().indicator.success_duration = duration;
     }
 
+    pub fn subtitle_hotkey(&self) -> u32 {
+        self.config.lock().unwrap().subtitle.subtitle_hotkey
+    }
+
+    pub fn set_subtitle_hotkey(&self, vk: u32) {
+        self.config.lock().unwrap().subtitle.subtitle_hotkey = vk;
+    }
+
+    pub fn subtitle_font_size(&self) -> u32 {
+        self.config.lock().unwrap().subtitle.subtitle_font_size
+    }
+
+    pub fn set_subtitle_font_size(&self, size: u32) {
+        self.config.lock().unwrap().subtitle.subtitle_font_size = size;
+    }
+
+    pub fn subtitle_font_color(&self) -> String {
+        self.config.lock().unwrap().subtitle.subtitle_font_color.clone()
+    }
+
+    pub fn set_subtitle_font_color(&self, color: String) {
+        self.config.lock().unwrap().subtitle.subtitle_font_color = color;
+    }
+
+    pub fn subtitle_bg_opacity(&self) -> f32 {
+        self.config.lock().unwrap().subtitle.subtitle_bg_opacity
+    }
+
+    pub fn set_subtitle_bg_opacity(&self, opacity: f32) {
+        self.config.lock().unwrap().subtitle.subtitle_bg_opacity = opacity.clamp(0.0, 1.0);
+    }
+
+    pub fn subtitle_blur(&self) -> u32 {
+        self.config.lock().unwrap().subtitle.subtitle_blur
+    }
+
+    pub fn set_subtitle_blur(&self, blur: u32) {
+        self.config.lock().unwrap().subtitle.subtitle_blur = blur;
+    }
+
+    pub fn subtitle_max_lines(&self) -> u32 {
+        self.config.lock().unwrap().subtitle.subtitle_max_lines
+    }
+
+    pub fn set_subtitle_max_lines(&self, lines: u32) {
+        self.config.lock().unwrap().subtitle.subtitle_max_lines = lines;
+    }
+
+    pub fn subtitle_window_x(&self) -> i32 {
+        self.config.lock().unwrap().subtitle.subtitle_window_x
+    }
+
+    pub fn set_subtitle_window_x(&self, x: i32) {
+        self.config.lock().unwrap().subtitle.subtitle_window_x = x;
+    }
+
+    pub fn subtitle_window_y(&self) -> i32 {
+        self.config.lock().unwrap().subtitle.subtitle_window_y
+    }
+
+    pub fn set_subtitle_window_y(&self, y: i32) {
+        self.config.lock().unwrap().subtitle.subtitle_window_y = y;
+    }
+
+    pub fn subtitle_window_width(&self) -> u32 {
+        self.config.lock().unwrap().subtitle.subtitle_window_width
+    }
+
+    pub fn set_subtitle_window_width(&self, width: u32) {
+        self.config.lock().unwrap().subtitle.subtitle_window_width = width;
+    }
+
+    pub fn subtitle_window_height(&self) -> u32 {
+        self.config.lock().unwrap().subtitle.subtitle_window_height
+    }
+
+    pub fn set_subtitle_window_height(&self, height: u32) {
+        self.config.lock().unwrap().subtitle.subtitle_window_height = height;
+    }
+
+    pub fn vad_sensitivity(&self) -> f32 {
+        self.config.lock().unwrap().vad.vad_sensitivity
+    }
+
+    pub fn set_vad_sensitivity(&self, sensitivity: f32) {
+        self.config.lock().unwrap().vad.vad_sensitivity = sensitivity.clamp(0.0, 1.0);
+    }
+
+    pub fn vad_silence_duration_ms(&self) -> u32 {
+        self.config.lock().unwrap().vad.vad_silence_duration_ms
+    }
+
+    pub fn set_vad_silence_duration_ms(&self, duration: u32) {
+        self.config.lock().unwrap().vad.vad_silence_duration_ms = duration;
+    }
+
+    pub fn batch_model(&self) -> String {
+        self.config.lock().unwrap().model_selection.batch_model.clone()
+    }
+
+    pub fn set_batch_model(&self, model: String) {
+        self.config.lock().unwrap().model_selection.batch_model = model;
+    }
+
+    pub fn stream_model(&self) -> String {
+        self.config.lock().unwrap().model_selection.stream_model.clone()
+    }
+
+    pub fn set_stream_model(&self, model: String) {
+        self.config.lock().unwrap().model_selection.stream_model = model;
+    }
+
+    pub fn subtitle_model(&self) -> String {
+        self.config.lock().unwrap().model_selection.subtitle_model.clone()
+    }
+
+    pub fn set_subtitle_model(&self, model: String) {
+        self.config.lock().unwrap().model_selection.subtitle_model = model;
+    }
+
+    pub fn theme(&self) -> String {
+        self.config.lock().unwrap().theme.clone()
+    }
+
+    pub fn set_theme(&self, theme: String) {
+        self.config.lock().unwrap().theme = theme;
+    }
+
     pub fn reset_ai_config(&self) {
         let mut cfg = self.config.lock().unwrap();
         cfg.basic.model_name = MODEL_SENSEVOICE.to_string();
@@ -752,7 +1144,6 @@ impl ConfigManager {
         Ok(())
     }
 
-    /// 保存配置；失败时通过托盘通知用户。
     pub fn save_or_notify(&self) -> bool {
         match self.save() {
             Ok(()) => true,

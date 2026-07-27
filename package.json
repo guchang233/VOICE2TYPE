@@ -1,0 +1,13 @@
+{
+  "name": "voice2type",
+  "version": "0.1.0",
+  "description": "Voice2Type - 语音输入与实时字幕",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}

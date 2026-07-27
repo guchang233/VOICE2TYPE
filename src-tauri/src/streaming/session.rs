@@ -49,6 +49,17 @@ impl StreamingSession {
         self.pcm_buffer.clone()
     }
 
+    /// 在 `start()` 之前调用：把音频采集得到的真实采样率写入会话，
+    /// 供 pump_task 与 finish() 中的重采样使用。
+    pub fn set_sample_rate(&mut self, rate: u32) {
+        self.sample_rate = rate;
+    }
+
+    /// 当前会话是否处于运行中（已建立 WebSocket 连接）。
+    pub fn is_running(&self) -> bool {
+        self.client.is_some()
+    }
+
     pub async fn start(&mut self, config: Arc<ConfigManager>) -> Result<()> {
         if self.client.is_some() {
             return Ok(());
@@ -109,6 +120,9 @@ impl StreamingSession {
                     break;
                 }
 
+                // 取走当前 buffer 中全部积累的样本（采集回调一直在写入）
+                // 之前的计算 `buf.len() * TARGET_RATE / rate` 会只取走 1/3，
+                // 导致 buffer 以 3 倍速积压，音频直到松开才被发送。
                 let chunk_f32 = {
                     let Ok(mut buf) = pcm_buf.lock() else {
                         break;
@@ -116,19 +130,14 @@ impl StreamingSession {
                     if buf.is_empty() {
                         continue;
                     }
-                    let take = if rate == 0 {
-                        buf.len()
-                    } else {
-                        ((buf.len() as u64 * TARGET_RATE as u64) / rate as u64).max(1) as usize
-                    };
-                    let take = take.min(buf.len());
-                    buf.drain(..take).collect::<Vec<_>>()
+                    std::mem::take(&mut *buf)
                 };
 
                 if chunk_f32.is_empty() {
                     continue;
                 }
 
+                // buffer 中已是单声道样本（start_capture 回调做了 downmix）
                 let (pcm_i16, _) = resample_and_convert(&chunk_f32, rate);
                 if pcm_i16.is_empty() {
                     continue;

@@ -3,25 +3,40 @@ name: Release
 on:
   push:
     tags:
-      - "v*" # 触发条件：推送 v 开头的 tag，例如 v0.0.1
+      - "v*"
   workflow_dispatch:
-  release:
-    types: [published]
+    inputs:
+      tag_name:
+        description: "Tag name for the release (e.g. v0.1.0)"
+        required: true
+        default: v0.1.0
 
 env:
   CARGO_TERM_COLOR: always
 
 permissions:
-  contents: write # 需要写入权限来创建 Release
+  contents: write
 
 jobs:
   build-release:
-    name: Build Windows Release
+    name: Build & Release (Windows)
     runs-on: windows-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc
 
       - name: Cache Cargo
         uses: actions/cache@v4
@@ -29,23 +44,31 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+            src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Determine tag name
+        id: tag
+        run: |
+          if [ -n "${{ github.event.inputs.tag_name }}" ]; then
+            echo "name=${{ github.event.inputs.tag_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "name=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+          fi
+        shell: bash
+
+      - name: Build & Publish Release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          toolchain: stable
-          target: x86_64-pc-windows-msvc
-
-      - name: Build Release
-        run: cargo build --release --verbose
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: target/release/voice2type.exe
-          name: Release ${{ github.ref_name }}
-          draft: false
+          tagName: ${{ steps.tag.outputs.name }}
+          releaseName: "Voice2Type ${{ steps.tag.outputs.name }}"
+          releaseBody: "Voice2Type 桌面版自动构建发布。基于 Tauri 2.0，包含蓝色主题 UI 与流式语音识别。"
+          releaseDraft: false
           prerelease: false
-          generate_release_notes: true
+          generateReleaseNotes: true
+          args: --target x86_64-pc-windows-msvc

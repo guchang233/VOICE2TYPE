@@ -24,6 +24,34 @@ pub fn last() -> Option<String> {
     HISTORY.get()?.lock().ok()?.last()
 }
 
+pub fn get_all() -> Vec<String> {
+    if let Some(h) = HISTORY.get() {
+        if let Ok(guard) = h.lock() {
+            return guard.entries.iter().cloned().collect();
+        }
+    }
+    Vec::new()
+}
+
+/// 按索引（从 0 开始，0 = 最新）删除一条历史记录
+pub fn remove(index: usize) -> bool {
+    if let Some(h) = HISTORY.get() {
+        if let Ok(mut guard) = h.lock() {
+            return guard.remove(index);
+        }
+    }
+    false
+}
+
+/// 清空所有历史记录
+pub fn clear() {
+    if let Some(h) = HISTORY.get() {
+        if let Ok(mut guard) = h.lock() {
+            guard.clear();
+        }
+    }
+}
+
 const MAX_ENTRIES: usize = 20;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -71,6 +99,27 @@ impl TranscriptionHistory {
 
     pub fn last(&self) -> Option<String> {
         self.entries.front().cloned()
+    }
+
+    pub fn entries(&self) -> Vec<String> {
+        self.entries.iter().cloned().collect()
+    }
+
+    pub fn remove(&mut self, index: usize) -> bool {
+        if index >= self.entries.len() {
+            return false;
+        }
+        // VecDeque 没有 remove(idx)，先收集到 Vec 再重建
+        let mut vec: Vec<String> = self.entries.iter().cloned().collect();
+        vec.remove(index);
+        self.entries = vec.into_iter().collect();
+        let _ = self.save();
+        true
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        let _ = self.save();
     }
 
     fn save(&self) -> anyhow::Result<()> {

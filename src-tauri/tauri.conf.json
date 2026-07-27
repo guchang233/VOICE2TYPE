@@ -1,0 +1,58 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Voice2Type",
+  "version": "0.1.0",
+  "identifier": "com.guchang233.voice2type",
+  "build": {
+    "frontendDist": "../src"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Voice2Type",
+        "width": 1000,
+        "height": 700,
+        "transparent": true,
+        "decorations": false,
+        "resizable": true,
+        "center": true,
+        "url": "index.html"
+      },
+      {
+        "label": "subtitle",
+        "title": "Voice2Type 实时字幕",
+        "width": 1200,
+        "height": 120,
+        "x": 360,
+        "y": 900,
+        "transparent": true,
+        "decorations": false,
+        "resizable": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "url": "subtitle.html",
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["icons/icon.ico"],
+    "windows": {
+      "nsis": {
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": true,
+        "installMode": "currentUser"
+      }
+    },
+    "shortDescription": "Voice2Type - 语音输入与实时字幕",
+    "longDescription": "高精度语音识别与实时字幕工具，支持云端API和本地模型"
+  },
+  "plugins": {}
+}

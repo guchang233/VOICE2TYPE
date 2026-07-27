@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>实时字幕</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            height: 100%;
+            width: 100%;
+            overflow: hidden;
+            background: transparent;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        #subtitle-container {
+            height: 100%;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            padding: 12px 24px;
+            -webkit-app-region: drag;
+            app-region: drag;
+        }
+        #subtitle-text {
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-radius: 12px;
+            padding: 12px 24px;
+            color: #ffffff;
+            font-family: "Microsoft YaHei", sans-serif;
+            font-size: 32px;
+            font-weight: 400;
+            line-height: 1.4;
+            letter-spacing: 0px;
+            text-align: center;
+            max-width: 100%;
+            word-wrap: break-word;
+            border: 1px solid transparent;
+            text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+            transition: opacity 0.15s ease;
+        }
+        #subtitle-text.interim {
+            opacity: 0.7;
+        }
+        #subtitle-text.empty {
+            opacity: 0.5;
+        }
+    </style>
+</head>
+<body>
+    <div id="subtitle-container">
+        <div id="subtitle-text" class="empty">等待语音输入...</div>
+    </div>
+    <script>
+        const { listen } = window.__TAURI__.event;
+        const subtitleText = document.getElementById('subtitle-text');
+
+        // 将 hex 颜色转换为 rgba 字符串（保留 alpha）
+        function hexToRgba(hex, alpha) {
+            const h = hex.replace('#', '');
+            const r = parseInt(h.substring(0, 2), 16);
+            const g = parseInt(h.substring(2, 4), 16);
+            const b = parseInt(h.substring(4, 6), 16);
+            return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        }
+
+        // 根据 shadow_strength 生成 text-shadow 字符串（多层叠加增强阴影效果）
+        function buildTextShadow(color, strength) {
+            if (!strength || strength === 0) return 'none';
+            // 对称投影，模拟轮廓效果
+            const offsets = [
+                [0, 1], [0, -1], [1, 0], [-1, 0],
+                [1, 1], [-1, 1], [1, -1], [-1, -1]
+            ];
+            const intensity = Math.min(strength / 4, 2.5);
+            return offsets
+                .map(([x, y]) => `${x * intensity}px ${y * intensity}px ${intensity}px ${color}`)
+                .join(', ');
+        }
+
+        function applyConfig(cfg) {
+            const el = subtitleText.style;
+            if (cfg.fontFamily) {
+                el.fontFamily = `"${cfg.fontFamily}", sans-serif`;
+            }
+            if (cfg.fontSize) {
+                el.fontSize = cfg.fontSize + 'px';
+            }
+            if (cfg.fontWeight) {
+                el.fontWeight = cfg.fontWeight;
+            }
+            // 加粗优先：bold=true 时强制 700
+            if (cfg.bold === true) {
+                el.fontWeight = '700';
+            }
+            el.fontStyle = cfg.italic === true ? 'italic' : 'normal';
+            if (cfg.fontColor) {
+                el.color = cfg.fontColor;
+            }
+            if (cfg.textAlign) {
+                el.textAlign = cfg.textAlign;
+            }
+            if (typeof cfg.letterSpacing === 'number') {
+                el.letterSpacing = cfg.letterSpacing + 'px';
+            }
+            if (typeof cfg.lineHeight === 'number') {
+                el.lineHeight = String(cfg.lineHeight);
+            }
+            if (typeof cfg.paddingX === 'number' && typeof cfg.paddingY === 'number') {
+                el.padding = `${cfg.paddingY}px ${cfg.paddingX}px`;
+            }
+            if (typeof cfg.borderRadius === 'number') {
+                el.borderRadius = cfg.borderRadius + 'px';
+            }
+            // 背景：color + opacity
+            const bgColor = cfg.bgColor || '#000000';
+            const bgOpacity = typeof cfg.bgOpacity === 'number' ? cfg.bgOpacity : 0.6;
+            el.background = hexToRgba(bgColor, bgOpacity);
+            // 模糊
+            const blur = typeof cfg.blur === 'number' ? cfg.blur : 20;
+            el.backdropFilter = `blur(${blur}px)`;
+            el.webkitBackdropFilter = `blur(${blur}px)`;
+            // 边框
+            const borderWidth = typeof cfg.borderWidth === 'number' ? cfg.borderWidth : 0;
+            const borderColor = cfg.borderColor || '#ffffff';
+            el.borderWidth = borderWidth + 'px';
+            el.borderStyle = borderWidth > 0 ? 'solid' : 'none';
+            el.borderColor = borderColor;
+            // 阴影
+            const shadowColor = cfg.textShadowColor || '#000000';
+            const shadowStrength = typeof cfg.textShadowStrength === 'number' ? cfg.textShadowStrength : 4;
+            el.textShadow = buildTextShadow(shadowColor, shadowStrength);
+            // 临时文字样式
+            if (typeof cfg.interimOpacity === 'number') {
+                subtitleText.dataset.interimOpacity = cfg.interimOpacity;
+            }
+            if (cfg.interimColor) {
+                subtitleText.dataset.interimColor = cfg.interimColor;
+            }
+        }
+
+        function updateInterimStyle(isFinal) {
+            const interimOpacity = parseFloat(subtitleText.dataset.interimOpacity || '0.7');
+            const interimColor = subtitleText.dataset.interimColor || '#ffffff';
+            if (isFinal) {
+                // 还原为正常颜色与不透明度（由 fontColor 配置控制）
+                subtitleText.style.opacity = '1';
+            } else {
+                subtitleText.style.opacity = String(interimOpacity);
+            }
+        }
+
+        listen('subtitle-text', (event) => {
+            const { text, isFinal } = event.payload;
+            const displayText = text || '...';
+            subtitleText.textContent = displayText;
+            subtitleText.classList.toggle('interim', !isFinal);
+            subtitleText.classList.toggle('empty', !text || text.trim() === '');
+            updateInterimStyle(isFinal);
+        });
+
+        listen('subtitle-config', (event) => {
+            const cfg = event.payload;
+            applyConfig(cfg);
+        });
+    </script>
+</body>
+</html>

@@ -35,17 +35,33 @@ impl ApiClient {
             anyhow::bail!("API Key is not configured");
         }
 
+        let url = self.api_url(config);
+        let model = config.get_model_name();
+        let service = config.get_speech_service();
+
+        log::info!(
+            "API request: service={}, model={}, url={}, audio_size={} bytes, key={}...",
+            service,
+            model,
+            url,
+            audio_data.len(),
+            &api_key[..api_key.len().min(8)]
+        );
+
         let resp = HTTP_CLIENT
-            .post(self.api_url(config))
+            .post(&url)
             .header("Authorization", format!("Bearer {}", api_key))
             .multipart(self.build_form(audio_data, config, "recording.wav")?)
             .send()
             .await
             .context("Failed to send API request")?;
 
-        if !resp.status().is_success() {
-            let status = resp.status();
+        let status = resp.status();
+        log::info!("API response status: {}", status);
+
+        if !status.is_success() {
             let error_text = resp.text().await.context("Failed to read error response")?;
+            log::error!("API error {}: {}", status, error_text);
             anyhow::bail!("API error {}: {}", status, error_text);
         }
 
@@ -71,18 +87,22 @@ impl ApiClient {
         config: &ConfigManager,
         file_name: &str,
     ) -> Result<Form> {
-        let mut form = Form::new().text("model", config.get_model_name()).part(
-            "file",
-            reqwest::multipart::Part::bytes(audio_data)
-                .file_name(file_name.to_string())
-                .mime_str("audio/wav")?,
-        );
+        let service = config.get_speech_service();
+        let mut form = Form::new()
+            .text("model", config.get_model_name())
+            .text("response_format", "json")
+            .part(
+                "file",
+                reqwest::multipart::Part::bytes(audio_data)
+                    .file_name(file_name.to_string())
+                    .mime_str("audio/wav")?,
+            );
 
-        if config.get_speech_service() == "groq" {
-            form = form
-                .text("temperature", "0")
-                .text("response_format", "json");
-        } else if config.output_language() != "auto" {
+        if service == "groq" {
+            form = form.text("temperature", "0");
+        }
+
+        if config.output_language() != "auto" {
             form = form.text("language", config.output_language());
         }
 
