@@ -1,12 +1,11 @@
 use anyhow::Result;
-use self_update::cargo_crate_version;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 
 /// 当前应用版本号（来自 Cargo.toml 的 version 字段）
 pub fn current_version() -> String {
-    cargo_crate_version!().to_string()
+    env!("CARGO_PKG_VERSION").to_string()
 }
 
 #[derive(Clone, Debug)]
@@ -125,7 +124,7 @@ pub fn check_update() -> Result<UpdateCheckResult> {
 
     // semver parsing
     // 清理版本字符串（去除 'v' 前缀，例如 "v0.1.1" -> "0.1.1"）
-    let clean_current = cargo_crate_version!().trim_start_matches('v');
+    let clean_current = env!("CARGO_PKG_VERSION").trim_start_matches('v');
     let clean_latest = release.tag_name.trim_start_matches('v');
 
     let current =
