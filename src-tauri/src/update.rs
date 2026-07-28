@@ -40,21 +40,74 @@ struct GithubRelease {
 
 const GITHUB_API_BASE: &str = "https://api.github.com/repos/guchang233/VOICE2TYPE";
 
+/// jsDelivr CDN 域名列表（国内可达，用于获取仓库中的 update.json）
+const JSDELIVR_CDNS: &[&str] = &[
+    "https://cdn.jsdelivr.net/gh/guchang233/VOICE2TYPE@main/update.json",
+    "https://fastly.jsdelivr.net/gh/guchang233/VOICE2TYPE@main/update.json",
+    "https://gcore.jsdelivr.net/gh/guchang233/VOICE2TYPE@main/update.json",
+];
+
+/// GitHub 加速镜像前缀列表（用于下载文件回退）
+/// 空字符串表示直连，其余为代理服务前缀
+const GITHUB_MIRRORS: &[&str] = &[
+    "",  // 直连
+];
+
 fn build_client() -> Result<reqwest::blocking::Client> {
     reqwest::blocking::Client::builder()
         .user_agent("Voice2Type-App")
-        .timeout(std::time::Duration::from_secs(15))
+        // 仅限制连接建立超时，不限制整体下载时长（防止大文件下载被中断）
+        .connect_timeout(std::time::Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::limited(5))
         .build()
         .map_err(Into::into)
 }
 
-/// 获取最新正式 release（跳过 prerelease 和 draft）
-/// 优先使用 /releases/latest，失败时回退到 /releases 列表
-fn fetch_latest_release() -> Result<GithubRelease> {
+/// 通过 jsDelivr CDN 获取 update.json（国内首选方案）
+/// 返回 None 表示所有 CDN 都不可用（上层回退到 GitHub API）
+fn fetch_via_cdn() -> Result<GithubRelease> {
     let client = build_client()?;
+    let mut errors = Vec::new();
 
-    // 1. 首选 /releases/latest（仅返回最新正式发布，自动排除 prerelease 和 draft）
+    for url in JSDELIVR_CDNS {
+        log::info!("尝试 CDN: {}", url);
+        match client.get(*url).send() {
+            Ok(resp) if resp.status().is_success() => {
+                log::info!("CDN 获取成功: {}", url);
+                return Ok(resp.json()?);
+            }
+            Ok(resp) => {
+                errors.push(format!("{}: HTTP {}", url, resp.status()));
+            }
+            Err(e) => {
+                errors.push(format!("{}: {}", url, e));
+            }
+        }
+    }
+
+    anyhow::bail!("所有 CDN 均不可用: {}", errors.join("; "))
+}
+
+/// 获取最新正式 release（跳过 prerelease 和 draft）
+/// 优先通过 jsDelivr CDN 获取 update.json（国内稳定），失败回退到 GitHub API
+fn fetch_latest_release() -> Result<GithubRelease> {
+    // 1. 首选：jsDelivr CDN（国内访问稳定）
+    match fetch_via_cdn() {
+        Ok(release) => {
+            // 过滤掉 prerelease 和 draft（CDN 上的文件应始终是正式版）
+            if release.prerelease || release.draft {
+                log::warn!("CDN 返回的 release 不是正式版，回退到 GitHub API");
+            } else {
+                return Ok(release);
+            }
+        }
+        Err(e) => {
+            log::warn!("CDN 获取失败，回退到 GitHub API: {}", e);
+        }
+    }
+
+    // 2. 回退：GitHub API 直连
+    let client = build_client()?;
     let resp = client
         .get(format!("{}/releases/latest", GITHUB_API_BASE))
         .header("Accept", "application/vnd.github+json")
@@ -80,14 +133,12 @@ fn fetch_latest_release() -> Result<GithubRelease> {
         }
 
         let releases: Vec<GithubRelease> = resp2.json()?;
-        // 过滤掉 prerelease 和 draft，取第一个（即最新）
         return releases
             .into_iter()
             .find(|r| !r.prerelease && !r.draft)
             .ok_or_else(|| anyhow::anyhow!("No stable releases found in repository"));
     }
 
-    // 其他错误状态码
     let status = resp.status();
     let body = resp.text().unwrap_or_default();
     anyhow::bail!("GitHub API returned error status: {} - {}", status, body);
@@ -158,6 +209,40 @@ pub fn check_update() -> Result<UpdateCheckResult> {
 
 // Progress callback: (current_bytes, total_bytes)
 pub fn download_file<F>(url: &str, path: &PathBuf, on_progress: F) -> Result<()>
+where
+    F: Fn(u64, u64),
+{
+    // 构建下载源列表：直连 + 各加速镜像
+    let mut sources = vec![url.to_string()];
+    for mirror in GITHUB_MIRRORS.iter().skip(1) {
+        sources.push(format!("{}{}", mirror, url));
+    }
+
+    let mut errors = Vec::new();
+
+    for try_url in &sources {
+        log::info!("尝试下载: {}", try_url);
+        match download_single(try_url, path, &on_progress) {
+            Ok(()) => {
+                if try_url != url {
+                    log::info!("镜像下载成功: {}", try_url);
+                }
+                return Ok(());
+            }
+            Err(e) => {
+                log::warn!("下载源 {} 失败: {}", try_url, e);
+                errors.push(format!("{}: {}", try_url, e));
+                // 清理可能的部分下载文件
+                let _ = fs::remove_file(path);
+            }
+        }
+    }
+
+    anyhow::bail!("所有下载源均失败: {}", errors.join("; "))
+}
+
+/// 从单个 URL 下载文件到指定路径
+fn download_single<F>(url: &str, path: &PathBuf, on_progress: F) -> Result<()>
 where
     F: Fn(u64, u64),
 {
@@ -239,7 +324,12 @@ pub fn install_update(new_bin: &PathBuf) -> Result<()> {
     }
 
     // Move new to current
-    fs::rename(new_bin, &current_exe)?;
+    // 优先尝试 rename（同卷时原子且快速），失败则回退到 copy + remove（跨卷场景）
+    if fs::rename(new_bin, &current_exe).is_err() {
+        // 跨卷 rename 在 Windows 上会失败，回退到 copy + delete
+        fs::copy(new_bin, &current_exe)?;
+        let _ = fs::remove_file(new_bin);
+    }
 
     Ok(())
 }

@@ -257,6 +257,7 @@ pub fn build_start_json(
             "enable_ddc": true,
             "show_utterances": true,
             "result_type": "full",
+            "end_window_size": 800,
         }
     });
 

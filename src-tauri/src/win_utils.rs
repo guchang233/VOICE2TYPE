@@ -38,8 +38,9 @@ pub fn is_admin() -> bool {
 
 /// 单次 SendInput 事件上限，避免长文本/大量退格时 Vec 过大导致 OOM（release 下 panic=abort 会直接闪退）
 #[cfg(target_os = "windows")]
-const SENDINPUT_CHUNK: usize = 64;
+const SENDINPUT_CHUNK: usize = 512;
 
+/// 批量发送退格键：构建单个 INPUT 数组一次性提交，将 N 次系统调用降为 ceil(N/256) 次
 #[cfg(target_os = "windows")]
 pub unsafe fn send_backspaces(count: usize) {
     if count == 0 {
@@ -47,32 +48,42 @@ pub unsafe fn send_backspaces(count: usize) {
     }
     let count = count.min(16_384);
     let vk_back = VIRTUAL_KEY(0x08);
-    for _ in 0..count {
-        let down = INPUT {
-            r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 {
-                ki: KEYBDINPUT {
-                    wVk: vk_back,
-                    wScan: 0,
-                    dwFlags: KEYBD_EVENT_FLAGS(0),
-                    time: 0,
-                    dwExtraInfo: 0,
+
+    // 每个 INPUT 数组的容量上限（以 INPUT 结构数为单位），对应 SENDINPUT_CHUNK/2 次退格
+    let max_pairs_per_call = SENDINPUT_CHUNK / 2;
+
+    let mut remaining = count;
+    while remaining > 0 {
+        let pairs = remaining.min(max_pairs_per_call);
+        let mut inputs = Vec::with_capacity(pairs * 2);
+        for _ in 0..pairs {
+            inputs.push(INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: vk_back,
+                        wScan: 0,
+                        dwFlags: KEYBD_EVENT_FLAGS(0),
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
                 },
-            },
-        };
-        let up = INPUT {
-            r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 {
-                ki: KEYBDINPUT {
-                    wVk: vk_back,
-                    wScan: 0,
-                    dwFlags: KEYEVENTF_KEYUP,
-                    time: 0,
-                    dwExtraInfo: 0,
+            });
+            inputs.push(INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: vk_back,
+                        wScan: 0,
+                        dwFlags: KEYEVENTF_KEYUP,
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
                 },
-            },
-        };
-        SendInput(&[down, up], std::mem::size_of::<INPUT>() as i32);
+            });
+        }
+        SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+        remaining -= pairs;
     }
 }
 

@@ -28,6 +28,7 @@ pub struct StreamingSession {
     client: Option<Arc<StreamingAsrClient>>,
     ws_task: Option<JoinHandle<()>>,
     pump_task: Option<JoinHandle<()>>,
+    consumer_task: Option<JoinHandle<()>>,
     output: Arc<StreamingOutput>,
 }
 
@@ -41,6 +42,7 @@ impl StreamingSession {
             client: None,
             ws_task: None,
             pump_task: None,
+            consumer_task: None,
             output: Arc::new(StreamingOutput::new()),
         }
     }
@@ -81,7 +83,7 @@ impl StreamingSession {
 
         let output = self.output.clone();
         let cfg = config.clone();
-        tokio::spawn(async move {
+        let consumer = tokio::spawn(async move {
             while let Some(msg) = result_rx.recv().await {
                 match msg {
                     Ok(resp) => {
@@ -93,6 +95,7 @@ impl StreamingSession {
                 }
             }
         });
+        self.consumer_task = Some(consumer);
 
         IS_STREAMING.store(true, Ordering::SeqCst);
         write_log_line("--> [流式] 开始实时识别… (ESC 取消)", Some(&config));
@@ -203,14 +206,22 @@ impl StreamingSession {
         }
 
         if let Some(task) = self.ws_task.take() {
-            let _ = tokio::time::timeout(Duration::from_secs(3), task).await;
+            let _ = tokio::time::timeout(Duration::from_secs(1), task).await;
+        }
+
+        // 等待消费任务处理完最后的 ASR 帧，最多 500ms 后强制终止
+        if let Some(task) = self.consumer_task.take() {
+            let abort_handle = task.abort_handle();
+            if tokio::time::timeout(Duration::from_millis(500), task).await.is_err() {
+                // 超时则 abort，防止松手后仍在逐字输出
+                abort_handle.abort();
+            }
         }
 
         self.client = None;
-        tokio::time::sleep(Duration::from_millis(80)).await;
+        tokio::time::sleep(Duration::from_millis(30)).await;
         if !cancelled {
             self.output.finalize_ai_polish(config);
-            tokio::time::sleep(Duration::from_millis(1200)).await;
         }
         self.output.reset();
 

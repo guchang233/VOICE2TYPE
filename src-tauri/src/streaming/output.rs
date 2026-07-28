@@ -140,11 +140,13 @@ impl StreamingOutput {
             return;
         }
 
-        let prev_utf16 = utf16_len(&last);
-        let ok = replace_session_text(prev_utf16, display, self);
+        // 公共前缀增量替换：只删除变化的尾部、只输入新增的字符
+        let (common_utf16, delete_count, new_suffix) = compute_incremental(&last, display);
+
+        let ok = replace_session_text(common_utf16, delete_count, new_suffix, self);
         if !ok {
             #[cfg(target_os = "windows")]
-            fallback_backspace_type(prev_utf16, display);
+            fallback_backspace_type(delete_count, new_suffix);
         }
         *last = display.to_string();
     }
@@ -154,7 +156,30 @@ fn utf16_len(s: &str) -> u32 {
     s.encode_utf16().count().min(16_384) as u32
 }
 
-fn replace_session_text(prev_utf16: u32, new_text: &str, output: &StreamingOutput) -> bool {
+/// 计算新旧文本的公共前缀，返回 (公共前缀 UTF-16 长度, 需删除的 UTF-16 数量, 新文本后缀)
+fn compute_incremental<'a>(prev: &'a str, new: &'a str) -> (u32, u32, &'a str) {
+    // 按字符（Unicode scalar value）计算公共前缀的字节长度
+    let mut common_bytes = 0usize;
+    for (a, b) in prev.chars().zip(new.chars()) {
+        if a == b {
+            common_bytes += a.len_utf8();
+        } else {
+            break;
+        }
+    }
+    let common_utf16 = prev[..common_bytes].encode_utf16().count() as u32;
+    let prev_utf16 = utf16_len(prev);
+    let delete_count = prev_utf16.saturating_sub(common_utf16);
+    let new_suffix = &new[common_bytes..];
+    (common_utf16, delete_count, new_suffix)
+}
+
+fn replace_session_text(
+    common_utf16: u32,
+    delete_count: u32,
+    new_suffix: &str,
+    output: &StreamingOutput,
+) -> bool {
     #[cfg(target_os = "windows")]
     {
         let anchor = match output.anchor.lock() {
@@ -162,10 +187,10 @@ fn replace_session_text(prev_utf16: u32, new_text: &str, output: &StreamingOutpu
             Err(_) => return false,
         };
         if let Some(a) = anchor {
-            return replace_via_edit(&a, prev_utf16, new_text);
+            return replace_via_edit(&a, common_utf16, delete_count, new_suffix);
         }
     }
-    let _ = (prev_utf16, new_text, output);
+    let _ = (common_utf16, delete_count, new_suffix, output);
     false
 }
 
@@ -199,19 +224,21 @@ fn is_edit_like(hwnd: HWND) -> bool {
 }
 
 #[cfg(target_os = "windows")]
-fn replace_via_edit(anchor: &EditAnchor, prev_utf16: u32, new_text: &str) -> bool {
+fn replace_via_edit(anchor: &EditAnchor, common_utf16: u32, delete_count: u32, new_suffix: &str) -> bool {
     unsafe {
         if !IsWindow(anchor.hwnd).as_bool() {
             return false;
         }
-        let end = anchor.start.saturating_add(prev_utf16);
+        // 只选中变化的尾部 [anchor.start + common, anchor.start + common + delete_count]
+        let sel_start = anchor.start.saturating_add(common_utf16);
+        let sel_end = sel_start.saturating_add(delete_count);
         SendMessageW(
             anchor.hwnd,
             EM_SETSEL,
-            WPARAM(anchor.start as usize),
-            LPARAM(end as isize),
+            WPARAM(sel_start as usize),
+            LPARAM(sel_end as isize),
         );
-        let wide: Vec<u16> = new_text.encode_utf16().chain(std::iter::once(0)).collect();
+        let wide: Vec<u16> = new_suffix.encode_utf16().chain(std::iter::once(0)).collect();
         let replaced = SendMessageW(
             anchor.hwnd,
             EM_REPLACESEL,
@@ -223,13 +250,13 @@ fn replace_via_edit(anchor: &EditAnchor, prev_utf16: u32, new_text: &str) -> boo
 }
 
 #[cfg(target_os = "windows")]
-fn fallback_backspace_type(prev_utf16: u32, new_text: &str) {
+fn fallback_backspace_type(delete_count: u32, new_suffix: &str) {
     unsafe {
-        if prev_utf16 > 0 {
-            crate::win_utils::send_backspaces(prev_utf16 as usize);
+        if delete_count > 0 {
+            crate::win_utils::send_backspaces(delete_count as usize);
         }
-        if !new_text.is_empty() {
-            crate::win_utils::send_unicode_text(new_text);
+        if !new_suffix.is_empty() {
+            crate::win_utils::send_unicode_text(new_suffix);
         }
     }
 }

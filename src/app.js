@@ -1354,6 +1354,24 @@
                 }
             });
         });
+
+        // 申请链接按钮：点击通过 shell 插件打开系统浏览器
+        $$('.apply-link-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const url = btn.dataset.url;
+                if (!url) return;
+                try {
+                    if (window.__TAURI__ && window.__TAURI__.shell && window.__TAURI__.shell.open) {
+                        await window.__TAURI__.shell.open(url);
+                    } else {
+                        window.open(url, '_blank');
+                    }
+                } catch (e) {
+                    console.error('打开链接失败:', e);
+                    window.open(url, '_blank');
+                }
+            });
+        });
     }
 
     const logs = [];

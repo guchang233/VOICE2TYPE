@@ -97,3 +97,37 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: ${{ steps.binary.outputs.path }}
+
+      - name: Update update.json for jsDelivr CDN
+        run: |
+          VERSION="${{ steps.tag.outputs.name }}"
+          # 获取刚创建的 release 信息（发布时间、body）
+          RELEASE_JSON=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/latest")
+          PUBLISHED_AT=$(echo "$RELEASE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('published_at',''))" 2>/dev/null || echo "")
+          BODY=$(echo "$RELEASE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('body',''))" 2>/dev/null || echo "")
+
+          # 生成 update.json
+          cat > update.json << EOF
+          {
+            "tag_name": "${VERSION}",
+            "name": "Voice2Type ${VERSION}",
+            "body": "$(echo "$BODY" | sed 's/\\/\\\\/g; s/"/\\"/g; s/$/\\n/' | tr -d '\n' | sed 's/\\n$//')",
+            "prerelease": false,
+            "draft": false,
+            "published_at": "${PUBLISHED_AT}",
+            "assets": [
+              {
+                "name": "Voice2Type_v${VERSION#v}_x86_64.exe",
+                "browser_download_url": "https://github.com/guchang233/VOICE2TYPE/releases/download/${VERSION}/Voice2Type_v${VERSION#v}_x86_64.exe"
+              }
+            ]
+          }
+          EOF
+
+          # 提交到仓库（触发 jsDelivr CDN 缓存更新）
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add update.json
+          git commit -m "chore: update update.json for ${VERSION}" || echo "No changes to commit"
+          git push
