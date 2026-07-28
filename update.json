@@ -1,14 +1,14 @@
 {
-  "tag_name": "v0.1.2",
-  "name": "Voice2Type v0.1.2",
+  "tag_name": "v0.1.3",
+  "name": "Voice2Type v0.1.3",
   "body": "Voice2Type 桌面版自动构建发布。\n\n## 安装说明\n\n下载下方的 Voice2Type_v*.exe 文件即可直接运行，无需安装。\n\n## 特性\n\n- 流式语音识别输出重构：公共前缀增量替换，解决长句逐字输出问题\n- 检查更新支持 jsDelivr CDN，国内访问稳定\n- API 密钥设置增加申请链接快捷入口",
   "prerelease": false,
   "draft": false,
   "published_at": "2026-07-28T06:23:31Z",
   "assets": [
     {
-      "name": "Voice2Type_v0.1.2_x86_64.exe",
-      "browser_download_url": "https://github.com/guchang233/VOICE2TYPE/releases/download/v0.1.2/Voice2Type_v0.1.2_x86_64.exe"
+      "name": "Voice2Type_v0.1.3_x86_64.exe",
+      "browser_download_url": "https://github.com/guchang233/VOICE2TYPE/releases/download/v0.1.3/Voice2Type_v0.1.3_x86_64.exe"
     }
   ]
 }
