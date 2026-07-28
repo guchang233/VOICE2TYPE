@@ -198,6 +198,7 @@ html, body {
     overflow: hidden;
     min-height: 40px;
     position: relative;
+    z-index: 1;
 }
 
 .nav-item:hover {
@@ -205,16 +206,43 @@ html, body {
     color: var(--text-primary);
 }
 
+/* 激活态：背景由 .nav-indicator 滑动提供，这里只保留文字颜色 */
 .nav-item.active {
-    background: linear-gradient(180deg, var(--accent-blue-hover) 0%, var(--accent-blue) 100%);
     color: white;
     border-color: transparent;
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1) inset, 0 2px 8px rgba(59, 130, 246, 0.25);
+}
+
+.nav-item.active:hover {
+    background: transparent;
+    color: white;
 }
 
 .nav-item svg {
     flex-shrink: 0;
     z-index: 1;
+}
+
+/* 滑动指示器：主题强调色背景块，平滑过渡到新选中项 */
+.nav-indicator {
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    top: 0;
+    height: 40px;
+    background: linear-gradient(180deg, var(--accent-blue-hover) 0%, var(--accent-blue) 100%);
+    border-radius: var(--radius-md);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1) inset, 0 2px 8px rgba(59, 130, 246, 0.25);
+    opacity: 0;
+    transform: translateY(0);
+    transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1),
+                height 0.32s cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 0.2s ease;
+    pointer-events: none;
+    z-index: 0;
+}
+
+.nav-indicator.visible {
+    opacity: 1;
 }
 
 .nav-label {
@@ -350,6 +378,10 @@ html, body {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
     padding: 2px;
+    position: relative;
+    /* 自适应内容宽度，避免在父容器变宽时被拉伸导致按钮左对齐留白 */
+    width: fit-content;
+    max-width: 100%;
 }
 
 .seg-btn {
@@ -362,15 +394,45 @@ html, body {
     cursor: pointer;
     border-radius: 3px;
     transition: var(--transition);
+    position: relative;
+    z-index: 1;
+    /* 确保按钮内文字水平居中 */
+    text-align: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .seg-btn:hover {
     color: var(--text-primary);
 }
 
+/* 激活态：背景由 .seg-indicator 滑动提供 */
 .seg-btn.active {
-    background: var(--accent-blue);
     color: white;
+}
+
+/* 滑动指示器：主题强调色背景块，平滑过渡到新选中项 */
+.seg-indicator {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 0;
+    width: 0;
+    background: var(--accent-blue);
+    border-radius: 3px;
+    opacity: 0;
+    transform: translate(0, 0);
+    transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1),
+                width 0.32s cubic-bezier(0.4, 0, 0.2, 1),
+                height 0.32s cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 0.2s ease;
+    pointer-events: none;
+    z-index: 0;
+}
+
+.seg-indicator.visible {
+    opacity: 1;
 }
 
 .dictation-center {
@@ -1084,6 +1146,10 @@ html, body {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
     padding: 2px;
+    position: relative;
+    /* 自适应内容宽度，避免被父容器拉伸导致按钮左对齐留白 */
+    width: fit-content;
+    max-width: 100%;
 }
 
 .log-level-btn {
@@ -1097,14 +1163,21 @@ html, body {
     border-radius: 3px;
     transition: var(--transition);
     font-family: var(--font-mono);
+    position: relative;
+    z-index: 1;
+    /* 确保按钮内文字水平居中 */
+    text-align: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .log-level-btn:hover {
     color: var(--text-primary);
 }
 
+/* 激活态：背景由 .seg-indicator 滑动提供 */
 .log-level-btn.active {
-    background: var(--bg-hover);
     color: var(--text-primary);
 }
 

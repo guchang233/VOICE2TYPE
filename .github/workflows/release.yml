@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: "Tag name for the release (e.g. v0.1.1)"
+        description: "Tag name for the release (e.g. v0.1.2)"
         required: true
-        default: v0.1.1
+        default: v0.1.2
 
 env:
   CARGO_TERM_COLOR: always
@@ -59,7 +59,7 @@ jobs:
         id: binary
         shell: bash
         run: |
-          # 提取版本号（去掉 'v' 前缀，例如 v0.1.1 -> 0.1.1）
+          # 提取版本号（去掉 'v' 前缀，例如 v0.1.2 -> 0.1.2）
           VERSION="${{ steps.tag.outputs.name }}"
           VERSION="${VERSION#v}"
           # 源文件路径（cargo 输出的 exe 名称来自 Cargo.toml 的 [package].name）

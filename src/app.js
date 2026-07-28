@@ -36,6 +36,56 @@
     const $ = (selector) => document.querySelector(selector);
     const $$ = (selector) => document.querySelectorAll(selector);
 
+    // ====== 滑动指示器：为主题强调色背景块提供平滑过渡动画 ======
+
+    /**
+     * 将侧边栏滑动指示器移动到目标导航项。
+     * 使用 offsetTop/offsetHeight（相对 offsetParent，已包含父级 padding），
+     * 通过 transform + height 过渡实现平滑滑动。
+     */
+    function moveNavIndicator(targetNav) {
+        const indicator = $('#nav-indicator');
+        if (!indicator || !targetNav) return;
+        const offsetY = targetNav.offsetTop;
+        indicator.style.transform = `translateY(${offsetY}px)`;
+        indicator.style.height = `${targetNav.offsetHeight}px`;
+        indicator.classList.add('visible');
+    }
+
+    /**
+     * 将分段控件/日志级别筛选器的滑动指示器移动到目标按钮。
+     * 使用 offsetLeft/offsetTop/offsetWidth/offsetHeight（相对 offsetParent，已包含父级 padding），
+     * 通过 transform + width/height 过渡实现平滑滑动。
+     */
+    function moveSegIndicator(targetBtn) {
+        if (!targetBtn) return;
+        const container = targetBtn.parentElement;
+        const indicator = container ? container.querySelector('.seg-indicator') : null;
+        if (!container || !indicator) return;
+        indicator.style.transform = `translate(${targetBtn.offsetLeft}px, ${targetBtn.offsetTop}px)`;
+        indicator.style.width = `${targetBtn.offsetWidth}px`;
+        indicator.style.height = `${targetBtn.offsetHeight}px`;
+        indicator.classList.add('visible');
+    }
+
+    /**
+     * 刷新所有可见的滑动指示器位置（用于窗口尺寸变化、侧边栏切换、视图切换后）。
+     */
+    function refreshAllIndicators() {
+        // 侧边栏导航
+        const activeNav = $('.nav-item.active');
+        if (activeNav) moveNavIndicator(activeNav);
+
+        // 所有可见的 segmented control / log-level-filter
+        $$('.segmented-control, .log-level-filter').forEach(container => {
+            // 只刷新当前可见视图内的容器（避免为隐藏视图计算错误的尺寸）
+            const view = container.closest('.view');
+            if (view && !view.classList.contains('active')) return;
+            const activeBtn = container.querySelector('.seg-btn.active, .log-level-btn.active');
+            if (activeBtn) moveSegIndicator(activeBtn);
+        });
+    }
+
     function virtualKeyToName(vkCode) {
         const vkMap = {
             0x70: 'F1',
@@ -136,6 +186,8 @@
         const targetNav = $(`.nav-item[data-view="${viewName}"]`);
         if (targetNav) {
             targetNav.classList.add('active');
+            // 滑动指示器：平滑移动到新选中的导航项
+            moveNavIndicator(targetNav);
         }
         state.currentView = viewName;
 
@@ -145,6 +197,9 @@
             loadSettings();
             loadDownloadedModels();
         }
+
+        // 视图切换后刷新分段控件指示器（新视图变为可见后才能正确测量尺寸）
+        requestAnimationFrame(refreshAllIndicators);
     }
 
     function showSettings() {
@@ -512,9 +567,11 @@
         // 无论 config.basic 是否存在，都同步识别模式 UI
         const dictMode = (config.basic && config.basic.dictation_mode) || 'batch';
         state.dictationMode = dictMode;
+        const dictActiveBtn = $(`#dictation-mode .seg-btn[data-mode="${dictMode}"]`);
         $$('#dictation-mode .seg-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.mode === dictMode);
+            btn.classList.toggle('active', btn === dictActiveBtn);
         });
+        if (dictActiveBtn) moveSegIndicator(dictActiveBtn);
 
         if (config.streaming) {
             // 流式配置仍然保留（资源 ID、模型名等），但不再有独立热键输入
@@ -557,9 +614,11 @@
             // 对齐
             const align = config.subtitle.subtitle_text_align || 'center';
             state.subtitleAlign = align;
+            const alignActiveBtn = $(`#subtitle-text-align .seg-btn[data-mode="${align}"]`);
             $$('#subtitle-text-align .seg-btn').forEach(btn => {
-                btn.classList.toggle('active', btn.dataset.mode === align);
+                btn.classList.toggle('active', btn === alignActiveBtn);
             });
+            if (alignActiveBtn) moveSegIndicator(alignActiveBtn);
 
             updateSubtitlePreview();
         }
@@ -929,6 +988,10 @@
                     sidebar.classList.add('collapsed');
                     localStorage.setItem('sidebar-collapsed', 'true');
                 }
+                // 侧边栏宽度过渡期间持续刷新指示器位置，保证平滑跟随
+                requestAnimationFrame(refreshAllIndicators);
+                setTimeout(refreshAllIndicators, 180);
+                setTimeout(refreshAllIndicators, 320);
             });
         }
     }
@@ -984,6 +1047,7 @@
                 btn.classList.add('active');
                 state.triggerMode = btn.dataset.mode;
                 updateMicHint();
+                moveSegIndicator(btn);
             });
         });
 
@@ -993,6 +1057,7 @@
                 btn.classList.add('active');
                 state.dictationMode = btn.dataset.mode;
                 updateHotkeyHint();
+                moveSegIndicator(btn);
                 // 立即保存到后端，便于 F2 切换后即时生效
                 if (invoke && state.config) {
                     const cfg = JSON.parse(JSON.stringify(state.config));
@@ -1005,9 +1070,11 @@
         });
 
         // 启动时根据 state.dictationMode 同步按钮选中状态
+        const activeDictBtn = $(`#dictation-mode .seg-btn[data-mode="${state.dictationMode}"]`);
         $$('#dictation-mode .seg-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.mode === state.dictationMode);
+            btn.classList.toggle('active', btn === activeDictBtn);
         });
+        if (activeDictBtn) moveSegIndicator(activeDictBtn);
     }
 
     function initSubtitle() {
@@ -1052,6 +1119,7 @@
                 btn.classList.add('active');
                 state.subtitleAlign = btn.dataset.mode;
                 updateSubtitlePreview();
+                moveSegIndicator(btn);
             });
         });
 
@@ -1406,6 +1474,7 @@
                 btn.classList.add('active');
                 currentLogFilter = btn.dataset.level;
                 renderLogs();
+                moveSegIndicator(btn);
             });
         });
 
@@ -1797,6 +1866,21 @@
         setStatus('idle', '就绪');
         updateMicHint();
         updateHotkeyHint();
+
+        // 初始化所有滑动指示器位置（等 DOM 完成布局后再计算）
+        requestAnimationFrame(() => {
+            refreshAllIndicators();
+            // 字体渲染/异步布局可能导致首次测量偏差，再补一次刷新
+            setTimeout(refreshAllIndicators, 60);
+        });
+
+        // 窗口尺寸变化时同步刷新指示器位置（防抖）
+        let resizeTimer = null;
+        window.addEventListener('resize', () => {
+            if (resizeTimer) clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(refreshAllIndicators, 80);
+        });
+
         console.log('Voice2Type UI initialized');
     }
 
