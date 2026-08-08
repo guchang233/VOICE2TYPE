@@ -17,9 +17,7 @@
             lines: 3
         },
         unlisteners: [],
-        isMouseDown: false,
-        engineStatusCache: null,       // 引擎状态缓存 { status, timestamp }
-        engineChecking: false          // 防止并发检测
+        isMouseDown: false
     };
 
     let invoke = null;
