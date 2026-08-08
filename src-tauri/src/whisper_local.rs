@@ -153,32 +153,60 @@ impl LocalWhisperEngine {
             cmd.as_std_mut().creation_flags(CREATE_NO_WINDOW);
         }
 
+        log::info!(
+            "[whisper] 启动转写: 引擎={}, 模型={}, 采样数={}, 语言={}",
+            binary_path.display(),
+            model_path.display(),
+            samples.len(),
+            language.unwrap_or("auto")
+        );
+
         let mut child = cmd.spawn()?;
 
-        // 写入 WAV 数据到 stdin
+        // 写入 WAV 数据到 stdin，写入完成后立即关闭（drop）发送 EOF，
+        // whisper.cpp 需要读到 EOF 才会开始处理
         if let Some(mut stdin) = child.stdin.take() {
             stdin.write_all(&wav_bytes).await?;
-            // stdin drop 时发送 EOF
+            stdin.flush().await?;
+            // 显式 drop 关闭 stdin 通道
+            drop(stdin);
         }
 
         let output = child.wait_with_output().await?;
 
+        let stdout_str = String::from_utf8_lossy(&output.stdout);
+        let stderr_str = String::from_utf8_lossy(&output.stderr);
+
+        log::info!(
+            "[whisper] 转写结束: 退出码={:?}, stdout={}字节, stderr={}字节",
+            output.status.code(),
+            stdout_str.len(),
+            stderr_str.len()
+        );
+
         if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let stdout = String::from_utf8_lossy(&output.stdout);
             bail!(
                 "whisper.cpp 执行失败（退出码 {:?}）\nstdout: {}\nstderr: {}\n引擎路径: {}",
                 output.status.code(),
-                stdout.trim(),
-                stderr.trim(),
+                stdout_str.trim(),
+                stderr_str.trim(),
                 binary_path.display()
             );
         }
 
         // 解析 stdout：每行格式为 [HH:MM:SS.mmm --> HH:MM:SS.mmm]  <text>
         // 使用 -nt 后仍可能有时间戳前缀（取决于版本），统一剥离
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let text = parse_whisper_output(&stdout);
+        let text = parse_whisper_output(&stdout_str);
+
+        // 转写结果为空时记录 stderr 辅助排查（如模型加载失败、无语音段）
+        if text.is_empty() {
+            let stderr_tail = stderr_str.trim();
+            if stderr_tail.is_empty() {
+                bail!("转写结果为空：whisper.cpp 未输出任何文本（可能未检测到语音）");
+            } else {
+                bail!("转写结果为空。whisper.cpp stderr:\n{}", stderr_tail);
+            }
+        }
 
         Ok(text)
     }
