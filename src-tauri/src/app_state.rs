@@ -276,14 +276,15 @@ impl AppState {
 
         let recognition_result: Result<String, String> = if service == "local" {
             // 本地 Whisper：通过 whisper.cpp 预编译二进制执行转写。
-            // 模型路径在引擎创建时和用户切换模型时已设置，这里只在锁内检查可用性，
-            // 再在不持有锁的情况下异步调用转写。
+            // 先在锁内同步模型路径并检查可用性，再在不持有锁的情况下异步调用转写。
             async {
                 let (model_path, binary_path) = {
-                    let engine = self
+                    let mut engine = self
                         .whisper_engine
                         .lock()
                         .map_err(|e| format!("Lock error: {}", e))?;
+                    let model_name = self.config.local_whisper_model();
+                    engine.sync_model_path(&model_name);
                     if !engine.is_model_available() {
                         return Err(
                             "Local Whisper model not found. Please download a model first."

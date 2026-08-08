@@ -10,7 +10,6 @@ pub const MODEL_LOCAL_WHISPER: &str = "local-whisper";
 pub const MODEL_CUSTOM: &str = "custom";
 
 pub const STREAM_MODEL_DOUBAO: &str = "doubao";
-pub const STREAM_MODEL_SHERPA: &str = "sherpa-onnx";
 
 pub const STREAMING_ASR_URI: &str = "/api/v3/sauc/bigmodel";
 pub const STREAMING_RESOURCE_BIGASR_DURATION: &str = "volc.bigasr.sauc.duration";
@@ -295,7 +294,7 @@ impl Default for ModelSelectionConfig {
         Self {
             batch_model: MODEL_SENSEVOICE.to_string(),
             stream_model: STREAM_MODEL_DOUBAO.to_string(),
-            subtitle_model: STREAM_MODEL_SHERPA.to_string(),
+            subtitle_model: STREAM_MODEL_DOUBAO.to_string(),
         }
     }
 }
@@ -536,50 +535,17 @@ impl ConfigManager {
         manager
     }
 
-    fn is_e_drive_available() -> bool {
-        #[cfg(windows)]
-        {
-            use std::fs;
-            let e_drive = PathBuf::from("E:\\");
-            if !e_drive.exists() {
-                return false;
-            }
-            let test_dir = e_drive.join("Voice2Type");
-            match fs::create_dir_all(&test_dir) {
-                Ok(_) => {
-                    let test_file = test_dir.join(".write_test");
-                    match fs::write(&test_file, b"test") {
-                        Ok(_) => {
-                            let _ = fs::remove_file(&test_file);
-                            true
-                        }
-                        Err(_) => false,
-                    }
-                }
-                Err(_) => false,
-            }
-        }
-        #[cfg(not(windows))]
-        {
-            false
-        }
-    }
-
     pub fn models_dir(&self) -> PathBuf {
         // 优先使用用户自定义目录
         let custom = self.config.lock().unwrap().model.custom_models_dir.clone();
         if !custom.is_empty() && PathBuf::from(&custom).is_dir() {
             return PathBuf::from(custom);
         }
-        if Self::is_e_drive_available() {
-            PathBuf::from("E:\\Voice2Type\\models")
-        } else {
-            let data_dir = dirs::data_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("Voice2Type")
-                .join("models");
-            data_dir
-        }
+        let data_dir = dirs::data_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("Voice2Type")
+            .join("models");
+        data_dir
     }
 
     /// 获取当前生效的模型目录（只读，用于前端展示）
@@ -623,9 +589,7 @@ impl ConfigManager {
         }
     }
 
-    pub fn sherpa_models_dir(&self) -> PathBuf {
-        self.models_dir().join("sherpa-onnx")
-    }
+
 
     fn migrate_legacy_whisper_dir(&self) {
         let legacy = self.config_dir().join("whisper");

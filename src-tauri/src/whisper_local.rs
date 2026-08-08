@@ -17,14 +17,6 @@ pub fn expected_sha256(filename: &str) -> Option<&'static str> {
         .map(|(_, hash)| *hash)
 }
 
-/// 二进制健康状态
-#[derive(Debug, Clone, serde::Serialize)]
-pub enum BinaryHealth {
-    Ok,
-    Missing,
-    Corrupt(String),
-}
-
 pub struct LocalWhisperEngine {
     model_dir: PathBuf,
     model_path: PathBuf,
@@ -69,55 +61,9 @@ impl LocalWhisperEngine {
         self.binary_path.exists()
     }
 
-    /// 确保二进制可用，不存在则返回错误提示用户在设置中下载
-    pub async fn ensure_binary(&self, _app: &tauri::AppHandle) -> Result<()> {
-        if self.is_binary_available() {
-            Ok(())
-        } else {
-            bail!("whisper.cpp 二进制未下载，请在设置中下载引擎")
-        }
-    }
-
-    /// 检查二进制健康状态：存在、配套 DLL 是否齐全
-    /// 注意：whisper-cli.exe 本身约 479KB，且依赖 whisper.dll/ggml.dll，
-    /// 因此不能用 >500KB 的大小阈值判断完整性。
-    pub fn check_binary_health(&self) -> BinaryHealth {
-        if !self.binary_path.exists() {
-            return BinaryHealth::Missing;
-        }
-        // Windows 下检查关键配套 DLL 是否存在（whisper.dll 是核心依赖）
-        #[cfg(target_os = "windows")]
-        {
-            if let Some(dir) = self.binary_path.parent() {
-                let whisper_dll = dir.join("whisper.dll");
-                if !whisper_dll.exists() {
-                    return BinaryHealth::Corrupt(
-                        "缺少 whisper.dll，请重新下载引擎".to_string(),
-                    );
-                }
-                let ggml_dll = dir.join("ggml.dll");
-                if !ggml_dll.exists() {
-                    return BinaryHealth::Corrupt(
-                        "缺少 ggml.dll，请重新下载引擎".to_string(),
-                    );
-                }
-            }
-        }
-        BinaryHealth::Ok
-    }
-
     /// 根据配置中的模型名（如 "ggml-small.bin"）更新当前模型路径
     pub fn sync_model_path(&mut self, model_name: &str) {
         self.model_path = self.model_dir.join(model_name);
-    }
-
-    /// 实例方法：使用引擎当前的模型路径和二进制路径进行转写
-    pub async fn transcribe_i16(
-        &self,
-        samples_i16: &[i16],
-        language: Option<&str>,
-    ) -> Result<String> {
-        Self::transcribe_at(&self.binary_path, &self.model_path, samples_i16, language).await
     }
 
     /// 关联函数：不持有引擎锁即可调用转写。

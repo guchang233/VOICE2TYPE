@@ -722,12 +722,6 @@ pub async fn download_whisper_binary(
     Ok(format!("引擎下载完成: {}", binary_path.display()))
 }
 
-/// 检查 whisper.cpp 二进制是否已下载
-#[tauri::command]
-pub fn check_whisper_binary(config: tauri::State<'_, Arc<ConfigManager>>) -> bool {
-    config.whisper_binary_path().exists()
-}
-
 /// 检查 whisper.cpp 二进制健康状态（存在性、配套 DLL 是否齐全）
 /// 注意：whisper-cli.exe 约 479KB，且依赖 whisper.dll/ggml.dll，
 /// 因此不能用 >500KB 的大小阈值判断完整性，改为检查关键 DLL 是否存在。

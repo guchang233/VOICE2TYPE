@@ -32,7 +32,9 @@ pub static INDICATOR: OnceCell<StatusIndicator> = OnceCell::new();
 pub static CONFIG_GLOBAL: OnceCell<Arc<ConfigManager>> = OnceCell::new();
 pub static LOG_MENU_NEEDS_UNCHECK: AtomicBool = AtomicBool::new(false);
 
-pub fn request_uncheck_log_menu() {}
+pub fn request_uncheck_log_menu() {
+    LOG_MENU_NEEDS_UNCHECK.store(true, std::sync::atomic::Ordering::SeqCst);
+}
 
 fn main() {
     // 必须在任何 WebView2 初始化之前设置环境变量
@@ -85,7 +87,6 @@ fn main() {
             commands::download_whisper_model,
             commands::list_available_models,
             commands::download_whisper_binary,
-            commands::check_whisper_binary,
             commands::check_whisper_binary_health,
             commands::check_update,
             commands::download_and_install_update,
