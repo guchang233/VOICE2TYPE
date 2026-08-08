@@ -1,6 +1,6 @@
 {
   "name": "voice2type",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Voice2Type - 语音输入与实时字幕",
   "scripts": {
     "tauri": "tauri",
