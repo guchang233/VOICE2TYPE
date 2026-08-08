@@ -83,16 +83,15 @@ impl LocalWhisperEngine {
     }
 
     /// 关联函数：不持有引擎锁即可调用转写。
-    /// 在内存中编码 WAV 并通过 stdin 传给 whisper.cpp 二进制，解析 stdout 获取文本。
+    /// 将音频写入临时 WAV 文件，通过文件路径调用 whisper.cpp 二进制，解析 stdout 获取文本。
+    /// 不使用 stdin 模式，因为 whisper-cli 对 stdin WAV 的支持在某些版本下不稳定，
+    /// 文件路径方式更可靠且便于诊断。
     pub async fn transcribe_at(
         binary_path: &Path,
         model_path: &Path,
         samples: &[i16],
         language: Option<&str>,
     ) -> Result<String> {
-        use std::process::Stdio;
-        use tokio::io::AsyncWriteExt;
-
         if !binary_path.exists() {
             bail!(
                 "whisper.cpp 二进制不存在: {}，请在设置中下载引擎",
@@ -106,22 +105,33 @@ impl LocalWhisperEngine {
             );
         }
 
-        // 在内存中编码 WAV（16kHz mono 16-bit）
-        let wav_bytes = {
-            let mut cursor = std::io::Cursor::new(Vec::new());
+        // 写入临时 WAV 文件（16kHz mono 16-bit）
+        let temp_dir = std::env::temp_dir();
+        let temp_id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let wav_path = temp_dir.join(format!("v2t_whisper_{}.wav", temp_id));
+
+        // 在阻塞线程中写入 WAV 文件
+        let wav_path_clone = wav_path.clone();
+        let samples_vec = samples.to_vec();
+        tokio::task::spawn_blocking(move || -> Result<()> {
             let spec = hound::WavSpec {
                 channels: 1,
                 sample_rate: 16_000,
                 bits_per_sample: 16,
                 sample_format: hound::SampleFormat::Int,
             };
-            let mut writer = hound::WavWriter::new(&mut cursor, spec)?;
-            for &sample in samples {
+            let mut writer = hound::WavWriter::create(&wav_path_clone, spec)?;
+            for &sample in &samples_vec {
                 writer.write_sample(sample)?;
             }
             writer.finalize()?;
-            cursor.into_inner()
-        };
+            Ok(())
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("WAV 写入任务失败: {}", e))??;
 
         // 构建线程数（上限 8）
         let thread_count = std::thread::available_parallelism()
@@ -129,21 +139,20 @@ impl LocalWhisperEngine {
             .unwrap_or(4)
             .min(8);
 
-        // 构建 whisper-cli 命令
+        // 构建 whisper-cli 命令（用文件路径而非 stdin）
         let mut cmd = tokio::process::Command::new(binary_path);
         cmd.arg("-m")
             .arg(model_path)
             .arg("-f")
-            .arg("-") // 从 stdin 读取
+            .arg(&wav_path)
             .arg("-nt")
             .arg("-np")
             .arg("-t")
-            .arg(thread_count.to_string()) // 线程数
+            .arg(thread_count.to_string())
             .arg("-l")
             .arg(language.unwrap_or("auto"))
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
 
         // Windows 隐藏控制台窗口
         #[cfg(target_os = "windows")]
@@ -154,25 +163,15 @@ impl LocalWhisperEngine {
         }
 
         log::info!(
-            "[whisper] 启动转写: 引擎={}, 模型={}, 采样数={}, 语言={}",
+            "[whisper] 启动转写: 引擎={}, 模型={}, WAV={}, 采样数={}, 语言={}",
             binary_path.display(),
             model_path.display(),
+            wav_path.display(),
             samples.len(),
             language.unwrap_or("auto")
         );
 
-        let mut child = cmd.spawn()?;
-
-        // 写入 WAV 数据到 stdin，写入完成后立即关闭（drop）发送 EOF，
-        // whisper.cpp 需要读到 EOF 才会开始处理
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(&wav_bytes).await?;
-            stdin.flush().await?;
-            // 显式 drop 关闭 stdin 通道
-            drop(stdin);
-        }
-
-        let output = child.wait_with_output().await?;
+        let output = cmd.output().await?;
 
         let stdout_str = String::from_utf8_lossy(&output.stdout);
         let stderr_str = String::from_utf8_lossy(&output.stderr);
@@ -183,6 +182,9 @@ impl LocalWhisperEngine {
             stdout_str.len(),
             stderr_str.len()
         );
+
+        // 清理临时文件（失败也忽略）
+        let _ = std::fs::remove_file(&wav_path);
 
         if !output.status.success() {
             bail!(
@@ -202,7 +204,7 @@ impl LocalWhisperEngine {
         if text.is_empty() {
             let stderr_tail = stderr_str.trim();
             if stderr_tail.is_empty() {
-                bail!("转写结果为空：whisper.cpp 未输出任何文本（可能未检测到语音）");
+                bail!("转写结果为空：whisper.cpp 未输出任何文本（可能未检测到语音，或音频太短/静音）");
             } else {
                 bail!("转写结果为空。whisper.cpp stderr:\n{}", stderr_tail);
             }
