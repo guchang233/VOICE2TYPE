@@ -1398,6 +1398,12 @@
             resetDirBtn.addEventListener('click', resetModelsDirectory);
         }
 
+        // 检测引擎状态
+        const checkEngineBtn = $('#btn-check-engine');
+        if (checkEngineBtn) {
+            checkEngineBtn.addEventListener('click', () => checkEngineStatus());
+        }
+
         // 下载/重新下载 whisper.cpp 引擎
         const dlEngineBtn = $('#btn-download-engine');
         if (dlEngineBtn) {
