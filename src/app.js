@@ -17,7 +17,9 @@
             lines: 3
         },
         unlisteners: [],
-        isMouseDown: false
+        isMouseDown: false,
+        engineStatusCache: null,       // 引擎状态缓存 { status, timestamp }
+        engineChecking: false          // 防止并发检测
     };
 
     let invoke = null;
@@ -196,6 +198,7 @@
         } else if (viewName === 'settings') {
             loadSettings();
             loadDownloadedModels();
+            checkEngineStatus();
         }
 
         // 视图切换后刷新分段控件指示器（新视图变为可见后才能正确测量尺寸）
@@ -457,14 +460,90 @@
         }
     }
 
+    /// 检查 whisper.cpp 引擎健康状态并更新 UI 徽章
+    /// force=true 时跳过缓存强制重新检测
+    async function checkEngineStatus(force) {
+        const badge = $('#engine-status-badge');
+        const hint = $('#engine-detail-hint');
+        const dlBtn = $('#btn-download-engine');
+        if (!badge) return;
+
+        // 防止并发检测
+        if (state.engineChecking) return;
+
+        // 10 秒内有缓存且非强制刷新时，直接使用缓存结果
+        const CACHE_TTL = 10_000;
+        if (!force && state.engineStatusCache) {
+            const age = Date.now() - state.engineStatusCache.timestamp;
+            if (age < CACHE_TTL) {
+                applyEngineStatus(state.engineStatusCache.health);
+                return;
+            }
+        }
+
+        state.engineChecking = true;
+        // 仅在无缓存时显示"检测中..."，避免每次切换页面闪烁
+        if (!state.engineStatusCache) {
+            badge.textContent = '检测中...';
+            badge.className = 'engine-status-badge';
+        }
+        if (hint && !state.engineStatusCache) hint.textContent = '';
+
+        try {
+            const health = await invoke('check_whisper_binary_health');
+            state.engineStatusCache = { health, timestamp: Date.now() };
+            applyEngineStatus(health);
+        } catch (err) {
+            badge.textContent = '检测失败';
+            badge.className = 'engine-status-badge status-corrupt';
+            if (hint) hint.textContent = String(err);
+        } finally {
+            state.engineChecking = false;
+        }
+    }
+
+    /// 将引擎状态应用到 UI
+    function applyEngineStatus(health) {
+        const badge = $('#engine-status-badge');
+        const hint = $('#engine-detail-hint');
+        const dlBtn = $('#btn-download-engine');
+        if (!badge) return;
+
+        if (health.status === 'ok') {
+            badge.textContent = '引擎就绪';
+            badge.className = 'engine-status-badge status-ok';
+            if (hint) hint.textContent = '';
+            if (dlBtn) dlBtn.textContent = '重新下载';
+        } else if (health.status === 'missing') {
+            badge.textContent = '未下载';
+            badge.className = 'engine-status-badge status-missing';
+            if (hint) hint.textContent = '点击"下载引擎"自动下载，或手动下载 whisper-bin-x64.zip 解压所有文件到 whisper-bin 文件夹';
+            if (dlBtn) dlBtn.textContent = '下载引擎';
+        } else if (health.status === 'corrupt') {
+            badge.textContent = '引擎损坏';
+            badge.className = 'engine-status-badge status-corrupt';
+            if (hint) hint.textContent = health.message + '。请点击"重新下载"';
+            if (dlBtn) dlBtn.textContent = '重新下载';
+        }
+    }
+
     async function loadDownloadedModels() {
-        if (!invoke) return;
+        if (!invoke) {
+            console.error('[loadDownloadedModels] invoke 不可用');
+            const listEl = $('#downloaded-models-list');
+            if (listEl) listEl.innerHTML = '<span class="empty-hint">invoke 不可用</span>';
+            return;
+        }
 
         const listEl = $('#downloaded-models-list');
         if (!listEl) return;
 
+        listEl.innerHTML = '<span class="empty-hint">检测中...</span>';
+
         try {
+            console.log('[loadDownloadedModels] 调用 list_available_models');
             const models = await invoke('list_available_models');
+            console.log('[loadDownloadedModels] 返回:', JSON.stringify(models));
             if (!models || models.length === 0) {
                 listEl.innerHTML = '<span class="empty-hint">暂无已下载模型</span>';
                 return;
@@ -472,54 +551,72 @@
 
             listEl.innerHTML = models.map(m => {
                 const sizeMB = (m.size / (1024 * 1024)).toFixed(1);
-                return `<div class="model-item"><span class="model-name">${m.name}</span><span class="model-size">${sizeMB} MB</span></div>`;
+                // available 字段表示 SHA256 校验是否通过
+                const available = m.available !== false;
+                const statusClass = available ? 'model-available' : 'model-corrupt';
+                const statusText = available ? '可用' : '校验失败';
+                return `<div class="model-item ${statusClass}"><span class="model-name">${m.name}</span><span class="model-size">${sizeMB} MB</span><span class="model-status">${statusText}</span></div>`;
             }).join('');
         } catch (err) {
-            console.error('Failed to list models:', err);
-            listEl.innerHTML = '<span class="empty-hint">加载失败</span>';
+            console.error('[loadDownloadedModels] 失败:', err);
+            listEl.innerHTML = `<span class="empty-hint">加载失败: ${err}</span>`;
         }
     }
 
-    async function downloadModel() {
-        if (!invoke) return;
+    /// 显示本地模型使用教程模态框
+    function showHelpModal() {
+        const modal = $('#help-modal');
+        if (modal) modal.style.display = 'flex';
+    }
 
-        const selectEl = $('#whisper-model-select');
-        const btn = $('#btn-download-model');
-        const progressRow = $('#download-progress-row');
-        const progressBar = $('#download-progress-bar');
-        const progressText = $('#download-progress-text');
+    /// 关闭本地模型使用教程模态框
+    function closeHelpModal() {
+        const modal = $('#help-modal');
+        if (modal) modal.style.display = 'none';
+    }
 
-        if (!selectEl || !btn) return;
+    /// 显示通用确认对话框，返回用户是否点击了"确认"
+    function showConfirmDialog(title, message) {
+        return new Promise((resolve) => {
+            // 动态创建确认模态框
+            const overlay = document.createElement('div');
+            overlay.className = 'modal-overlay';
+            overlay.style.display = 'flex';
+            overlay.innerHTML = `
+                <div class="modal-content confirm-modal">
+                    <div class="modal-header">
+                        <h2>${title}</h2>
+                    </div>
+                    <div class="modal-body">
+                        <p class="confirm-message">${message.replace(/\n/g, '<br>')}</p>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="secondary-btn" data-action="cancel">取消</button>
+                        <button class="solid-btn" data-action="confirm">确认下载</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
 
-        const modelName = selectEl.value;
-
-        btn.disabled = true;
-        btn.textContent = '下载中...';
-        if (progressRow) progressRow.style.display = 'flex';
-        if (progressBar) progressBar.style.width = '0%';
-        if (progressText) progressText.textContent = '0%';
-
-        try {
-            await invoke('download_whisper_model', { model_name: modelName });
-            if (progressBar) progressBar.style.width = '100%';
-            if (progressText) progressText.textContent = '完成!';
-            btn.textContent = '下载完成';
-            setTimeout(() => {
-                btn.disabled = false;
-                btn.textContent = '下载';
-                if (progressRow) progressRow.style.display = 'none';
-                loadDownloadedModels();
-            }, 1500);
-        } catch (err) {
-            console.error('Download failed:', err);
-            btn.disabled = false;
-            btn.textContent = '下载失败';
-            if (progressText) progressText.textContent = '失败';
-            setTimeout(() => {
-                btn.textContent = '下载';
-                if (progressRow) progressRow.style.display = 'none';
-            }, 2000);
-        }
+            const close = (result) => {
+                overlay.remove();
+                resolve(result);
+            };
+            overlay.querySelector('[data-action="confirm"]').addEventListener('click', () => close(true));
+            overlay.querySelector('[data-action="cancel"]').addEventListener('click', () => close(false));
+            // 点击遮罩取消
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) close(false);
+            });
+            // ESC 取消
+            const onKey = (e) => {
+                if (e.key === 'Escape') {
+                    document.removeEventListener('keydown', onKey);
+                    close(false);
+                }
+            };
+            document.addEventListener('keydown', onKey);
+        });
     }
 
     function setupDefaultSettings() {
@@ -544,6 +641,14 @@
             if (sfKey) sfKey.value = config.model.siliconflow_api_key || '';
             if (groqKey) groqKey.value = config.model.groq_api_key || '';
             if (doubaoKey) doubaoKey.value = config.model.doubao_api_key || '';
+
+            // 自定义模型提供商配置
+            const customUrl = $('#setting-custom-api-url');
+            const customModel = $('#setting-custom-model-name');
+            const customKey = $('#setting-custom-key');
+            if (customUrl) customUrl.value = config.model.custom_api_url || '';
+            if (customModel) customModel.value = config.model.custom_model_name || '';
+            if (customKey) customKey.value = config.model.custom_api_key || '';
         }
 
         if (config.basic) {
@@ -722,6 +827,14 @@
         if (sfKey) newConfig.model.siliconflow_api_key = sfKey.value;
         if (groqKey) newConfig.model.groq_api_key = groqKey.value;
         if (doubaoKey) newConfig.model.doubao_api_key = doubaoKey.value;
+
+        // 自定义模型提供商配置
+        const customUrl = $('#setting-custom-api-url');
+        const customModel = $('#setting-custom-model-name');
+        const customKey = $('#setting-custom-key');
+        if (customUrl) newConfig.model.custom_api_url = customUrl.value;
+        if (customModel) newConfig.model.custom_model_name = customModel.value;
+        if (customKey) newConfig.model.custom_api_key = customKey.value;
 
         const modelSelect = $('#whisper-model-select');
         if (modelSelect) {
@@ -1262,9 +1375,49 @@
             saveBtn.addEventListener('click', saveSettings);
         }
 
-        const downloadBtn = $('#btn-download-model');
-        if (downloadBtn) {
-            downloadBtn.addEventListener('click', downloadModel);
+        // 本地模型帮助按钮
+        const helpBtn = $('#btn-local-model-help');
+        if (helpBtn) {
+            helpBtn.addEventListener('click', showHelpModal);
+        }
+        const closeHelpBtn = $('#btn-close-help');
+        if (closeHelpBtn) {
+            closeHelpBtn.addEventListener('click', closeHelpModal);
+        }
+        // 点击模态框遮罩关闭
+        const helpModal = $('#help-modal');
+        if (helpModal) {
+            helpModal.addEventListener('click', (e) => {
+                if (e.target === helpModal) closeHelpModal();
+            });
+        }
+        // 模态框内的链接按钮也通过 shell.open 打开
+        $$('.help-link').forEach(link => {
+            link.addEventListener('click', async (e) => {
+                e.preventDefault();
+                const url = link.dataset.url;
+                if (!url) return;
+                try {
+                    if (window.__TAURI__ && window.__TAURI__.shell && window.__TAURI__.shell.open) {
+                        await window.__TAURI__.shell.open(url);
+                    } else {
+                        window.open(url, '_blank');
+                    }
+                } catch (err) {
+                    window.open(url, '_blank');
+                }
+            });
+        });
+
+        // 刷新已下载模型列表
+        const refreshBtn = $('#btn-refresh-models');
+        if (refreshBtn) {
+            refreshBtn.addEventListener('click', async () => {
+                refreshBtn.classList.add('spinning');
+                await loadDownloadedModels();
+                // 旋转动画持续至少 500ms，给用户视觉反馈
+                setTimeout(() => refreshBtn.classList.remove('spinning'), 600);
+            });
         }
 
         // 更改模型目录
@@ -1277,6 +1430,40 @@
         const resetDirBtn = $('#btn-reset-models-dir');
         if (resetDirBtn) {
             resetDirBtn.addEventListener('click', resetModelsDirectory);
+        }
+
+        // 下载/重新下载 whisper.cpp 引擎
+        const dlEngineBtn = $('#btn-download-engine');
+        if (dlEngineBtn) {
+            dlEngineBtn.addEventListener('click', async () => {
+                if (!invoke) return;
+                dlEngineBtn.disabled = true;
+                dlEngineBtn.textContent = '下载中...';
+
+                // 监听下载进度
+                let unlisten = null;
+                if (listen) {
+                    unlisten = await listen('binary-download-progress', (event) => {
+                        const p = event.payload;
+                        if (p && typeof p.progress !== 'undefined') {
+                            dlEngineBtn.textContent = `下载中 ${p.progress}%`;
+                        }
+                    });
+                }
+
+                try {
+                    const result = await invoke('download_whisper_binary', { force: true });
+                    console.log('引擎下载成功:', result);
+                    await checkEngineStatus(true);  // 强制刷新
+                } catch (err) {
+                    console.error('引擎下载失败:', err);
+                    alert('引擎下载失败: ' + err);
+                    await checkEngineStatus(true);  // 强制刷新
+                } finally {
+                    if (unlisten) unlisten();
+                    dlEngineBtn.disabled = false;
+                }
+            });
         }
     }
 
@@ -1360,6 +1547,18 @@
             btn.addEventListener('click', async () => {
                 const url = btn.dataset.url;
                 if (!url) return;
+
+                // Whisper 模型文件下载链接（位于 .model-link-item 内）需二次确认
+                const isModelLink = btn.closest('.model-link-item');
+                if (isModelLink) {
+                    const modelName = isModelLink.querySelector('span')?.textContent?.trim() || '该模型';
+                    const confirmed = await showConfirmDialog(
+                        '下载模型文件',
+                        `将打开浏览器下载 ${modelName}。\n下载完成后，请将 .bin 文件放入上方「模型目录」中，再点击「已下载模型」旁的刷新按钮。`
+                    );
+                    if (!confirmed) return;
+                }
+
                 try {
                     if (window.__TAURI__ && window.__TAURI__.shell && window.__TAURI__.shell.open) {
                         await window.__TAURI__.shell.open(url);
@@ -1768,20 +1967,6 @@
                     state.isSubtitleActive = running;
                     updateSubtitleButton();
                 }).catch(() => {});
-            }
-        }).then(unlisten => {
-            state.unlisteners.push(unlisten);
-        });
-
-        listen('model-download-progress', (event) => {
-            const data = event.payload;
-            const progressBar = $('#download-progress-bar');
-            const progressText = $('#download-progress-text');
-            if (progressBar && data && data.progress !== undefined) {
-                progressBar.style.width = `${data.progress}%`;
-            }
-            if (progressText && data && data.progress !== undefined) {
-                progressText.textContent = `${data.progress}%`;
             }
         }).then(unlisten => {
             state.unlisteners.push(unlisten);

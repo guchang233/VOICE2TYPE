@@ -23,10 +23,10 @@ tauri-plugin-os = "2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
-tokio = { version = "1.36", features = ["rt-multi-thread", "sync", "time", "macros", "fs"] }
+tokio = { version = "1.36", features = ["rt-multi-thread", "sync", "time", "macros", "fs", "process"] }
 anyhow = "1.0"
 reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls-native-roots", "blocking", "stream"] }
-# whisper-rs = "0.16"  # 需要 cmake 和 C++ 编译环境，暂时注释
+sha2 = "0.10"
 cpal = "0.15"
 hound = "3.5"
 rdev = "0.5"
@@ -44,6 +44,7 @@ tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 uuid = { version = "1", features = ["v4"] }
 flate2 = "1"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.54", features = [

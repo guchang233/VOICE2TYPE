@@ -1390,6 +1390,14 @@ html, body {
     background: var(--accent-cyan);
 }
 
+.section-hint {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    margin: -2px 0 10px;
+    line-height: 1.5;
+    opacity: 0.8;
+}
+
 .setting-row {
     display: flex;
     align-items: center;
@@ -1779,17 +1787,6 @@ html, body {
     text-align: left;
 }
 
-/* 下载模型选择行：select + button 横向布局 */
-.download-model-row {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-}
-
-.download-model-select {
-    min-width: 120px;
-}
-
 /* 进度行：垂直布局变体（用于下载/更新进度展示） */
 .setting-row-vertical {
     flex-direction: column;
@@ -1870,6 +1867,330 @@ html, body {
     flex-shrink: 0;
     padding: 7px 12px;
     font-size: 12px;
+}
+
+/* ============================================
+ * 本地模型下载指引行
+ * ============================================ */
+.guide-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+}
+
+.guide-hint {
+    flex: 1;
+    color: var(--text-tertiary);
+    font-size: 12px;
+    min-width: 0;
+}
+
+.engine-status-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.engine-status-badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 500;
+    background: var(--bg-tertiary, #e0e0e0);
+    color: var(--text-secondary, #666);
+}
+
+.engine-status-badge.status-ok {
+    background: #e6f7ed;
+    color: #52c41a;
+}
+
+.engine-status-badge.status-missing {
+    background: #fff1f0;
+    color: #f5222d;
+}
+
+.engine-status-badge.status-corrupt {
+    background: #fff7e6;
+    color: #fa8c16;
+}
+
+.model-links {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+    margin-top: 8px;
+}
+
+.model-link-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 10px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.model-link-item .apply-link-btn {
+    flex-shrink: 0;
+}
+
+/* ============================================
+ * 帮助按钮（标题旁的 ? 图标）
+ * ============================================ */
+.help-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    margin-left: 8px;
+    padding: 0;
+    border: 1px solid var(--border-color);
+    border-radius: 50%;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    vertical-align: middle;
+    transition: all 0.15s ease;
+}
+
+.help-btn:hover {
+    color: var(--accent-blue);
+    border-color: var(--accent-blue);
+}
+
+/* ============================================
+ * 已下载模型刷新按钮
+ * ============================================ */
+.label-with-action {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    margin-bottom: 8px;
+}
+
+.refresh-models-btn {
+    width: 24px;
+    height: 24px;
+    flex-shrink: 0;
+}
+
+.refresh-models-btn.spinning svg {
+    animation: spin 0.6s linear;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* ============================================
+ * 帮助模态框
+ * ============================================ */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-content {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    width: 90%;
+    max-width: 560px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.modal-header h2 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.modal-close-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+    transition: color 0.15s ease;
+}
+
+.modal-close-btn:hover {
+    color: var(--text-primary);
+}
+
+.modal-body {
+    padding: 20px;
+    overflow-y: auto;
+}
+
+/* 确认对话框专用样式 */
+.confirm-modal {
+    max-width: 420px;
+}
+
+.confirm-message {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.7;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 20px;
+    border-top: 1px solid var(--border-color);
+}
+
+.modal-footer .solid-btn {
+    min-width: 80px;
+}
+
+.help-section {
+    margin-bottom: 20px;
+}
+
+.help-section:last-child {
+    margin-bottom: 0;
+}
+
+.help-section h3 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0 0 8px 0;
+}
+
+.help-section p {
+    margin: 0 0 8px 0;
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+
+.help-section ol,
+.help-section ul {
+    margin: 0 0 8px 0;
+    padding-left: 20px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.8;
+}
+
+.help-section code {
+    padding: 1px 5px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--accent-blue);
+}
+
+.help-tip {
+    margin-top: 8px;
+    padding: 8px 12px;
+    background: rgba(59, 130, 246, 0.1);
+    border-left: 3px solid var(--accent-blue);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.help-link {
+    color: var(--accent-blue);
+    text-decoration: none;
+}
+
+.help-link:hover {
+    color: var(--accent-blue-hover);
+    text-decoration: underline;
+}
+
+/* ============================================
+ * 已下载模型列表项（含完整性校验状态）
+ * ============================================ */
+.model-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.model-item .model-name {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.model-item .model-size {
+    color: var(--text-tertiary);
+    font-family: var(--font-mono);
+}
+
+.model-item .model-status {
+    margin-left: auto;
+    padding: 1px 6px;
+    border-radius: 8px;
+    font-size: 10px;
+    font-weight: 500;
+}
+
+/* SHA256 校验通过：绿色 */
+.model-item.model-available .model-status {
+    background: rgba(34, 197, 94, 0.15);
+    color: var(--accent-green);
+}
+
+/* SHA256 校验失败：红色 */
+.model-item.model-corrupt {
+    border-color: rgba(239, 68, 68, 0.4);
+}
+
+.model-item.model-corrupt .model-status {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--accent-red);
 }
 
 /* ============================================

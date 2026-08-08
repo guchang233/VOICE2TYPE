@@ -41,11 +41,16 @@ struct GithubRelease {
 const GITHUB_API_BASE: &str = "https://api.github.com/repos/guchang233/VOICE2TYPE";
 
 /// jsDelivr CDN 域名列表（国内可达，用于获取仓库中的 update.json）
+/// 通过 jsDelivr data API 获取最新版本号拼接到 URL，确保拿到最新内容（非缓存）
 const JSDELIVR_CDNS: &[&str] = &[
-    "https://cdn.jsdelivr.net/gh/guchang233/VOICE2TYPE@main/update.json",
-    "https://fastly.jsdelivr.net/gh/guchang233/VOICE2TYPE@main/update.json",
-    "https://gcore.jsdelivr.net/gh/guchang233/VOICE2TYPE@main/update.json",
+    "https://gcore.jsdelivr.net/gh/guchang233/VOICE2TYPE@",
+    "https://cdn.jsdelivr.net/gh/guchang233/VOICE2TYPE@",
+    "https://fastly.jsdelivr.net/gh/guchang233/VOICE2TYPE@",
 ];
+
+/// jsDelivr data API（用于查询仓库已缓存的最新版本号，无需认证，无速率限制）
+const JSDELIVR_DATA_API: &str =
+    "https://data.jsdelivr.com/v1/packages/gh/guchang233/VOICE2TYPE";
 
 /// GitHub 加速镜像前缀列表（用于下载文件回退）
 /// 空字符串表示直连，其余为代理服务前缀
@@ -63,15 +68,54 @@ fn build_client() -> Result<reqwest::blocking::Client> {
         .map_err(Into::into)
 }
 
+/// 通过 jsDelivr data API 获取仓库最新版本号（semver tag）
+/// 返回形如 "0.1.3" 的版本字符串；失败时返回 None（上层回退到 @main）
+/// 此 API 无需认证、无速率限制，且 jsDelivr 会主动拉取仓库 tag
+fn fetch_latest_jsdelivr_version() -> Option<String> {
+    let client = build_client().ok()?;
+    let resp = client.get(JSDELIVR_DATA_API).send().ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let v: serde_json::Value = resp.json().ok()?;
+    // 返回结构: { "versions": [{"version": "0.1.3", ...}, ...] }
+    // 过滤掉非 semver 的分支版本（如 "0.10-live-subtitle"），取第一个合法 semver
+    v["versions"]
+        .as_array()
+        .and_then(|arr| {
+            arr.iter().find_map(|item| {
+                let ver = item["version"].as_str()?;
+                // 仅接受纯 semver 格式（x.y.z），排除分支名带连字符的
+                if ver.split('.').count() == 3
+                    && ver.split('.').all(|p| p.parse::<u32>().is_ok())
+                {
+                    Some(ver.to_string())
+                } else {
+                    None
+                }
+            })
+        })
+}
+
 /// 通过 jsDelivr CDN 获取 update.json（国内首选方案）
-/// 返回 None 表示所有 CDN 都不可用（上层回退到 GitHub API）
+/// 使用 jsDelivr data API 查到的最新版本号拼接 URL，确保拿到最新内容（绕过 @main 缓存）
 fn fetch_via_cdn() -> Result<GithubRelease> {
     let client = build_client()?;
     let mut errors = Vec::new();
 
-    for url in JSDELIVR_CDNS {
+    // 尝试获取 jsDelivr 已知的最新版本号
+    let version = fetch_latest_jsdelivr_version();
+    let ref_part = version.as_deref().unwrap_or("main");
+    if version.is_some() {
+        log::info!("jsDelivr 最新版本号: {}", ref_part);
+    } else {
+        log::warn!("无法获取 jsDelivr 版本号，使用 @main（可能有 CDN 缓存延迟）");
+    }
+
+    for base in JSDELIVR_CDNS {
+        let url = format!("{}{}/update.json", base, ref_part);
         log::info!("尝试 CDN: {}", url);
-        match client.get(*url).send() {
+        match client.get(&url).send() {
             Ok(resp) if resp.status().is_success() => {
                 log::info!("CDN 获取成功: {}", url);
                 return Ok(resp.json()?);

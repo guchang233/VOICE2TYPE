@@ -137,83 +137,658 @@ pub async fn toggle_subtitle(state: tauri::State<'_, Arc<AppState>>) -> Result<b
     state.toggle_subtitle().await
 }
 
+/// 计算文件的 SHA256 哈希（同步，分块读取）
+fn compute_sha256(path: &std::path::Path) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 8192];
+    loop {
+        let n = std::io::Read::read(&mut file, &mut buffer).map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buffer[..n]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
 #[tauri::command]
 pub async fn download_whisper_model(
     config: tauri::State<'_, Arc<ConfigManager>>,
     app: tauri::AppHandle,
     model_name: String,
 ) -> Result<String, String> {
+    use futures_util::StreamExt;
+    use tokio::io::AsyncWriteExt;
+
     let model_dir = config.whisper_models_dir();
     std::fs::create_dir_all(&model_dir).map_err(|e| e.to_string())?;
 
-    let model_url = match model_name.as_str() {
-        "tiny" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
-        "base" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
-        "small" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
-        "medium" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin",
-        _ => return Err(format!("Unknown model: {}", model_name)),
-    };
+    let model_paths = [
+        ("tiny", "ggml-tiny.bin"),
+        ("base", "ggml-base.bin"),
+        ("small", "ggml-small.bin"),
+        ("medium", "ggml-medium.bin"),
+    ];
+    let file_name = model_paths
+        .iter()
+        .find(|(k, _)| *k == model_name.as_str())
+        .map(|(_, v)| *v)
+        .ok_or_else(|| format!("未知模型: {}", model_name))?;
 
-    let output_path = model_dir.join(format!("ggml-{}.bin", model_name));
+    let final_path = model_dir.join(file_name);
+    let part_path = model_dir.join(format!("{}.part", file_name));
 
-    if output_path.exists() {
-        return Ok(format!("Model already exists at {:?}", output_path));
-    }
-
-    let client = reqwest::Client::new();
-    let response = client.get(model_url)
-        .send()
+    // 如果最终文件已存在且哈希匹配，直接返回
+    if final_path.exists() {
+        let part_path_clone = final_path.clone();
+        let hash_check = tokio::task::spawn_blocking(move || {
+            if let Some(expected) = crate::whisper_local::expected_sha256(file_name) {
+                match compute_sha256(&part_path_clone) {
+                    Ok(computed) => Ok(computed == expected),
+                    Err(e) => Err(e),
+                }
+            } else {
+                Ok(true)
+            }
+        })
         .await
-        .map_err(|e| format!("Download failed: {}", e))?;
+        .map_err(|e| e.to_string())??;
 
-    let total_size = response.content_length().unwrap_or(0);
-    let mut downloaded: u64 = 0;
-
-    use futures_util::StreamExt;
-    let mut file = tokio::fs::File::create(&output_path).await.map_err(|e| e.to_string())?;
-    let mut stream = response.bytes_stream();
-
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| format!("Stream error: {}", e))?;
-        downloaded += chunk.len() as u64;
-        tokio::io::AsyncWriteExt::write_all(&mut file, &chunk).await.map_err(|e| e.to_string())?;
-
-        if total_size > 0 {
-            let progress = (downloaded as f64 / total_size as f64 * 100.0) as u32;
-            let _ = app.emit("model-download-progress", serde_json::json!({
-                "model": model_name,
-                "progress": progress,
-                "downloaded": downloaded,
-                "total": total_size
-            }));
+        if hash_check {
+            return Ok("模型已存在".to_string());
         }
     }
 
-    Ok(format!("Model downloaded to {:?}", output_path))
+    // 三级镜像源（HF-Mirror → ModelScope → HuggingFace）
+    let mirror_urls = [
+        format!("https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/{}", file_name),
+        format!(
+            "https://modelscope.cn/api/v1/models/ggerganov/whisper.cpp/repo?Revision=master&FilePath={}",
+            file_name
+        ),
+        format!("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{}", file_name),
+    ];
+
+    let mut errors: Vec<String> = Vec::new();
+
+    for url in &mirror_urls {
+        log::info!("尝试下载模型: {}", url);
+
+        // 检查已有 .part 文件大小（用于断点续传）
+        let downloaded_so_far = std::fs::metadata(&part_path)
+            .map(|m| m.len())
+            .unwrap_or(0);
+
+        let client = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(15))
+            .redirect(reqwest::redirect::Policy::limited(5))
+            .build()
+            .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+
+        let mut request = client.get(url.to_string());
+        if downloaded_so_far > 0 {
+            request = request.header("Range", format!("bytes={}-", downloaded_so_far));
+        }
+
+        let response = match request.send().await {
+            Ok(r) => r,
+            Err(e) => {
+                let msg = format!("{}: {}", url, e);
+                log::warn!("下载失败: {}", msg);
+                errors.push(msg);
+                continue;
+            }
+        };
+
+        let status = response.status();
+        let is_partial = status == reqwest::StatusCode::PARTIAL_CONTENT; // 206
+
+        // 非 206 且非成功状态
+        if !is_partial && !status.is_success() {
+            let msg = format!("{}: HTTP {}", url, status);
+            log::warn!("下载失败: {}", msg);
+            errors.push(msg);
+            continue;
+        }
+
+        // 确定总大小和起始位置
+        let (total_size, start_pos): (u64, u64) = if is_partial {
+            // 206：从 Content-Range 解析总大小
+            let total = response
+                .headers()
+                .get(reqwest::header::CONTENT_RANGE)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.split('/').nth(1))
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(0);
+            (total, downloaded_so_far)
+        } else {
+            // 200：完整下载（服务器不支持 Range 或首次下载）
+            let total = response.content_length().unwrap_or(0);
+            (total, 0)
+        };
+
+        if !is_partial && downloaded_so_far > 0 {
+            log::info!("服务器不支持断点续传，从头下载");
+        }
+
+        // 打开文件：206 追加，200 覆盖
+        let mut file = if is_partial {
+            tokio::fs::OpenOptions::new()
+                .append(true)
+                .open(&part_path)
+                .await
+                .map_err(|e| e.to_string())?
+        } else {
+            tokio::fs::File::create(&part_path)
+                .await
+                .map_err(|e| e.to_string())?
+        };
+
+        let mut stream = response.bytes_stream();
+        let mut downloaded: u64 = start_pos;
+        let bytes_at_start = start_pos;
+        let start_time = std::time::Instant::now();
+        let mut last_emit_time = std::time::Instant::now();
+
+        let mut stream_ok = true;
+        let mut stream_err_msg = String::new();
+
+        while let Some(chunk_result) = stream.next().await {
+            match chunk_result {
+                Ok(chunk) => {
+                    if let Err(e) = file.write_all(&chunk).await {
+                        stream_err_msg = format!("写入文件失败: {}", e);
+                        stream_ok = false;
+                        break;
+                    }
+                    downloaded += chunk.len() as u64;
+
+                    // 每 ~500ms 发送一次进度
+                    let now = std::time::Instant::now();
+                    if now.duration_since(last_emit_time).as_millis() >= 500 {
+                        let elapsed = start_time.elapsed().as_secs_f64();
+                        let bytes_this_session = downloaded.saturating_sub(bytes_at_start);
+                        let speed = if elapsed > 0.0 {
+                            bytes_this_session as f64 / elapsed / 1_048_576.0
+                        } else {
+                            0.0
+                        };
+                        let eta = if speed > 0.0 && total_size > downloaded {
+                            ((total_size - downloaded) as f64 / (speed * 1_048_576.0)) as u64
+                        } else {
+                            0
+                        };
+                        let progress = if total_size > 0 {
+                            (downloaded as f64 / total_size as f64 * 100.0) as u32
+                        } else {
+                            0
+                        };
+
+                        let _ = app.emit(
+                            "model-download-progress",
+                            serde_json::json!({
+                                "model": model_name,
+                                "progress": progress,
+                                "downloaded": downloaded,
+                                "total": total_size,
+                                "speed": speed,
+                                "eta": eta
+                            }),
+                        );
+                        last_emit_time = now;
+                    }
+                }
+                Err(e) => {
+                    stream_err_msg = format!("流读取错误: {}", e);
+                    stream_ok = false;
+                    break;
+                }
+            }
+        }
+
+        // 刷新并关闭文件
+        let _ = file.flush().await;
+        drop(file);
+
+        if !stream_ok {
+            log::warn!("下载中断 {}: {}", url, stream_err_msg);
+            errors.push(format!("{}: {}", url, stream_err_msg));
+            // 保留 .part 文件以便下次续传
+            continue;
+        }
+
+        // 下载完成，校验 SHA256（在 spawn_blocking 中执行避免阻塞）
+        let part_path_clone = part_path.clone();
+        let hash_result = tokio::task::spawn_blocking(move || -> Result<bool, String> {
+            if let Some(expected) = crate::whisper_local::expected_sha256(file_name) {
+                let computed = compute_sha256(&part_path_clone)?;
+                Ok(computed == expected)
+            } else {
+                Ok(true)
+            }
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+
+        if !hash_result {
+            // 哈希不匹配，删除损坏的 .part 文件
+            let _ = std::fs::remove_file(&part_path);
+            let msg = format!("{}: SHA256 校验失败，文件已损坏", url);
+            log::warn!("{}", msg);
+            errors.push(msg);
+            continue;
+        }
+
+        // 校验通过，重命名 .part 为最终文件名
+        std::fs::rename(&part_path, &final_path).map_err(|e| e.to_string())?;
+        log::info!("模型下载完成: {}", final_path.display());
+
+        // 发送 100% 进度
+        let _ = app.emit(
+            "model-download-progress",
+            serde_json::json!({
+                "model": model_name,
+                "progress": 100,
+                "downloaded": total_size,
+                "total": total_size,
+                "speed": 0.0,
+                "eta": 0
+            }),
+        );
+
+        return Ok(format!("模型下载完成: {}", final_path.display()));
+    }
+
+    // 所有镜像源均失败（不删除 .part 文件，允许未来续传）
+    Err(format!("所有下载源均失败:\n{}", errors.join("\n")))
 }
 
 #[tauri::command]
-pub async fn list_available_models(config: tauri::State<'_, Arc<ConfigManager>>) -> Result<Vec<serde_json::Value>, String> {
+pub async fn list_available_models(
+    config: tauri::State<'_, Arc<ConfigManager>>,
+) -> Result<Vec<serde_json::Value>, String> {
     let model_dir = config.whisper_models_dir();
-    let mut models = Vec::new();
+    log::info!("[list_available_models] 扫描目录: {}", model_dir.display());
 
-    if model_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(&model_dir) {
+    let models = tokio::task::spawn_blocking(move || -> Result<Vec<serde_json::Value>, String> {
+        let mut models = Vec::new();
+        if !model_dir.exists() {
+            log::warn!("[list_available_models] 目录不存在: {}", model_dir.display());
+            return Ok(models);
+        }
+        let entries = std::fs::read_dir(&model_dir).map_err(|e| e.to_string())?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map(|e| e == "bin").unwrap_or(false) {
+                let name = path.file_name().unwrap().to_string_lossy().to_string();
+                let size = path.metadata().map(|m| m.len()).unwrap_or(0);
+                let available = if let Some(expected) = crate::whisper_local::expected_sha256(&name)
+                {
+                    compute_sha256(&path).map(|h| h == expected).unwrap_or(false)
+                } else {
+                    true
+                };
+                models.push(serde_json::json!({
+                    "name": name,
+                    "size": size,
+                    "available": available
+                }));
+            }
+        }
+        Ok(models)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    Ok(models)
+}
+
+/// whisper-bin-x64.zip 预期大小（v1.9.2，来自 GitHub API）
+const WHISPER_BIN_ZIP_SIZE: u64 = 8_194_445;
+/// whisper-bin-x64.zip 预期 SHA256（v1.9.2）
+const WHISPER_BIN_ZIP_SHA256: &str = "49dcc16de826f20bd53d44f947a1ae49dfa81f86cad67a64d80820cb192d674a";
+
+/// 下载 whisper.cpp 预编译二进制（Windows: whisper-bin-x64.zip）
+/// force=true 时先删除现有二进制目录内容再重新下载
+#[tauri::command]
+pub async fn download_whisper_binary(
+    config: tauri::State<'_, Arc<ConfigManager>>,
+    app: tauri::AppHandle,
+    force: Option<bool>,
+) -> Result<String, String> {
+    use futures_util::StreamExt;
+    use tokio::io::AsyncWriteExt;
+
+    let binary_dir = config.whisper_binary_dir();
+    let binary_path = config.whisper_binary_path();
+
+    // force=true 时清理现有二进制目录内容
+    if force.unwrap_or(false) && binary_dir.exists() {
+        log::info!("强制重新下载，清理二进制目录: {}", binary_dir.display());
+        if let Ok(entries) = std::fs::read_dir(&binary_dir) {
             for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().map(|e| e == "bin").unwrap_or(false) {
-                    let size = path.metadata().map(|m| m.len()).unwrap_or(0);
-                    models.push(serde_json::json!({
-                        "name": path.file_name().unwrap().to_string_lossy(),
-                        "path": path.to_string_lossy(),
-                        "size": size
-                    }));
-                }
+                let _ = std::fs::remove_file(entry.path());
             }
         }
     }
 
-    Ok(models)
+    std::fs::create_dir_all(&binary_dir).map_err(|e| e.to_string())?;
+
+    // 已存在且未强制下载，直接返回
+    if !force.unwrap_or(false) && binary_path.exists() {
+        return Ok("引擎已存在".to_string());
+    }
+
+    // 多镜像源：GitHub 代理优先（国内可达），直连兜底
+    let mirror_urls = [
+        "https://ghgo.xyz/https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.2/whisper-bin-x64.zip",
+        "https://gh-proxy.com/https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.2/whisper-bin-x64.zip",
+        "https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.2/whisper-bin-x64.zip",
+    ];
+
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+
+    let temp_zip =
+        std::env::temp_dir().join(format!("whisper-bin-{}.zip", uuid::Uuid::new_v4()));
+
+    let mut errors: Vec<String> = Vec::new();
+    let mut download_ok = false;
+
+    for url in &mirror_urls {
+        log::info!("尝试下载引擎: {}", url);
+
+        let response = match client.get(*url).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                let msg = format!("{}: {}", url, e);
+                log::warn!("下载失败: {}", msg);
+                errors.push(msg);
+                continue;
+            }
+        };
+
+        if !response.status().is_success() {
+            let msg = format!("{}: HTTP {}", url, response.status());
+            log::warn!("下载失败: {}", msg);
+            errors.push(msg);
+            continue;
+        }
+
+        let total_size = response.content_length().unwrap_or(0);
+
+        // 预检：Content-Length 明显不对（<1MB，预期 ~8MB）直接跳过此源
+        if total_size > 0 && total_size < 1_000_000 {
+            let msg = format!("{}: Content-Length 异常 ({} bytes，预期 ~8MB)，可能为代理错误页", url, total_size);
+            log::warn!("{}", msg);
+            errors.push(msg);
+            continue;
+        }
+
+        // 下载到临时文件
+        let mut file = match tokio::fs::File::create(&temp_zip).await {
+            Ok(f) => f,
+            Err(e) => {
+                let msg = format!("{}: 创建临时文件失败: {}", url, e);
+                errors.push(msg);
+                continue;
+            }
+        };
+
+        let mut stream = response.bytes_stream();
+        let mut downloaded: u64 = 0;
+        let mut last_emit_time = std::time::Instant::now();
+        let mut stream_ok = true;
+
+        while let Some(chunk_result) = stream.next().await {
+            match chunk_result {
+                Ok(chunk) => {
+                    if let Err(e) = file.write_all(&chunk).await {
+                        errors.push(format!("{}: 写入文件失败: {}", url, e));
+                        stream_ok = false;
+                        break;
+                    }
+                    downloaded += chunk.len() as u64;
+
+                    let now = std::time::Instant::now();
+                    if now.duration_since(last_emit_time).as_millis() >= 500 {
+                        let progress = if total_size > 0 {
+                            (downloaded as f64 / total_size as f64 * 100.0) as u32
+                        } else {
+                            0
+                        };
+                        let _ = app.emit(
+                            "binary-download-progress",
+                            serde_json::json!({
+                                "progress": progress,
+                                "downloaded": downloaded,
+                                "total": total_size
+                            }),
+                        );
+                        last_emit_time = now;
+                    }
+                }
+                Err(e) => {
+                    errors.push(format!("{}: 流读取错误: {}", url, e));
+                    stream_ok = false;
+                    break;
+                }
+            }
+        }
+
+        if let Err(e) = file.flush().await {
+            errors.push(format!("{}: 刷新文件失败: {}", url, e));
+            continue;
+        }
+        drop(file);
+
+        if !stream_ok {
+            continue;
+        }
+
+        log::info!("引擎下载完成 ({} bytes)，验证完整性: {}", downloaded, url);
+
+        // 验证 1：文件大小（允许 ±5% 误差，防止 CDN 压缩差异）
+        let size_min = WHISPER_BIN_ZIP_SIZE * 95 / 100;
+        let size_max = WHISPER_BIN_ZIP_SIZE * 110 / 100;
+        if downloaded < size_min || downloaded > size_max {
+            let msg = format!(
+                "{}: 文件大小不匹配 ({} bytes，预期 {} bytes)，可能为代理返回的错误内容",
+                url, downloaded, WHISPER_BIN_ZIP_SIZE
+            );
+            log::warn!("{}", msg);
+            errors.push(msg);
+            let _ = std::fs::remove_file(&temp_zip);
+            continue;
+        }
+
+        // 验证 2：SHA256 校验（确保内容完整且未被篡改）
+        let temp_zip_hash = temp_zip.clone();
+        let expected_hash = WHISPER_BIN_ZIP_SHA256.to_string();
+        let hash_result = tokio::task::spawn_blocking(move || -> Result<(), String> {
+            let hash = compute_sha256(&temp_zip_hash).map_err(|e| e.to_string())?;
+            if hash != expected_hash {
+                return Err(format!("SHA256 校验失败: {} != {}", hash, expected_hash));
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+
+        if let Err(e) = hash_result {
+            let msg = format!("{}: {}", url, e);
+            log::warn!("{}", msg);
+            errors.push(msg);
+            let _ = std::fs::remove_file(&temp_zip);
+            continue;
+        }
+
+        // 验证 3：zip 文件有效性
+        let temp_zip_verify = temp_zip.clone();
+        let zip_valid = tokio::task::spawn_blocking(move || -> Result<(), String> {
+            let zip_file =
+                std::fs::File::open(&temp_zip_verify).map_err(|e| e.to_string())?;
+            let _archive =
+                zip::ZipArchive::new(zip_file).map_err(|e| format!("无效的 zip 文件: {}", e))?;
+            Ok(())
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+
+        if let Err(e) = zip_valid {
+            let msg = format!("{}: {}", url, e);
+            log::warn!("{}", msg);
+            errors.push(msg);
+            let _ = std::fs::remove_file(&temp_zip);
+            continue;
+        }
+
+        log::info!("引擎下载验证通过: {}", url);
+        download_ok = true;
+        break;
+    }
+
+    if !download_ok {
+        return Err(format!("所有镜像源下载均失败:\n{}", errors.join("\n")));
+    }
+
+    // 解压 zip 文件，提取所有文件到 binary_dir
+    let temp_zip_clone = temp_zip.clone();
+    let binary_dir_clone = binary_dir.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let zip_file = std::fs::File::open(&temp_zip_clone).map_err(|e| e.to_string())?;
+        let mut archive = zip::ZipArchive::new(zip_file).map_err(|e| e.to_string())?;
+        for i in 0..archive.len() {
+            let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
+            let name = entry.name().to_string();
+            // 跳过目录
+            if name.ends_with('/') {
+                continue;
+            }
+            // 提取文件名（去除 zip 内可能的目录层级）
+            let file_name = std::path::Path::new(&name)
+                .file_name()
+                .map(|f| f.to_owned())
+                .ok_or_else(|| format!("无效的文件名: {}", name))?;
+            let out_path = binary_dir_clone.join(&file_name);
+            let mut out_file = std::fs::File::create(&out_path).map_err(|e| e.to_string())?;
+            std::io::copy(&mut entry, &mut out_file).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    // 清理临时文件
+    let _ = std::fs::remove_file(&temp_zip);
+
+    // 验证 whisper-cli.exe 存在
+    // 注意：whisper-cli.exe 本身约 479KB，且依赖 whisper.dll/ggml.dll，
+    // 因此不做大小阈值判断，只验证可执行文件和关键 DLL 是否齐全
+    if !binary_path.exists() {
+        return Err("解压完成但未找到 whisper-cli.exe".to_string());
+    }
+    let binary_dir_check = config.whisper_binary_dir();
+    #[cfg(target_os = "windows")]
+    {
+        let whisper_dll = binary_dir_check.join("whisper.dll");
+        let ggml_dll = binary_dir_check.join("ggml.dll");
+        if !whisper_dll.exists() {
+            return Err("解压完成但未找到 whisper.dll".to_string());
+        }
+        if !ggml_dll.exists() {
+            return Err("解压完成但未找到 ggml.dll".to_string());
+        }
+    }
+
+    log::info!("whisper.cpp 二进制下载完成: {}", binary_path.display());
+
+    // 发送 100% 进度
+    let _ = app.emit(
+        "binary-download-progress",
+        serde_json::json!({
+            "progress": 100,
+            "downloaded": WHISPER_BIN_ZIP_SIZE,
+            "total": WHISPER_BIN_ZIP_SIZE
+        }),
+    );
+
+    Ok(format!("引擎下载完成: {}", binary_path.display()))
+}
+
+/// 检查 whisper.cpp 二进制是否已下载
+#[tauri::command]
+pub fn check_whisper_binary(config: tauri::State<'_, Arc<ConfigManager>>) -> bool {
+    config.whisper_binary_path().exists()
+}
+
+/// 检查 whisper.cpp 二进制健康状态（存在性、配套 DLL 是否齐全）
+/// 注意：whisper-cli.exe 约 479KB，且依赖 whisper.dll/ggml.dll，
+/// 因此不能用 >500KB 的大小阈值判断完整性，改为检查关键 DLL 是否存在。
+#[tauri::command]
+pub fn check_whisper_binary_health(
+    config: tauri::State<'_, Arc<ConfigManager>>,
+) -> serde_json::Value {
+    let binary_path = config.whisper_binary_path();
+    let binary_dir = config.whisper_binary_dir();
+
+    if !binary_path.exists() {
+        return serde_json::json!({
+            "status": "missing",
+            "message": "引擎未下载",
+            "size": 0
+        });
+    }
+
+    let size = binary_path.metadata().map(|m| m.len()).unwrap_or(0);
+
+    // 列出二进制目录下所有文件
+    let mut files = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&binary_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let file_size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+            files.push(serde_json::json!({
+                "name": name,
+                "size": file_size
+            }));
+        }
+    }
+
+    // Windows 下检查关键配套 DLL 是否存在
+    #[cfg(target_os = "windows")]
+    {
+        let whisper_dll = binary_dir.join("whisper.dll");
+        let ggml_dll = binary_dir.join("ggml.dll");
+        if !whisper_dll.exists() || !ggml_dll.exists() {
+            let mut missing = Vec::new();
+            if !whisper_dll.exists() {
+                missing.push("whisper.dll");
+            }
+            if !ggml_dll.exists() {
+                missing.push("ggml.dll");
+            }
+            return serde_json::json!({
+                "status": "corrupt",
+                "message": format!("缺少关键依赖: {}，请重新下载引擎", missing.join(", ")),
+                "size": size,
+                "files": files
+            });
+        }
+    }
+
+    serde_json::json!({
+        "status": "ok",
+        "message": "引擎就绪",
+        "size": size,
+        "files": files
+    })
 }
 
 #[tauri::command]

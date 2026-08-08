@@ -604,7 +604,23 @@ impl ConfigManager {
     }
 
     pub fn whisper_models_dir(&self) -> PathBuf {
-        self.models_dir().join("whisper")
+        // 模型 .bin 文件直接放在模型目录根目录（与前端展示和帮助教程一致）
+        self.models_dir()
+    }
+
+    /// whisper.cpp 预编译二进制存放目录
+    pub fn whisper_binary_dir(&self) -> PathBuf {
+        self.models_dir().join("whisper-bin")
+    }
+
+    /// whisper.cpp 可执行文件完整路径（Windows: whisper-cli.exe）
+    /// v1.9.2 起 main.exe 已弃用（仅输出警告后退出），改用 whisper-cli
+    pub fn whisper_binary_path(&self) -> PathBuf {
+        if cfg!(target_os = "windows") {
+            self.whisper_binary_dir().join("whisper-cli.exe")
+        } else {
+            self.whisper_binary_dir().join("whisper-cli")
+        }
     }
 
     pub fn sherpa_models_dir(&self) -> PathBuf {

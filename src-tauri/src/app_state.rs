@@ -274,23 +274,40 @@ impl AppState {
         let lang = self.config.output_language();
         let lang_opt: Option<String> = if lang == "auto" { None } else { Some(lang.clone()) };
 
-        let recognition_result = if service == "local" {
-            let engine = self.whisper_engine.clone();
-            let samples_clone = samples_i16.clone();
-            let lang_for_closure = lang_opt.clone();
-
-            tokio::task::spawn_blocking(move || -> Result<String, String> {
-                let mut engine = engine.lock().map_err(|e| format!("Lock error: {}", e))?;
-                if !engine.is_model_available() {
-                    return Err("Local Whisper model not found. Please download a model first.".to_string());
-                }
-                engine.load_model().map_err(|e| format!("Failed to load model: {}", e))?;
-                let lang_ref = lang_for_closure.as_deref();
-                engine.transcribe_i16(&samples_clone, lang_ref).map_err(|e| format!("Whisper error: {}", e))
-            })
+        let recognition_result: Result<String, String> = if service == "local" {
+            // 本地 Whisper：通过 whisper.cpp 预编译二进制执行转写。
+            // 先在锁内同步模型路径并检查模型/二进制可用性，再在不持有锁的情况下异步调用转写。
+            async {
+                let (model_path, binary_path) = {
+                    let mut engine = self
+                        .whisper_engine
+                        .lock()
+                        .map_err(|e| format!("Lock error: {}", e))?;
+                    let model_name = self.config.local_whisper_model();
+                    engine.sync_model_path(&model_name);
+                    if !engine.is_model_available() {
+                        return Err(
+                            "Local Whisper model not found. Please download a model first."
+                                .to_string(),
+                        );
+                    }
+                    if !engine.is_binary_available() {
+                        return Err(
+                            "whisper.cpp 引擎未下载，请在设置中下载引擎二进制".to_string(),
+                        );
+                    }
+                    Ok::<(std::path::PathBuf, std::path::PathBuf), String>((
+                        engine.model_path().to_path_buf(),
+                        engine.binary_path_clone(),
+                    ))
+                }?;
+                // 异步转写（不持有引擎锁，避免阻塞其他操作）
+                let lang_ref = lang_opt.as_deref();
+                LocalWhisperEngine::transcribe_at(&binary_path, &model_path, &samples_i16, lang_ref)
+                    .await
+                    .map_err(|e| format!("Whisper error: {}", e))
+            }
             .await
-            .map_err(|e| format!("Task error: {}", e))
-            .and_then(|r| r)
         } else {
             let wav_result = processor::encode_wav_memory(&samples_i16, output_rate)
                 .map_err(|e| format!("Failed to encode WAV: {}", e));

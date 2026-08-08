@@ -377,6 +377,7 @@
                                     <option value="TeleAI/TeleSpeechASR">TeleSpeechASR (SiliconFlow)</option>
                                     <option value="whisper-large-v3">Whisper Large v3 (Groq)</option>
                                     <option value="local-whisper">本地 Whisper</option>
+                                    <option value="custom">自定义提供商</option>
                                 </select>
                             </div>
                             <div class="setting-row">
@@ -429,6 +430,28 @@
                                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
                                     </button>
                                     <button class="toggle-eye-btn" data-target="setting-doubao-key" title="显示/隐藏">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="settings-section" id="custom-provider-section">
+                            <h3>自定义模型提供商</h3>
+                            <p class="section-hint">兼容 OpenAI 转写接口（/v1/audio/transcriptions），填入 API 地址、模型名和密钥即可</p>
+                            <div class="setting-row">
+                                <label>API 地址</label>
+                                <input type="text" class="text-input" id="setting-custom-api-url" placeholder="https://api.example.com/v1/audio/transcriptions">
+                            </div>
+                            <div class="setting-row">
+                                <label>模型名</label>
+                                <input type="text" class="text-input" id="setting-custom-model-name" placeholder="whisper-1">
+                            </div>
+                            <div class="setting-row">
+                                <label>API Key</label>
+                                <div class="input-with-btn">
+                                    <input type="password" class="text-input" id="setting-custom-key" placeholder="sk-...">
+                                    <button class="toggle-eye-btn" data-target="setting-custom-key" title="显示/隐藏">
                                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                                     </button>
                                 </div>
@@ -491,7 +514,9 @@
                         </div>
 
                         <div class="settings-section">
-                            <h3>模型管理</h3>
+                            <h3>模型管理
+                                <button class="help-btn" id="btn-local-model-help" title="本地模型使用教程">?</button>
+                            </h3>
                             <div class="setting-row setting-row-vertical">
                                 <label>模型目录</label>
                                 <div class="models-dir-row">
@@ -500,29 +525,56 @@
                                     <button class="solid-btn" id="btn-reset-models-dir" title="恢复默认目录">恢复默认</button>
                                 </div>
                             </div>
-                            <div class="setting-row">
-                                <label>下载 Whisper 模型</label>
-                                <div class="download-model-row">
-                                    <select class="select-input download-model-select" id="whisper-model-select">
-                                        <option value="tiny">Tiny (快速)</option>
-                                        <option value="base" selected>Base (推荐)</option>
-                                        <option value="small">Small (准确)</option>
-                                        <option value="medium">Medium (高精度)</option>
-                                    </select>
-                                    <button class="solid-btn" id="btn-download-model">下载</button>
+                            <div class="setting-row setting-row-vertical">
+                                <label>转写引擎 (whisper.cpp)</label>
+                                <div class="engine-status-row">
+                                    <span class="engine-status-badge" id="engine-status-badge">检测中...</span>
+                                    <button class="secondary-btn" id="btn-download-engine">下载引擎</button>
+                                    <button class="apply-link-btn" data-url="https://github.com/ggml-org/whisper.cpp/releases" title="打开 whisper.cpp Releases 页面（手动下载）">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                    </button>
                                 </div>
+                                <span class="guide-hint" id="engine-detail-hint"></span>
                             </div>
-                            <div class="setting-row" id="download-progress-row" style="display: none;">
-                                <label>下载进度</label>
-                                <div class="progress-row-inner">
-                                    <div class="progress-bar-container">
-                                        <div class="progress-bar" id="download-progress-bar" style="width: 0%"></div>
+                            <div class="setting-row setting-row-vertical">
+                                <label>Whisper 模型文件</label>
+                                <div class="guide-row">
+                                    <span class="guide-hint">需手动下载 ggml-*.bin 放入模型目录</span>
+                                </div>
+                                <div class="model-links">
+                                    <div class="model-link-item">
+                                        <span>tiny (快速, ~75MB)</span>
+                                        <button class="apply-link-btn" data-url="https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin" title="下载 ggml-tiny.bin">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                        </button>
                                     </div>
-                                    <div class="progress-text" id="download-progress-text">0%</div>
+                                    <div class="model-link-item">
+                                        <span>base (推荐, ~142MB)</span>
+                                        <button class="apply-link-btn" data-url="https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-base.bin" title="下载 ggml-base.bin">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                        </button>
+                                    </div>
+                                    <div class="model-link-item">
+                                        <span>small (准确, ~466MB)</span>
+                                        <button class="apply-link-btn" data-url="https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-small.bin" title="下载 ggml-small.bin">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                        </button>
+                                    </div>
+                                    <div class="model-link-item">
+                                        <span>medium (高精度, ~1.5GB)</span>
+                                        <button class="apply-link-btn" data-url="https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin" title="下载 ggml-medium.bin">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                             <div class="setting-row setting-row-vertical">
-                                <label>已下载模型</label>
+                                <div class="label-with-action">
+                                    <label>已下载模型</label>
+                                    <button class="icon-btn refresh-models-btn" id="btn-refresh-models" title="重新检测已下载模型">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                                    </button>
+                                </div>
                                 <div class="downloaded-models-list" id="downloaded-models-list">
                                     <span class="empty-hint">加载中...</span>
                                 </div>
@@ -581,6 +633,48 @@
 
     <div class="context-menu" id="context-menu" hidden></div>
 
+    <!-- 本地模型使用教程模态框 -->
+    <div class="modal-overlay" id="help-modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>本地模型使用教程</h2>
+                <button class="modal-close-btn" id="btn-close-help" title="关闭">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="help-section">
+                    <h3>1. 下载转写引擎</h3>
+                    <p>也可在设置页面点击「下载引擎」按钮自动下载。</p>
+                    <p>或手动下载：点击 <a href="#" class="help-link" data-url="https://github.com/ggml-org/whisper.cpp/releases">whisper.cpp Releases</a> 打开 GitHub 发布页面。</p>
+                    <ol>
+                        <li>找到最新版本的 <code>whisper-bin-x64.zip</code>（Windows 64 位）</li>
+                        <li>下载并解压 zip 文件</li>
+                        <li>将解压出的 <code>Release</code> 文件夹下<strong>所有文件</strong>（whisper-cli.exe、main.exe、各 .dll 文件）复制到上方「模型目录」下的 <code>whisper-bin</code> 文件夹</li>
+                    </ol>
+                    <p class="help-tip">提示：如果 whisper-bin 文件夹不存在，请先手动创建。</p>
+                </div>
+                <div class="help-section">
+                    <h3>2. 下载模型文件</h3>
+                    <p>点击上方模型链接下载对应的 <code>ggml-*.bin</code> 文件（推荐 base 版本）。</p>
+                    <ul>
+                        <li><strong>tiny</strong> — 最快，精度最低，适合测试 (~75MB)</li>
+                        <li><strong>base</strong> — 速度与精度均衡，推荐首选 (~142MB)</li>
+                        <li><strong>small</strong> — 更准确，速度稍慢 (~466MB)</li>
+                        <li><strong>medium</strong> — 最高精度，需较强硬件 (~1.5GB)</li>
+                    </ul>
+                    <p>将下载的 <code>.bin</code> 文件放入「模型目录」根目录。</p>
+                </div>
+                <div class="help-section">
+                    <h3>3. 选择并使用</h3>
+                    <ol>
+                        <li>回到设置，在「批量识别模型」中选择「本地 Whisper」</li>
+                        <li>在「已下载模型」中确认文件已被识别</li>
+                        <li>使用语音输入快捷键录音，松开后将自动调用本地引擎转写</li>
+                    </ol>
+                    <p class="help-tip">首次转写会稍慢（引擎加载），后续会更快。本地模型不消耗 API 额度，完全离线运行。</p>
+                </div>
+            </div>
+        </div>
+    </div>
     <script src="app.js"></script>
 </body>
 </html>
