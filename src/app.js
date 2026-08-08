@@ -197,8 +197,7 @@
             loadHistory();
         } else if (viewName === 'settings') {
             loadSettings();
-            loadDownloadedModels();
-            checkEngineStatus();
+            // 模型和引擎检测改为手动触发
         }
 
         // 视图切换后刷新分段控件指示器（新视图变为可见后才能正确测量尺寸）

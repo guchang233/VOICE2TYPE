@@ -107,25 +107,8 @@ impl LocalWhisperEngine {
     }
 
     /// 根据配置中的模型名（如 "ggml-small.bin"）更新当前模型路径
-    /// 若文件不存在则回退到目录中第一个可用的 ggml-*.bin
     pub fn sync_model_path(&mut self, model_name: &str) {
-        let target = self.model_dir.join(model_name);
-        if target.exists() {
-            self.model_path = target;
-            return;
-        }
-        // 回退：扫描目录中第一个 ggml-*.bin
-        if let Ok(entries) = std::fs::read_dir(&self.model_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().map(|e| e == "bin").unwrap_or(false) {
-                    self.model_path = path;
-                    return;
-                }
-            }
-        }
-        // 仍保留默认值（可能不存在，后续转写会报错）
-        self.model_path = target;
+        self.model_path = self.model_dir.join(model_name);
     }
 
     /// 实例方法：使用引擎当前的模型路径和二进制路径进行转写
