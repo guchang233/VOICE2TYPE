@@ -61,9 +61,25 @@ impl LocalWhisperEngine {
         self.binary_path.exists()
     }
 
-    /// 根据配置中的模型名（如 "ggml-small.bin"）更新当前模型路径
-    pub fn sync_model_path(&mut self, model_name: &str) {
-        self.model_path = self.model_dir.join(model_name);
+    /// 用最新的模型目录刷新引擎内部所有路径（模型目录、二进制路径、模型路径）。
+    /// 必须在每次转写前调用，因为用户可能在启动后修改了自定义模型目录，
+    /// 导致启动时捕获的 model_dir 已过期。
+    pub fn refresh_paths(&mut self, model_dir: PathBuf, model_name: &str) {
+        self.binary_path = model_dir
+            .join("whisper-bin")
+            .join(if cfg!(target_os = "windows") {
+                "whisper-cli.exe"
+            } else {
+                "whisper-cli"
+            });
+        self.model_dir = model_dir.clone();
+        // model_name 为空时回退到默认 base 模型，避免 join 出目录本身
+        let name = if model_name.is_empty() {
+            "ggml-base.bin"
+        } else {
+            model_name
+        };
+        self.model_path = model_dir.join(name);
     }
 
     /// 关联函数：不持有引擎锁即可调用转写。

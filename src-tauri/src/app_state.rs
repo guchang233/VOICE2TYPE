@@ -284,12 +284,14 @@ impl AppState {
                         .lock()
                         .map_err(|e| format!("Lock error: {}", e))?;
                     let model_name = self.config.local_whisper_model();
-                    engine.sync_model_path(&model_name);
+                    let model_dir = self.config.whisper_models_dir();
+                    // 用实时配置刷新引擎路径，避免启动后用户修改模型目录导致路径过期
+                    engine.refresh_paths(model_dir, &model_name);
                     if !engine.is_model_available() {
-                        return Err(
-                            "Local Whisper model not found. Please download a model first."
-                                .to_string(),
-                        );
+                        return Err(format!(
+                            "Local Whisper model not found: {}。请在设置中确认模型目录与已下载模型",
+                            engine.model_path().display()
+                        ));
                     }
                     if !engine.is_binary_available() {
                         return Err(
