@@ -286,7 +286,23 @@ impl AppState {
                     let model_name = self.config.local_whisper_model();
                     let model_dir = self.config.whisper_models_dir();
                     // 用实时配置刷新引擎路径，避免启动后用户修改模型目录导致路径过期
-                    engine.refresh_paths(model_dir, &model_name);
+                    engine.refresh_paths(model_dir.clone(), &model_name);
+
+                    // 配置的模型不存在时，回退到目录中任意可用的 ggml-*.bin
+                    // （用户可能下载了 small 但配置仍是默认 base，不应直接报错）
+                    if !engine.is_model_available() {
+                        if let Some(fallback) = find_available_model(&model_dir) {
+                            log::warn!(
+                                "配置的本地模型 {} 不存在，回退到 {}",
+                                model_name,
+                                fallback
+                            );
+                            engine.refresh_paths(model_dir.clone(), &fallback);
+                            // 持久化回退结果，避免下次重复回退
+                            self.config.set_local_whisper_model(fallback);
+                        }
+                    }
+
                     if !engine.is_model_available() {
                         return Err(format!(
                             "Local Whisper model not found: {}。请在设置中确认模型目录与已下载模型",
@@ -396,4 +412,28 @@ impl AppState {
     pub async fn get_status(&self) -> String {
         self.status.lock().await.to_string()
     }
+}
+
+/// 扫描模型目录，返回第一个非空的 ggml-*.bin 文件名。
+/// 优先级：tiny > base > small > medium > 其他 .bin
+fn find_available_model(model_dir: &std::path::Path) -> Option<String> {
+    let entries = std::fs::read_dir(model_dir).ok()?;
+    let mut found: Vec<String> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().map(|e| e == "bin").unwrap_or(false) {
+            let name = path.file_name()?.to_string_lossy().to_string();
+            // 跳过空文件（< 1MB 视为不完整）
+            let size = path.metadata().map(|m| m.len()).unwrap_or(0);
+            if size > 1_000_000 {
+                found.push(name);
+            }
+        }
+    }
+    // 按优先级排序
+    let priority = ["ggml-tiny.bin", "ggml-base.bin", "ggml-small.bin", "ggml-medium.bin"];
+    found.sort_by_key(|n| {
+        priority.iter().position(|p| p == n).unwrap_or(usize::MAX)
+    });
+    found.into_iter().next()
 }
