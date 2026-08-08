@@ -133,11 +133,12 @@ impl LocalWhisperEngine {
         .await
         .map_err(|e| anyhow::anyhow!("WAV 写入任务失败: {}", e))??;
 
-        // 构建线程数（上限 8）
+        // 线程数：用物理核心数（whisper.cpp CPU 推理受物理核限制，
+        // 超线程/SMT 收益递减甚至倒退）。无法精确获取物理核时退回逻辑核 / 2。
         let thread_count = std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(4)
-            .min(8);
+            .min(16);
 
         // 构建 whisper-cli 命令（用文件路径而非 stdin）
         let mut cmd = tokio::process::Command::new(binary_path);
@@ -145,12 +146,19 @@ impl LocalWhisperEngine {
             .arg(model_path)
             .arg("-f")
             .arg(&wav_path)
-            .arg("-nt")
-            .arg("-np")
+            .arg("-nt") // no timestamps
+            .arg("-np") // no prints
             .arg("-t")
             .arg(thread_count.to_string())
             .arg("-l")
             .arg(language.unwrap_or("auto"))
+            // 性能优化：贪心解码，禁用 beam search 和 best-of
+            // 默认 -bs 5 -bo 5 对短句实时输入是巨大浪费，
+            // 贪心解码 (-bs 0) 牺牲极少精度换大幅速度提升
+            .arg("-bs")
+            .arg("0")
+            .arg("-bo")
+            .arg("1")
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
 
@@ -163,12 +171,13 @@ impl LocalWhisperEngine {
         }
 
         log::info!(
-            "[whisper] 启动转写: 引擎={}, 模型={}, WAV={}, 采样数={}, 语言={}",
+            "[whisper] 启动转写: 引擎={}, 模型={}, WAV={}, 采样数={}, 语言={}, 线程={} (贪心解码)",
             binary_path.display(),
             model_path.display(),
             wav_path.display(),
             samples.len(),
-            language.unwrap_or("auto")
+            language.unwrap_or("auto"),
+            thread_count
         );
 
         let output = cmd.output().await?;
