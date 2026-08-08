@@ -458,69 +458,38 @@
     }
 
     /// 检查 whisper.cpp 引擎健康状态并更新 UI 徽章
-    /// force=true 时跳过缓存强制重新检测
-    async function checkEngineStatus(force) {
+    async function checkEngineStatus() {
         const badge = $('#engine-status-badge');
         const hint = $('#engine-detail-hint');
         const dlBtn = $('#btn-download-engine');
         if (!badge) return;
 
-        // 防止并发检测
-        if (state.engineChecking) return;
-
-        // 10 秒内有缓存且非强制刷新时，直接使用缓存结果
-        const CACHE_TTL = 10_000;
-        if (!force && state.engineStatusCache) {
-            const age = Date.now() - state.engineStatusCache.timestamp;
-            if (age < CACHE_TTL) {
-                applyEngineStatus(state.engineStatusCache.health);
-                return;
-            }
-        }
-
-        state.engineChecking = true;
-        // 仅在无缓存时显示"检测中..."，避免每次切换页面闪烁
-        if (!state.engineStatusCache) {
-            badge.textContent = '检测中...';
-            badge.className = 'engine-status-badge';
-        }
-        if (hint && !state.engineStatusCache) hint.textContent = '';
+        badge.textContent = '检测中...';
+        badge.className = 'engine-status-badge';
+        if (hint) hint.textContent = '';
 
         try {
             const health = await invoke('check_whisper_binary_health');
-            state.engineStatusCache = { health, timestamp: Date.now() };
-            applyEngineStatus(health);
+            if (health.status === 'ok') {
+                badge.textContent = '引擎就绪';
+                badge.className = 'engine-status-badge status-ok';
+                if (hint) hint.textContent = '';
+                if (dlBtn) dlBtn.textContent = '重新下载';
+            } else if (health.status === 'missing') {
+                badge.textContent = '未下载';
+                badge.className = 'engine-status-badge status-missing';
+                if (hint) hint.textContent = '点击"下载引擎"自动下载，或手动下载 whisper-bin-x64.zip 解压所有文件到 whisper-bin 文件夹';
+                if (dlBtn) dlBtn.textContent = '下载引擎';
+            } else if (health.status === 'corrupt') {
+                badge.textContent = '引擎损坏';
+                badge.className = 'engine-status-badge status-corrupt';
+                if (hint) hint.textContent = health.message + '。请点击"重新下载"';
+                if (dlBtn) dlBtn.textContent = '重新下载';
+            }
         } catch (err) {
             badge.textContent = '检测失败';
             badge.className = 'engine-status-badge status-corrupt';
             if (hint) hint.textContent = String(err);
-        } finally {
-            state.engineChecking = false;
-        }
-    }
-
-    /// 将引擎状态应用到 UI
-    function applyEngineStatus(health) {
-        const badge = $('#engine-status-badge');
-        const hint = $('#engine-detail-hint');
-        const dlBtn = $('#btn-download-engine');
-        if (!badge) return;
-
-        if (health.status === 'ok') {
-            badge.textContent = '引擎就绪';
-            badge.className = 'engine-status-badge status-ok';
-            if (hint) hint.textContent = '';
-            if (dlBtn) dlBtn.textContent = '重新下载';
-        } else if (health.status === 'missing') {
-            badge.textContent = '未下载';
-            badge.className = 'engine-status-badge status-missing';
-            if (hint) hint.textContent = '点击"下载引擎"自动下载，或手动下载 whisper-bin-x64.zip 解压所有文件到 whisper-bin 文件夹';
-            if (dlBtn) dlBtn.textContent = '下载引擎';
-        } else if (health.status === 'corrupt') {
-            badge.textContent = '引擎损坏';
-            badge.className = 'engine-status-badge status-corrupt';
-            if (hint) hint.textContent = health.message + '。请点击"重新下载"';
-            if (dlBtn) dlBtn.textContent = '重新下载';
         }
     }
 
@@ -1451,11 +1420,11 @@
                 try {
                     const result = await invoke('download_whisper_binary', { force: true });
                     console.log('引擎下载成功:', result);
-                    await checkEngineStatus(true);  // 强制刷新
+                    await checkEngineStatus();
                 } catch (err) {
                     console.error('引擎下载失败:', err);
                     alert('引擎下载失败: ' + err);
-                    await checkEngineStatus(true);  // 强制刷新
+                    await checkEngineStatus();
                 } finally {
                     if (unlisten) unlisten();
                     dlEngineBtn.disabled = false;
@@ -1956,7 +1925,6 @@
 
         listen('app-ready', () => {
             setStatus('idle', '就绪');
-            loadSettings();
             updateSubtitlePreview();
 
             if (invoke) {
