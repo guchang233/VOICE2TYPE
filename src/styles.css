@@ -1,15 +1,35 @@
+/* ===== 非颜色变量（所有主题共享） ===== */
 :root {
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+    --transition: 0.15s ease;
+    --font-sans: "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont,
+                 "Helvetica Neue", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei",
+                 sans-serif;
+    --font-mono: "JetBrains Mono", "Cascadia Code", "SF Mono", "Consolas", Menlo, monospace;
+    /* 跨主题统一的控件前景色（iOS 风格开关旋钮） */
+    --switch-knob-bg: #ffffff;
+}
+
+/* ===== 深色主题（默认） ===== */
+:root, [data-theme="dark"] {
     --bg-primary: #0d0d0d;
     --bg-secondary: #18181b;
     --bg-tertiary: #212127;
     --bg-hover: #27272e;
     --bg-active: #303038;
+    --bg-code: #0a0a0a;
+    --bg-overlay: rgba(0, 0, 0, 0.6);
+    --bg-modal: #18181b;
     --border-color: #2e2e36;
     --border-strong: #3d3d47;
     --text-primary: #fafafa;
     --text-secondary: #a1a1aa;
     --text-tertiary: #52525b;
     --text-tertiary-strong: #6b6b73;
+    --text-on-accent: #ffffff;
+    --text-inverse: #ffffff;
     --accent: #3b82f6;
     --accent-hover: #60a5fa;
     --accent-active: #2563eb;
@@ -24,18 +44,253 @@
     --accent-cyan-soft: rgba(6, 182, 212, 0.15);
     --accent-purple: #a855f7;
     --accent-purple-soft: rgba(168, 85, 247, 0.15);
-    --radius-sm: 4px;
-    --radius-md: 6px;
-    --radius-lg: 8px;
-    --transition: 0.15s ease;
+    /* 状态色 */
+    --status-ok-bg: rgba(34, 197, 94, 0.15);
+    --status-ok-fg: #4ade80;
+    --status-missing-bg: rgba(239, 68, 68, 0.15);
+    --status-missing-fg: #f87171;
+    --status-corrupt-bg: rgba(250, 140, 22, 0.15);
+    --status-corrupt-fg: #fb923c;
+    /* 日志色 */
+    --log-info-bg: rgba(59, 130, 246, 0.15);
+    --log-info-fg: #60a5fa;
+    --log-warn-bg: rgba(234, 179, 8, 0.15);
+    --log-warn-fg: #facc15;
+    --log-error-bg: rgba(239, 68, 68, 0.18);
+    --log-error-fg: #f87171;
+    --log-success-bg: rgba(34, 197, 94, 0.15);
+    --log-success-fg: #4ade80;
+    --log-source-fg: #94a3b8;
+    --log-line-hover: rgba(255, 255, 255, 0.04);
+    --log-line-error-bg: rgba(239, 68, 68, 0.08);
+    --log-line-warn-bg: rgba(234, 179, 8, 0.05);
+    /* 阴影 */
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
     --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
     --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.4);
     --shadow-glow-blue: 0 0 0 3px rgba(59, 130, 246, 0.25);
-    --font-sans: "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont,
-                 "Helvetica Neue", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei",
-                 sans-serif;
-    --font-mono: "JetBrains Mono", "Cascadia Code", "SF Mono", "Consolas", Menlo, monospace;
+    --shadow-knob: 0 1px 3px rgba(0, 0, 0, 0.35), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+    --shadow-knob-hover: 0 1px 4px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+    --shadow-thumb: 0 1px 3px rgba(0, 0, 0, 0.3);
+    --shadow-thumb-hover: 0 2px 6px rgba(59, 130, 246, 0.4);
+    --shadow-primary-btn: 0 1px 2px rgba(0, 0, 0, 0.2);
+    --shadow-primary-btn-hover: 0 2px 8px rgba(59, 130, 246, 0.35);
+    --shadow-context-menu: 0 8px 24px rgba(0, 0, 0, 0.4);
+    --shadow-titlebar-inset: inset 0 -1px 0 rgba(255, 255, 255, 0.02);
+    --shadow-nav-indicator: 0 1px 0 rgba(255, 255, 255, 0.1) inset, 0 2px 8px rgba(59, 130, 246, 0.25);
+    --shadow-range-glow: var(--shadow-glow-blue), 0 1px 3px rgba(0, 0, 0, 0.3);
+    --setting-row-hover: rgba(255, 255, 255, 0.015);
+    --help-tip-bg: rgba(59, 130, 246, 0.1);
+    --select-arrow-color: %23a1a1aa;
+}
+
+/* ===== 白色主题 ===== */
+[data-theme="light"] {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f7f7f8;
+    --bg-tertiary: #efeff1;
+    --bg-hover: #e8e8ec;
+    --bg-active: #dfdfe4;
+    --bg-code: #f0f0f4;
+    --bg-overlay: rgba(0, 0, 0, 0.3);
+    --bg-modal: #ffffff;
+    --border-color: #e0e0e4;
+    --border-strong: #c8c8d0;
+    --text-primary: #1a1a1f;
+    --text-secondary: #6b6b76;
+    --text-tertiary: #a0a0ab;
+    --text-tertiary-strong: #8a8a94;
+    --text-on-accent: #ffffff;
+    --text-inverse: #1a1a1f;
+    --accent: #2563eb;
+    --accent-hover: #3b82f6;
+    --accent-active: #1d4ed8;
+    --accent-soft: rgba(37, 99, 235, 0.10);
+    --accent-blue: #2563eb;
+    --accent-blue-hover: #3b82f6;
+    --accent-blue-active: #1d4ed8;
+    --accent-red: #dc2626;
+    --accent-yellow: #ca8a04;
+    --accent-green: #16a34a;
+    --accent-cyan: #0891b2;
+    --accent-cyan-soft: rgba(8, 145, 178, 0.10);
+    --accent-purple: #9333ea;
+    --accent-purple-soft: rgba(147, 51, 234, 0.10);
+    --status-ok-bg: rgba(22, 163, 74, 0.12);
+    --status-ok-fg: #15803d;
+    --status-missing-bg: rgba(220, 38, 38, 0.10);
+    --status-missing-fg: #b91c1c;
+    --status-corrupt-bg: rgba(202, 138, 4, 0.12);
+    --status-corrupt-fg: #a16207;
+    --log-info-bg: rgba(37, 99, 235, 0.10);
+    --log-info-fg: #2563eb;
+    --log-warn-bg: rgba(202, 138, 4, 0.12);
+    --log-warn-fg: #a16207;
+    --log-error-bg: rgba(220, 38, 38, 0.10);
+    --log-error-fg: #b91c1c;
+    --log-success-bg: rgba(22, 163, 74, 0.10);
+    --log-success-fg: #15803d;
+    --log-source-fg: #64748b;
+    --log-line-hover: rgba(0, 0, 0, 0.03);
+    --log-line-error-bg: rgba(220, 38, 38, 0.05);
+    --log-line-warn-bg: rgba(202, 138, 4, 0.05);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+    --shadow-glow-blue: 0 0 0 3px rgba(37, 99, 235, 0.15);
+    --shadow-knob: 0 1px 3px rgba(0, 0, 0, 0.15), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+    --shadow-knob-hover: 0 1px 4px rgba(0, 0, 0, 0.2), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+    --shadow-thumb: 0 1px 3px rgba(0, 0, 0, 0.15);
+    --shadow-thumb-hover: 0 2px 6px rgba(37, 99, 235, 0.3);
+    --shadow-primary-btn: 0 1px 2px rgba(0, 0, 0, 0.06);
+    --shadow-primary-btn-hover: 0 2px 8px rgba(37, 99, 235, 0.2);
+    --shadow-context-menu: 0 8px 24px rgba(0, 0, 0, 0.12);
+    --shadow-titlebar-inset: inset 0 -1px 0 rgba(0, 0, 0, 0.04);
+    --shadow-nav-indicator: 0 1px 0 rgba(0, 0, 0, 0.05) inset, 0 2px 8px rgba(37, 99, 235, 0.2);
+    --shadow-range-glow: var(--shadow-glow-blue), 0 1px 3px rgba(0, 0, 0, 0.15);
+    --setting-row-hover: rgba(0, 0, 0, 0.02);
+    --help-tip-bg: rgba(37, 99, 235, 0.08);
+    --select-arrow-color: %236b6b76;
+}
+
+/* ===== 护眼主题 ===== */
+[data-theme="eye-care"] {
+    --bg-primary: #f5f1e8;
+    --bg-secondary: #ede8dc;
+    --bg-tertiary: #e4ded0;
+    --bg-hover: #ddd6c5;
+    --bg-active: #d2cab5;
+    --bg-code: #e4ded0;
+    --bg-overlay: rgba(60, 50, 30, 0.3);
+    --bg-modal: #ede8dc;
+    --border-color: #d0c9b8;
+    --border-strong: #b8af9a;
+    --text-primary: #3a362d;
+    --text-secondary: #6b6453;
+    --text-tertiary: #9a9180;
+    --text-tertiary-strong: #857c6b;
+    --text-on-accent: #ffffff;
+    --text-inverse: #3a362d;
+    --accent: #5b8c5a;
+    --accent-hover: #6fa56e;
+    --accent-active: #4a7349;
+    --accent-soft: rgba(91, 140, 90, 0.12);
+    --accent-blue: #5b8c5a;
+    --accent-blue-hover: #6fa56e;
+    --accent-blue-active: #4a7349;
+    --accent-red: #c0563e;
+    --accent-yellow: #b8911e;
+    --accent-green: #5b8c5a;
+    --accent-cyan: #4a8a8a;
+    --accent-cyan-soft: rgba(74, 138, 138, 0.12);
+    --accent-purple: #8a6ba5;
+    --accent-purple-soft: rgba(138, 107, 165, 0.12);
+    --status-ok-bg: rgba(91, 140, 90, 0.15);
+    --status-ok-fg: #4a7349;
+    --status-missing-bg: rgba(192, 86, 62, 0.12);
+    --status-missing-fg: #a04830;
+    --status-corrupt-bg: rgba(184, 145, 30, 0.15);
+    --status-corrupt-fg: #8a6515;
+    --log-info-bg: rgba(91, 140, 90, 0.12);
+    --log-info-fg: #4a7349;
+    --log-warn-bg: rgba(184, 145, 30, 0.12);
+    --log-warn-fg: #8a6515;
+    --log-error-bg: rgba(192, 86, 62, 0.12);
+    --log-error-fg: #a04830;
+    --log-success-bg: rgba(91, 140, 90, 0.12);
+    --log-success-fg: #4a7349;
+    --log-source-fg: #8a8270;
+    --log-line-hover: rgba(0, 0, 0, 0.03);
+    --log-line-error-bg: rgba(192, 86, 62, 0.06);
+    --log-line-warn-bg: rgba(184, 145, 30, 0.06);
+    --shadow-sm: 0 1px 2px rgba(60, 50, 30, 0.08);
+    --shadow-md: 0 4px 12px rgba(60, 50, 30, 0.10);
+    --shadow-lg: 0 8px 24px rgba(60, 50, 30, 0.15);
+    --shadow-glow-blue: 0 0 0 3px rgba(91, 140, 90, 0.15);
+    --shadow-knob: 0 1px 3px rgba(60, 50, 30, 0.12), 0 0 0 0.5px rgba(60, 50, 30, 0.06);
+    --shadow-knob-hover: 0 1px 4px rgba(60, 50, 30, 0.16), 0 0 0 0.5px rgba(60, 50,  30, 0.06);
+    --shadow-thumb: 0 1px 3px rgba(60, 50, 30, 0.12);
+    --shadow-thumb-hover: 0 2px 6px rgba(91, 140, 90, 0.3);
+    --shadow-primary-btn: 0 1px 2px rgba(60, 50, 30, 0.08);
+    --shadow-primary-btn-hover: 0 2px 8px rgba(91, 140, 90, 0.2);
+    --shadow-context-menu: 0 8px 24px rgba(60, 50, 30, 0.15);
+    --shadow-titlebar-inset: inset 0 -1px 0 rgba(60, 50, 30, 0.04);
+    --shadow-nav-indicator: 0 1px 0 rgba(60, 50, 30, 0.05) inset, 0 2px 8px rgba(91, 140, 90, 0.2);
+    --shadow-range-glow: var(--shadow-glow-blue), 0 1px 3px rgba(60, 50, 30, 0.12);
+    --setting-row-hover: rgba(60, 50, 30, 0.02);
+    --help-tip-bg: rgba(91, 140, 90, 0.08);
+    --select-arrow-color: %236b6453;
+}
+
+/* ===== auto 主题：跟随系统偏好 ===== */
+@media (prefers-color-scheme: light) {
+    [data-theme="auto"] {
+        --bg-primary: #ffffff;
+        --bg-secondary: #f7f7f8;
+        --bg-tertiary: #efeff1;
+        --bg-hover: #e8e8ec;
+        --bg-active: #dfdfe4;
+        --bg-code: #f0f0f4;
+        --bg-overlay: rgba(0, 0, 0, 0.3);
+        --bg-modal: #ffffff;
+        --border-color: #e0e0e4;
+        --border-strong: #c8c8d0;
+        --text-primary: #1a1a1f;
+        --text-secondary: #6b6b76;
+        --text-tertiary: #a0a0ab;
+        --text-tertiary-strong: #8a8a94;
+        --text-on-accent: #ffffff;
+        --text-inverse: #1a1a1f;
+        --accent: #2563eb;
+        --accent-hover: #3b82f6;
+        --accent-active: #1d4ed8;
+        --accent-soft: rgba(37, 99, 235, 0.10);
+        --accent-blue: #2563eb;
+        --accent-blue-hover: #3b82f6;
+        --accent-blue-active: #1d4ed8;
+        --accent-red: #dc2626;
+        --accent-yellow: #ca8a04;
+        --accent-green: #16a34a;
+        --accent-cyan: #0891b2;
+        --accent-cyan-soft: rgba(8, 145, 178, 0.10);
+        --accent-purple: #9333ea;
+        --accent-purple-soft: rgba(147, 51, 234, 0.10);
+        --status-ok-bg: rgba(22, 163, 74, 0.12);
+        --status-ok-fg: #15803d;
+        --status-missing-bg: rgba(220, 38, 38, 0.10);
+        --status-missing-fg: #b91c1c;
+        --status-corrupt-bg: rgba(202, 138, 4, 0.12);
+        --status-corrupt-fg: #a16207;
+        --log-info-bg: rgba(37, 99, 235, 0.10);
+        --log-info-fg: #2563eb;
+        --log-warn-bg: rgba(202, 138, 4, 0.12);
+        --log-warn-fg: #a16207;
+        --log-error-bg: rgba(220, 38, 38, 0.10);
+        --log-error-fg: #b91c1c;
+        --log-success-bg: rgba(22, 163, 74, 0.10);
+        --log-success-fg: #15803d;
+        --log-source-fg: #64748b;
+        --log-line-hover: rgba(0, 0, 0, 0.03);
+        --log-line-error-bg: rgba(220, 38, 38, 0.05);
+        --log-line-warn-bg: rgba(202, 138, 4, 0.05);
+        --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+        --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+        --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+        --shadow-glow-blue: 0 0 0 3px rgba(37, 99, 235, 0.15);
+        --shadow-knob: 0 1px 3px rgba(0, 0, 0, 0.15), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+        --shadow-knob-hover: 0 1px 4px rgba(0, 0, 0, 0.2), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+        --shadow-thumb: 0 1px 3px rgba(0, 0, 0, 0.15);
+        --shadow-thumb-hover: 0 2px 6px rgba(37, 99, 235, 0.3);
+        --shadow-primary-btn: 0 1px 2px rgba(0, 0, 0, 0.06);
+        --shadow-primary-btn-hover: 0 2px 8px rgba(37, 99, 235, 0.2);
+        --shadow-context-menu: 0 8px 24px rgba(0, 0, 0, 0.12);
+        --shadow-titlebar-inset: inset 0 -1px 0 rgba(0, 0, 0, 0.04);
+        --shadow-nav-indicator: 0 1px 0 rgba(0, 0, 0, 0.05) inset, 0 2px 8px rgba(37, 99, 235, 0.2);
+        --shadow-range-glow: var(--shadow-glow-blue), 0 1px 3px rgba(0, 0, 0, 0.15);
+        --setting-row-hover: rgba(0, 0, 0, 0.02);
+        --help-tip-bg: rgba(37, 99, 235, 0.08);
+        --select-arrow-color: %236b6b76;
+    }
 }
 
 * {
@@ -73,7 +328,7 @@ html, body {
     padding: 0 12px;
     background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-secondary) 100%);
     border-bottom: 1px solid var(--border-color);
-    box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.02);
+    box-shadow: var(--shadow-titlebar-inset);
     flex-shrink: 0;
 }
 
@@ -208,13 +463,13 @@ html, body {
 
 /* 激活态：背景由 .nav-indicator 滑动提供，这里只保留文字颜色 */
 .nav-item.active {
-    color: white;
+    color: var(--text-on-accent);
     border-color: transparent;
 }
 
 .nav-item.active:hover {
     background: transparent;
-    color: white;
+    color: var(--text-on-accent);
 }
 
 .nav-item svg {
@@ -231,7 +486,7 @@ html, body {
     height: 40px;
     background: linear-gradient(180deg, var(--accent-blue-hover) 0%, var(--accent-blue) 100%);
     border-radius: var(--radius-md);
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1) inset, 0 2px 8px rgba(59, 130, 246, 0.25);
+    box-shadow: var(--shadow-nav-indicator);
     opacity: 0;
     transform: translateY(0);
     transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1),
@@ -409,7 +664,7 @@ html, body {
 
 /* 激活态：背景由 .seg-indicator 滑动提供 */
 .seg-btn.active {
-    color: white;
+    color: var(--text-on-accent);
 }
 
 /* 滑动指示器：主题强调色背景块，平滑过渡到新选中项 */
@@ -476,7 +731,7 @@ html, body {
 .mic-button.recording {
     background: var(--accent-red);
     border-color: var(--accent-red);
-    color: white;
+    color: var(--text-on-accent);
 }
 
 .mic-ring, .mic-ring-outer {
@@ -629,8 +884,8 @@ html, body {
 .subtitle-preview {
     padding: 36px 28px;
     background:
-        radial-gradient(ellipse at top, rgba(59, 130, 246, 0.06), transparent 60%),
-        #000;
+        radial-gradient(ellipse at top, var(--accent-soft), transparent 60%),
+        var(--bg-code);
     border: 1px solid var(--border-strong);
     border-radius: 10px;
     display: flex;
@@ -656,11 +911,11 @@ html, body {
 
 .subtitle-line {
     font-size: 28px;
-    color: white;
+    color: var(--text-on-accent);
     text-align: center;
     font-weight: 500;
     padding: 8px 16px;
-    background: rgba(0, 0, 0, 0.6);
+    background: var(--bg-overlay);
     border-radius: var(--radius-sm);
 }
 
@@ -806,10 +1061,10 @@ html, body {
     left: 2px;
     width: 18px;
     height: 18px;
-    background: #fff;
+    background: var(--switch-knob-bg);
     border-radius: 50%;
     transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+    box-shadow: var(--shadow-knob);
 }
 
 .switch[data-on="true"] .switch-knob {
@@ -817,7 +1072,7 @@ html, body {
 }
 
 .switch[data-on]:hover .switch-knob {
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+    box-shadow: var(--shadow-knob-hover);
 }
 
 .switch[data-on]:focus-visible {
@@ -918,12 +1173,12 @@ html, body {
     cursor: pointer;
     border: 2px solid var(--bg-primary);
     transition: transform 0.15s ease, box-shadow 0.15s ease;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    box-shadow: var(--shadow-thumb);
 }
 
 .control-group input[type="range"]::-webkit-slider-thumb:hover {
     transform: scale(1.2);
-    box-shadow: 0 2px 6px rgba(59, 130, 246, 0.4);
+    box-shadow: var(--shadow-thumb-hover);
 }
 
 .control-group input[type="range"]:active::-webkit-slider-thumb {
@@ -931,7 +1186,7 @@ html, body {
 }
 
 .control-group input[type="range"]:focus-visible::-webkit-slider-thumb {
-    box-shadow: var(--shadow-glow-blue), 0 1px 3px rgba(0, 0, 0, 0.3);
+    box-shadow: var(--shadow-range-glow);
 }
 
 .value-display {
@@ -953,7 +1208,7 @@ html, body {
 .primary-btn {
     padding: 10px 24px;
     background: var(--accent-blue);
-    color: white;
+    color: var(--text-on-accent);
     border: 1px solid var(--accent-blue);
     border-radius: var(--radius-md);
     font-size: 13px;
@@ -964,20 +1219,20 @@ html, body {
     justify-content: center;
     gap: 8px;
     transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+    box-shadow: var(--shadow-primary-btn);
     white-space: nowrap;
 }
 
 .primary-btn:hover {
     background: var(--accent-blue-hover);
     border-color: var(--accent-blue-hover);
-    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.35);
+    box-shadow: var(--shadow-primary-btn-hover);
 }
 
 .primary-btn:active {
     background: var(--accent-blue-active);
     border-color: var(--accent-blue-active);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+    box-shadow: var(--shadow-primary-btn);
     transform: translateY(1px);
 }
 
@@ -985,7 +1240,7 @@ html, body {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: white;
+    background: var(--text-on-accent);
     opacity: 0;
     transition: var(--transition);
 }
@@ -1192,7 +1447,7 @@ html, body {
     flex: 1;
     overflow-y: auto;
     padding: 8px 12px;
-    background: #0a0a0a;
+    background: var(--bg-code);
     font-family: var(--font-mono);
     font-size: 12px;
     line-height: 1.55;
@@ -1228,15 +1483,15 @@ html, body {
 }
 
 .log-line:hover {
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--log-line-hover);
 }
 
 .log-line.error {
-    background: rgba(239, 68, 68, 0.08);
+    background: var(--log-line-error-bg);
 }
 
 .log-line.warn {
-    background: rgba(234, 179, 8, 0.05);
+    background: var(--log-line-warn-bg);
 }
 
 .log-time {
@@ -1262,27 +1517,27 @@ html, body {
 }
 
 .log-level-tag.info {
-    background: rgba(59, 130, 246, 0.15);
-    color: #60a5fa;
+    background: var(--log-info-bg);
+    color: var(--log-info-fg);
 }
 
 .log-level-tag.warn {
-    background: rgba(234, 179, 8, 0.15);
-    color: #facc15;
+    background: var(--log-warn-bg);
+    color: var(--log-warn-fg);
 }
 
 .log-level-tag.error {
-    background: rgba(239, 68, 68, 0.18);
-    color: #f87171;
+    background: var(--log-error-bg);
+    color: var(--log-error-fg);
 }
 
 .log-level-tag.success {
-    background: rgba(34, 197, 94, 0.15);
-    color: #4ade80;
+    background: var(--log-success-bg);
+    color: var(--log-success-fg);
 }
 
 .log-source {
-    color: #94a3b8;
+    color: var(--log-source-fg);
     font-size: 11px;
     flex-shrink: 0;
     opacity: 0.7;
@@ -1306,7 +1561,7 @@ html, body {
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-md);
     padding: 4px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    box-shadow: var(--shadow-context-menu);
     font-size: 13px;
     user-select: none;
 }
@@ -1390,6 +1645,96 @@ html, body {
     background: var(--accent-cyan);
 }
 
+/* ===== 可折叠设置分组 ===== */
+.section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    user-select: none;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 4px;
+    transition: border-color 0.2s ease;
+}
+
+.settings-section.collapsed .section-header {
+    border-bottom-color: transparent;
+    padding-bottom: 0;
+    margin-bottom: 0;
+}
+
+.section-header h3 {
+    padding-bottom: 0;
+    border-bottom: none;
+    margin-bottom: 0;
+}
+
+.section-chevron {
+    width: 14px;
+    height: 14px;
+    color: var(--text-tertiary);
+    transition: transform 0.25s ease, color 0.2s ease;
+    flex-shrink: 0;
+}
+
+.section-header:hover .section-chevron {
+    color: var(--text-secondary);
+}
+
+.settings-section.collapsed .section-chevron {
+    transform: rotate(-90deg);
+}
+
+.section-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow: hidden;
+    transition: max-height 0.3s ease, opacity 0.2s ease, margin-top 0.3s ease;
+    max-height: 3000px;
+    opacity: 1;
+}
+
+.settings-section.collapsed .section-body {
+    max-height: 0;
+    opacity: 0;
+    margin-top: -10px;
+}
+
+/* 主题选择器 */
+.theme-selector {
+    display: flex;
+    gap: 0;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    padding: 3px;
+    border: 1px solid var(--border-color);
+}
+
+.theme-selector .seg-btn {
+    padding: 5px 14px;
+    font-size: 12px;
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: all var(--transition);
+    white-space: nowrap;
+}
+
+.theme-selector .seg-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+}
+
+.theme-selector .seg-btn.active {
+    color: var(--text-on-accent);
+    background: var(--accent);
+    box-shadow: var(--shadow-sm);
+}
+
 .section-hint {
     font-size: 11px;
     color: var(--text-tertiary);
@@ -1410,7 +1755,7 @@ html, body {
 }
 
 .setting-row:hover {
-    background: rgba(255, 255, 255, 0.015);
+    background: var(--setting-row-hover);
 }
 
 .setting-row label {
@@ -1526,7 +1871,7 @@ html, body {
     transition: var(--transition);
     -webkit-appearance: none;
     appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='var(--select-arrow-color)' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: right 8px center;
 }
@@ -1559,10 +1904,10 @@ html, body {
     width: 18px;
     left: 2px;
     top: 2px;
-    background: #fff;
+    background: var(--switch-knob-bg);
     border-radius: 50%;
     transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+    box-shadow: var(--shadow-knob);
 }
 
 .switch input:checked + .switch-slider {
@@ -1574,7 +1919,7 @@ html, body {
 }
 
 .switch:hover .switch-slider::before {
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+    box-shadow: var(--shadow-knob-hover);
 }
 
 .setting-row input[type="range"] {
@@ -1595,12 +1940,12 @@ html, body {
     cursor: pointer;
     border: 2px solid var(--bg-primary);
     transition: transform 0.15s ease, box-shadow 0.15s ease;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    box-shadow: var(--shadow-thumb);
 }
 
 .setting-row input[type="range"]::-webkit-slider-thumb:hover {
     transform: scale(1.2);
-    box-shadow: 0 2px 6px rgba(59, 130, 246, 0.4);
+    box-shadow: var(--shadow-thumb-hover);
 }
 
 .setting-row input[type="range"]:active::-webkit-slider-thumb {
@@ -1608,7 +1953,7 @@ html, body {
 }
 
 .setting-row input[type="range"]:focus-visible::-webkit-slider-thumb {
-    box-shadow: var(--shadow-glow-blue), 0 1px 3px rgba(0, 0, 0, 0.3);
+    box-shadow: var(--shadow-range-glow);
 }
 
 .path-display {
@@ -1899,23 +2244,23 @@ html, body {
     border-radius: 10px;
     font-size: 12px;
     font-weight: 500;
-    background: var(--bg-tertiary, #e0e0e0);
-    color: var(--text-secondary, #666);
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
 }
 
 .engine-status-badge.status-ok {
-    background: #e6f7ed;
-    color: #52c41a;
+    background: var(--status-ok-bg);
+    color: var(--status-ok-fg);
 }
 
 .engine-status-badge.status-missing {
-    background: #fff1f0;
-    color: #f5222d;
+    background: var(--status-missing-bg);
+    color: var(--status-missing-fg);
 }
 
 .engine-status-badge.status-corrupt {
-    background: #fff7e6;
-    color: #fa8c16;
+    background: var(--status-corrupt-bg);
+    color: var(--status-corrupt-fg);
 }
 
 .model-links {
@@ -2005,7 +2350,7 @@ html, body {
     left: 0;
     width: 100%;
     height: 100%;
-    background: rgba(0, 0, 0, 0.6);
+    background: var(--bg-overlay);
     backdrop-filter: blur(4px);
     z-index: 1000;
     align-items: center;
@@ -2127,7 +2472,7 @@ html, body {
 .help-tip {
     margin-top: 8px;
     padding: 8px 12px;
-    background: rgba(59, 130, 246, 0.1);
+    background: var(--help-tip-bg);
     border-left: 3px solid var(--accent-blue);
     border-radius: var(--radius-sm);
     font-size: 12px;
@@ -2179,17 +2524,17 @@ html, body {
 
 /* SHA256 校验通过：绿色 */
 .model-item.model-available .model-status {
-    background: rgba(34, 197, 94, 0.15);
+    background: var(--status-ok-bg);
     color: var(--accent-green);
 }
 
 /* SHA256 校验失败：红色 */
 .model-item.model-corrupt {
-    border-color: rgba(239, 68, 68, 0.4);
+    border-color: var(--accent-red);
 }
 
 .model-item.model-corrupt .model-status {
-    background: rgba(239, 68, 68, 0.15);
+    background: var(--status-missing-bg);
     color: var(--accent-red);
 }
 

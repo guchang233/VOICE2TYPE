@@ -439,6 +439,7 @@
             const config = await invoke('get_config');
             state.config = config;
             populateSettings(config);
+            applyTheme(config.theme || 'auto', false);
         } catch (err) {
             console.error('Failed to load config:', err);
             // 初始化默认配置，确保用户操作（如切换模式）能被保存
@@ -730,7 +731,73 @@
             }
         }
 
+        // 主题选择器按钮状态
+        const theme = config.theme || 'auto';
+        $$('.theme-selector .seg-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.theme === theme);
+        });
+
         updateModelBadge();
+    }
+
+    /// 应用主题到 documentElement，并缓存到 localStorage（启动时避免闪烁）
+    function applyTheme(theme, persist) {
+        const resolved = theme || 'auto';
+        document.documentElement.setAttribute('data-theme', resolved);
+        try { localStorage.setItem('v2t-theme', resolved); } catch (e) {}
+        if (persist && state.config) {
+            state.config.theme = resolved;
+            if (invoke) {
+                invoke('save_config', { newConfig: state.config }).catch(err =>
+                    console.warn('Failed to persist theme:', err)
+                );
+            }
+        }
+    }
+
+    /// 初始化可折叠设置分组
+    function initCollapsibleSections() {
+        const headers = $$('.settings-section .section-header');
+        headers.forEach(header => {
+            if (header.dataset.bound) return;
+            header.dataset.bound = '1';
+            header.addEventListener('click', () => {
+                const section = header.closest('.settings-section');
+                if (!section) return;
+                section.classList.toggle('collapsed');
+                const collapsed = section.classList.contains('collapsed');
+                const title = (section.querySelector('h3') || {}).textContent || section.id || 'section';
+                try {
+                    const store = JSON.parse(localStorage.getItem('v2t-collapsed-sections') || '{}');
+                    store[title] = collapsed;
+                    localStorage.setItem('v2t-collapsed-sections', JSON.stringify(store));
+                } catch (e) {}
+            });
+        });
+
+        // 恢复折叠状态
+        try {
+            const store = JSON.parse(localStorage.getItem('v2t-collapsed-sections') || '{}');
+            $$('.settings-section').forEach(section => {
+                const title = (section.querySelector('h3') || {}).textContent || section.id || 'section';
+                if (store[title]) section.classList.add('collapsed');
+            });
+        } catch (e) {}
+    }
+
+    /// 初始化主题切换器
+    function initThemeSwitcher() {
+        const btns = $$('.theme-selector .seg-btn');
+        btns.forEach(btn => {
+            if (btn.dataset.bound) return;
+            btn.dataset.bound = '1';
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const theme = btn.dataset.theme;
+                btns.forEach(b => b.classList.toggle('active', b === btn));
+                applyTheme(theme, true);
+            });
+        });
     }
 
     function updateMicHint() {
@@ -853,6 +920,12 @@
             } else if (!sub.subtitle_bold && newConfig.subtitle.subtitle_font_weight >= 700) {
                 newConfig.subtitle.subtitle_font_weight = 400;
             }
+        }
+
+        // 主题
+        const activeThemeBtn = $('.theme-selector .seg-btn.active');
+        if (activeThemeBtn) {
+            newConfig.theme = activeThemeBtn.dataset.theme;
         }
 
         newConfig.basic.model_name = newConfig.model_selection.batch_model;
@@ -1950,6 +2023,12 @@
     }
 
     function init() {
+        // 早期应用主题（从 localStorage 缓存），避免主题闪烁
+        try {
+            const cached = localStorage.getItem('v2t-theme');
+            if (cached) document.documentElement.setAttribute('data-theme', cached);
+        } catch (e) {}
+
         initLogs();
         initWindowControls();
         initNavigation();
@@ -1962,6 +2041,8 @@
         initOutput();
         initUpdateChecker();
         initSliderFills();
+        initCollapsibleSections();
+        initThemeSwitcher();
 
         // 禁用 WebView 默认右键菜单（刷新、检查、另存为等），
         // 历史记录项的 contextmenu 监听器已自行处理 preventDefault，不受影响。

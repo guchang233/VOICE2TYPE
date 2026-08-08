@@ -369,246 +369,302 @@
                     </div>
                     <div class="settings-content">
                         <div class="settings-section">
-                            <h3>语音识别模型</h3>
-                            <div class="setting-row">
-                                <label>整段识别</label>
-                                <select class="select-input" id="setting-batch-model">
-                                    <option value="FunAudioLLM/SenseVoiceSmall">SenseVoiceSmall (SiliconFlow)</option>
-                                    <option value="TeleAI/TeleSpeechASR">TeleSpeechASR (SiliconFlow)</option>
-                                    <option value="whisper-large-v3">Whisper Large v3 (Groq)</option>
-                                    <option value="local-whisper">本地 Whisper</option>
-                                    <option value="custom">自定义提供商</option>
-                                </select>
+                            <div class="section-header">
+                                <h3>外观</h3>
+                                <svg class="section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
                             </div>
-                            <div class="setting-row">
-                                <label>流式识别</label>
-                                <select class="select-input" id="setting-stream-model">
-                                    <option value="doubao">豆包 (云端)</option>
-                                </select>
-                            </div>
-                            <div class="setting-row">
-                                <label>字幕模型</label>
-                                <select class="select-input" id="setting-subtitle-model">
-                                    <option value="doubao">豆包 (云端)</option>
-                                </select>
+                            <div class="section-body">
+                                <div class="setting-row">
+                                    <label>主题</label>
+                                    <div class="theme-selector" id="theme-selector">
+                                        <button class="seg-btn active" data-theme="dark">深色</button>
+                                        <button class="seg-btn" data-theme="light">浅色</button>
+                                        <button class="seg-btn" data-theme="eye-care">护眼</button>
+                                        <button class="seg-btn" data-theme="auto">自动</button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
                         <div class="settings-section">
-                            <h3>API 密钥</h3>
-                            <div class="setting-row">
-                                <label>SiliconFlow Key</label>
-                                <div class="input-with-btn">
-                                    <input type="password" class="text-input" id="setting-sf-key" placeholder="sk-...">
-                                    <button class="apply-link-btn" data-url="https://cloud.siliconflow.cn/" title="申请 SiliconFlow Key">
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                                    </button>
-                                    <button class="toggle-eye-btn" data-target="setting-sf-key" title="显示/隐藏">
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                                    </button>
+                            <div class="section-header">
+                                <h3>语音识别模型</h3>
+                                <svg class="section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                            </div>
+                            <div class="section-body">
+                                <div class="setting-row">
+                                    <label>整段识别</label>
+                                    <select class="select-input" id="setting-batch-model">
+                                        <option value="FunAudioLLM/SenseVoiceSmall">SenseVoiceSmall (SiliconFlow)</option>
+                                        <option value="TeleAI/TeleSpeechASR">TeleSpeechASR (SiliconFlow)</option>
+                                        <option value="whisper-large-v3">Whisper Large v3 (Groq)</option>
+                                        <option value="local-whisper">本地 Whisper</option>
+                                        <option value="custom">自定义提供商</option>
+                                    </select>
+                                </div>
+                                <div class="setting-row">
+                                    <label>流式识别</label>
+                                    <select class="select-input" id="setting-stream-model">
+                                        <option value="doubao">豆包 (云端)</option>
+                                    </select>
+                                </div>
+                                <div class="setting-row">
+                                    <label>字幕模型</label>
+                                    <select class="select-input" id="setting-subtitle-model">
+                                        <option value="doubao">豆包 (云端)</option>
+                                    </select>
                                 </div>
                             </div>
-                            <div class="setting-row">
-                                <label>Groq Key</label>
-                                <div class="input-with-btn">
-                                    <input type="password" class="text-input" id="setting-groq-key" placeholder="gsk_...">
-                                    <button class="apply-link-btn" data-url="https://console.groq.com/keys" title="申请 Groq Key">
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                                    </button>
-                                    <button class="toggle-eye-btn" data-target="setting-groq-key" title="显示/隐藏">
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                                    </button>
-                                </div>
+                        </div>
+
+                        <div class="settings-section">
+                            <div class="section-header">
+                                <h3>API 密钥</h3>
+                                <svg class="section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
                             </div>
-                            <div class="setting-row">
-                                <label>豆包 Key</label>
-                                <div class="input-with-btn">
-                                    <input type="password" class="text-input" id="setting-doubao-key" placeholder="...">
-                                    <button class="apply-link-btn" data-url="https://console.volcengine.com/speech/app" title="申请豆包 Key">
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                                    </button>
-                                    <button class="toggle-eye-btn" data-target="setting-doubao-key" title="显示/隐藏">
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                                    </button>
+                            <div class="section-body">
+                                <div class="setting-row">
+                                    <label>SiliconFlow Key</label>
+                                    <div class="input-with-btn">
+                                        <input type="password" class="text-input" id="setting-sf-key" placeholder="sk-...">
+                                        <button class="apply-link-btn" data-url="https://cloud.siliconflow.cn/" title="申请 SiliconFlow Key">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                        </button>
+                                        <button class="toggle-eye-btn" data-target="setting-sf-key" title="显示/隐藏">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="setting-row">
+                                    <label>Groq Key</label>
+                                    <div class="input-with-btn">
+                                        <input type="password" class="text-input" id="setting-groq-key" placeholder="gsk_...">
+                                        <button class="apply-link-btn" data-url="https://console.groq.com/keys" title="申请 Groq Key">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                        </button>
+                                        <button class="toggle-eye-btn" data-target="setting-groq-key" title="显示/隐藏">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="setting-row">
+                                    <label>豆包 Key</label>
+                                    <div class="input-with-btn">
+                                        <input type="password" class="text-input" id="setting-doubao-key" placeholder="...">
+                                        <button class="apply-link-btn" data-url="https://console.volcengine.com/speech/app" title="申请豆包 Key">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                        </button>
+                                        <button class="toggle-eye-btn" data-target="setting-doubao-key" title="显示/隐藏">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
 
                         <div class="settings-section" id="custom-provider-section">
-                            <h3>自定义模型提供商</h3>
-                            <p class="section-hint">兼容 OpenAI 转写接口（/v1/audio/transcriptions），填入 API 地址、模型名和密钥即可</p>
-                            <div class="setting-row">
-                                <label>API 地址</label>
-                                <input type="text" class="text-input" id="setting-custom-api-url" placeholder="https://api.example.com/v1/audio/transcriptions">
+                            <div class="section-header">
+                                <h3>自定义模型提供商</h3>
+                                <svg class="section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
                             </div>
-                            <div class="setting-row">
-                                <label>模型名</label>
-                                <input type="text" class="text-input" id="setting-custom-model-name" placeholder="whisper-1">
-                            </div>
-                            <div class="setting-row">
-                                <label>API Key</label>
-                                <div class="input-with-btn">
-                                    <input type="password" class="text-input" id="setting-custom-key" placeholder="sk-...">
-                                    <button class="toggle-eye-btn" data-target="setting-custom-key" title="显示/隐藏">
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                                    </button>
+                            <div class="section-body">
+                                <p class="section-hint">兼容 OpenAI 转写接口（/v1/audio/transcriptions），填入 API 地址、模型名和密钥即可</p>
+                                <div class="setting-row">
+                                    <label>API 地址</label>
+                                    <input type="text" class="text-input" id="setting-custom-api-url" placeholder="https://api.example.com/v1/audio/transcriptions">
                                 </div>
-                            </div>
-                        </div>
-
-                        <div class="settings-section">
-                            <h3>快捷键</h3>
-                            <div class="setting-row">
-                                <label>语音输入</label>
-                                <input type="text" class="text-input hotkey-input" id="setting-hotkey-batch" value="F2" readonly>
-                            </div>
-                        </div>
-
-                        <div class="settings-section">
-                            <h3>输出设置</h3>
-                            <div class="setting-row">
-                                <label>输出方式</label>
-                                <select class="select-input" id="setting-output-mode">
-                                    <option value="clipboard">剪贴板</option>
-                                    <option value="inject">键盘模拟</option>
-                                </select>
-                            </div>
-                            <div class="setting-row">
-                                <label>输出语言</label>
-                                <select class="select-input" id="setting-output-lang">
-                                    <option value="auto">自动检测</option>
-                                    <option value="zh">中文</option>
-                                    <option value="en">英文</option>
-                                </select>
-                            </div>
-                            <div class="setting-row toggle-row">
-                                <label>自动添加标点</label>
-                                <label class="switch">
-                                    <input type="checkbox" id="setting-punctuation" checked>
-                                    <span class="switch-slider"></span>
-                                </label>
-                            </div>
-                            <div class="setting-row toggle-row">
-                                <label>保留表情符号</label>
-                                <label class="switch">
-                                    <input type="checkbox" id="setting-emoji" checked>
-                                    <span class="switch-slider"></span>
-                                </label>
-                            </div>
-                        </div>
-
-                        <div class="settings-section">
-                            <h3>VAD 语音活动检测</h3>
-                            <div class="setting-row">
-                                <label>灵敏度</label>
-                                <input type="range" min="0" max="100" value="50" class="slider" id="setting-vad-sensitivity">
-                                <span class="value-display">50%</span>
-                            </div>
-                            <div class="setting-row">
-                                <label>静音断句时长</label>
-                                <input type="range" min="300" max="2000" value="800" step="100" class="slider" id="setting-vad-silence">
-                                <span class="value-display">800ms</span>
-                            </div>
-                        </div>
-
-                        <div class="settings-section">
-                            <h3>模型管理
-                                <button class="help-btn" id="btn-local-model-help" title="本地模型使用教程">?</button>
-                            </h3>
-                            <div class="setting-row setting-row-vertical">
-                                <label>模型目录</label>
-                                <div class="models-dir-row">
-                                    <div class="path-display" id="models-dir-path">加载中...</div>
-                                    <button class="secondary-btn" id="btn-change-models-dir" title="更改模型下载目录">更改目录</button>
-                                    <button class="solid-btn" id="btn-reset-models-dir" title="恢复默认目录">恢复默认</button>
+                                <div class="setting-row">
+                                    <label>模型名</label>
+                                    <input type="text" class="text-input" id="setting-custom-model-name" placeholder="whisper-1">
                                 </div>
-                            </div>
-                            <div class="setting-row setting-row-vertical">
-                                <label>转写引擎 (whisper.cpp)</label>
-                                <div class="engine-status-row">
-                                    <span class="engine-status-badge" id="engine-status-badge">未检测</span>
-                                    <button class="secondary-btn" id="btn-check-engine" title="检测引擎状态">检测</button>
-                                    <button class="secondary-btn" id="btn-download-engine">下载引擎</button>
-                                    <button class="apply-link-btn" data-url="https://github.com/ggml-org/whisper.cpp/releases" title="打开 whisper.cpp Releases 页面（手动下载）">
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                                    </button>
-                                </div>
-                                <span class="guide-hint" id="engine-detail-hint"></span>
-                            </div>
-                            <div class="setting-row setting-row-vertical">
-                                <label>Whisper 模型文件</label>
-                                <div class="guide-row">
-                                    <span class="guide-hint">需手动下载 ggml-*.bin 放入模型目录</span>
-                                </div>
-                                <div class="model-links">
-                                    <div class="model-link-item">
-                                        <span>tiny (快速, ~75MB)</span>
-                                        <button class="apply-link-btn" data-url="https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin" title="下载 ggml-tiny.bin">
-                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                                        </button>
-                                    </div>
-                                    <div class="model-link-item">
-                                        <span>base (推荐, ~142MB)</span>
-                                        <button class="apply-link-btn" data-url="https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-base.bin" title="下载 ggml-base.bin">
-                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                                        </button>
-                                    </div>
-                                    <div class="model-link-item">
-                                        <span>small (准确, ~466MB)</span>
-                                        <button class="apply-link-btn" data-url="https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-small.bin" title="下载 ggml-small.bin">
-                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                                        </button>
-                                    </div>
-                                    <div class="model-link-item">
-                                        <span>medium (高精度, ~1.5GB)</span>
-                                        <button class="apply-link-btn" data-url="https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin" title="下载 ggml-medium.bin">
-                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                <div class="setting-row">
+                                    <label>API Key</label>
+                                    <div class="input-with-btn">
+                                        <input type="password" class="text-input" id="setting-custom-key" placeholder="sk-...">
+                                        <button class="toggle-eye-btn" data-target="setting-custom-key" title="显示/隐藏">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                                         </button>
                                     </div>
                                 </div>
                             </div>
-                            <div class="setting-row setting-row-vertical">
-                                <div class="label-with-action">
-                                    <label>已下载模型</label>
-                                    <button class="icon-btn refresh-models-btn" id="btn-refresh-models" title="重新检测已下载模型">
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-                                    </button>
-                                </div>
-                                <div class="downloaded-models-list" id="downloaded-models-list">
-                                    <span class="empty-hint">点击右侧刷新按钮检测已下载模型</span>
+                        </div>
+
+                        <div class="settings-section">
+                            <div class="section-header">
+                                <h3>快捷键</h3>
+                                <svg class="section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                            </div>
+                            <div class="section-body">
+                                <div class="setting-row">
+                                    <label>语音输入</label>
+                                    <input type="text" class="text-input hotkey-input" id="setting-hotkey-batch" value="F2" readonly>
                                 </div>
                             </div>
                         </div>
 
                         <div class="settings-section">
-                            <h3>关于与更新</h3>
-                            <div class="setting-row">
-                                <label>当前版本</label>
-                                <span id="app-version-text" class="version-text">-</span>
+                            <div class="section-header">
+                                <h3>输出设置</h3>
+                                <svg class="section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
                             </div>
-                            <div class="setting-row">
-                                <label>最新版本</label>
-                                <span id="latest-version-text" class="version-text">-</span>
-                            </div>
-                            <div class="setting-row" id="update-status-row" style="display: none;">
-                                <label>更新状态</label>
-                                <span id="update-status-text" class="update-status-text">-</span>
-                            </div>
-                            <div class="setting-row setting-row-vertical" id="update-progress-row" style="display: none;">
-                                <label>下载进度</label>
-                                <div class="progress-container progress-container-full">
-                                    <div class="progress-bar" id="update-progress-bar" style="width: 0%"></div>
+                            <div class="section-body">
+                                <div class="setting-row">
+                                    <label>输出方式</label>
+                                    <select class="select-input" id="setting-output-mode">
+                                        <option value="clipboard">剪贴板</option>
+                                        <option value="inject">键盘模拟</option>
+                                    </select>
                                 </div>
-                                <div class="progress-text" id="update-progress-text">0%</div>
+                                <div class="setting-row">
+                                    <label>输出语言</label>
+                                    <select class="select-input" id="setting-output-lang">
+                                        <option value="auto">自动检测</option>
+                                        <option value="zh">中文</option>
+                                        <option value="en">英文</option>
+                                    </select>
+                                </div>
+                                <div class="setting-row toggle-row">
+                                    <label>自动添加标点</label>
+                                    <label class="switch">
+                                        <input type="checkbox" id="setting-punctuation" checked>
+                                        <span class="switch-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="setting-row toggle-row">
+                                    <label>保留表情符号</label>
+                                    <label class="switch">
+                                        <input type="checkbox" id="setting-emoji" checked>
+                                        <span class="switch-slider"></span>
+                                    </label>
+                                </div>
                             </div>
-                            <div class="setting-row update-actions-row" id="update-actions-row">
-                                <button class="secondary-btn" id="btn-check-update">检查更新</button>
-                                <button class="primary-btn" id="btn-download-update" style="display: none;">下载并安装</button>
-                                <button class="primary-btn" id="btn-restart-app" style="display: none;">重启应用</button>
+                        </div>
+
+                        <div class="settings-section">
+                            <div class="section-header">
+                                <h3>VAD 语音活动检测</h3>
+                                <svg class="section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
                             </div>
-                            <div class="setting-row setting-row-vertical" id="update-notes-row" style="display: none;">
-                                <label>更新内容</label>
-                                <div id="update-notes-content" class="update-notes-box"></div>
+                            <div class="section-body">
+                                <div class="setting-row">
+                                    <label>灵敏度</label>
+                                    <input type="range" min="0" max="100" value="50" class="slider" id="setting-vad-sensitivity">
+                                    <span class="value-display">50%</span>
+                                </div>
+                                <div class="setting-row">
+                                    <label>静音断句时长</label>
+                                    <input type="range" min="300" max="2000" value="800" step="100" class="slider" id="setting-vad-silence">
+                                    <span class="value-display">800ms</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="settings-section">
+                            <div class="section-header">
+                                <h3>模型管理<button class="help-btn" id="btn-local-model-help" title="本地模型使用教程" data-no-toggle>?</button></h3>
+                                <svg class="section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                            </div>
+                            <div class="section-body">
+                                <div class="setting-row setting-row-vertical">
+                                    <label>模型目录</label>
+                                    <div class="models-dir-row">
+                                        <div class="path-display" id="models-dir-path">加载中...</div>
+                                        <button class="secondary-btn" id="btn-change-models-dir" title="更改模型下载目录">更改目录</button>
+                                        <button class="solid-btn" id="btn-reset-models-dir" title="恢复默认目录">恢复默认</button>
+                                    </div>
+                                </div>
+                                <div class="setting-row setting-row-vertical">
+                                    <label>转写引擎 (whisper.cpp)</label>
+                                    <div class="engine-status-row">
+                                        <span class="engine-status-badge" id="engine-status-badge">未检测</span>
+                                        <button class="secondary-btn" id="btn-check-engine" title="检测引擎状态">检测</button>
+                                        <button class="secondary-btn" id="btn-download-engine">下载引擎</button>
+                                        <button class="apply-link-btn" data-url="https://github.com/ggml-org/whisper.cpp/releases" title="打开 whisper.cpp Releases 页面（手动下载）">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                        </button>
+                                    </div>
+                                    <span class="guide-hint" id="engine-detail-hint"></span>
+                                </div>
+                                <div class="setting-row setting-row-vertical">
+                                    <label>Whisper 模型文件</label>
+                                    <div class="guide-row">
+                                        <span class="guide-hint">需手动下载 ggml-*.bin 放入模型目录</span>
+                                    </div>
+                                    <div class="model-links">
+                                        <div class="model-link-item">
+                                            <span>tiny (快速, ~75MB)</span>
+                                            <button class="apply-link-btn" data-url="https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin" title="下载 ggml-tiny.bin">
+                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                            </button>
+                                        </div>
+                                        <div class="model-link-item">
+                                            <span>base (推荐, ~142MB)</span>
+                                            <button class="apply-link-btn" data-url="https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-base.bin" title="下载 ggml-base.bin">
+                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                            </button>
+                                        </div>
+                                        <div class="model-link-item">
+                                            <span>small (准确, ~466MB)</span>
+                                            <button class="apply-link-btn" data-url="https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-small.bin" title="下载 ggml-small.bin">
+                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                            </button>
+                                        </div>
+                                        <div class="model-link-item">
+                                            <span>medium (高精度, ~1.5GB)</span>
+                                            <button class="apply-link-btn" data-url="https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin" title="下载 ggml-medium.bin">
+                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="setting-row setting-row-vertical">
+                                    <div class="label-with-action">
+                                        <label>已下载模型</label>
+                                        <button class="icon-btn refresh-models-btn" id="btn-refresh-models" title="重新检测已下载模型">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                                        </button>
+                                    </div>
+                                    <div class="downloaded-models-list" id="downloaded-models-list">
+                                        <span class="empty-hint">点击右侧刷新按钮检测已下载模型</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="settings-section">
+                            <div class="section-header">
+                                <h3>关于与更新</h3>
+                                <svg class="section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                            </div>
+                            <div class="section-body">
+                                <div class="setting-row">
+                                    <label>当前版本</label>
+                                    <span id="app-version-text" class="version-text">-</span>
+                                </div>
+                                <div class="setting-row">
+                                    <label>最新版本</label>
+                                    <span id="latest-version-text" class="version-text">-</span>
+                                </div>
+                                <div class="setting-row" id="update-status-row" style="display: none;">
+                                    <label>更新状态</label>
+                                    <span id="update-status-text" class="update-status-text">-</span>
+                                </div>
+                                <div class="setting-row setting-row-vertical" id="update-progress-row" style="display: none;">
+                                    <label>下载进度</label>
+                                    <div class="progress-container progress-container-full">
+                                        <div class="progress-bar" id="update-progress-bar" style="width: 0%"></div>
+                                    </div>
+                                    <div class="progress-text" id="update-progress-text">0%</div>
+                                </div>
+                                <div class="setting-row update-actions-row" id="update-actions-row">
+                                    <button class="secondary-btn" id="btn-check-update">检查更新</button>
+                                    <button class="primary-btn" id="btn-download-update" style="display: none;">下载并安装</button>
+                                    <button class="primary-btn" id="btn-restart-app" style="display: none;">重启应用</button>
+                                </div>
+                                <div class="setting-row setting-row-vertical" id="update-notes-row" style="display: none;">
+                                    <label>更新内容</label>
+                                    <div id="update-notes-content" class="update-notes-box"></div>
+                                </div>
                             </div>
                         </div>
 
