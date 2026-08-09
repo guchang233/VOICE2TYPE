@@ -129,8 +129,9 @@ jobs:
             }' > update.json
 
           # 提交到仓库（触发 jsDelivr CDN 缓存更新）
+          # tag 触发时 checkout 处于 detached HEAD，需显式指定推送到 main 分支
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add update.json
           git commit -m "chore: update update.json for ${VERSION}" || echo "No changes to commit"
-          git push
+          git push origin HEAD:main
