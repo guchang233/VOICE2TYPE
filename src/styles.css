@@ -446,18 +446,53 @@ html, body {
     color: var(--text-secondary);
     transition: padding 0.28s cubic-bezier(0.4, 0, 0.2, 1),
                 gap 0.28s cubic-bezier(0.4, 0, 0.2, 1),
-                background 0.15s ease,
                 color 0.15s ease;
     border: 1px solid transparent;
     white-space: nowrap;
     overflow: hidden;
     min-height: 40px;
     position: relative;
-    z-index: 1;
+}
+
+/* hover 背景：用伪元素实现，z-index:-1 使其沉到 nav-indicator (z-index:0) 之下 */
+/* 这样滑动指示器经过时不会被 hover 背景遮挡 */
+.nav-item::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: var(--radius-md);
+    background: var(--bg-tertiary);
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    z-index: -1;
+    pointer-events: none;
+}
+
+/* 新样式：hover 时左侧显示 accent 色条，作为视觉点缀 */
+.nav-item::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    width: 3px;
+    height: 0;
+    background: var(--accent-blue);
+    border-radius: 0 2px 2px 0;
+    transform: translateY(-50%);
+    transition: height 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: -1;
+    pointer-events: none;
+}
+
+.nav-item:hover::before {
+    opacity: 1;
+}
+
+.nav-item:hover::after {
+    height: 60%;
 }
 
 .nav-item:hover {
-    background: var(--bg-tertiary);
     color: var(--text-primary);
 }
 
@@ -467,13 +502,20 @@ html, body {
     border-color: transparent;
 }
 
-.nav-item.active:hover {
-    background: transparent;
-    color: var(--text-on-accent);
+.nav-item.active:hover::before,
+.nav-item.active:hover::after {
+    opacity: 0;
+    height: 0;
 }
 
 .nav-item svg {
     flex-shrink: 0;
+    position: relative;
+    z-index: 1;
+}
+
+.nav-label {
+    position: relative;
     z-index: 1;
 }
 
