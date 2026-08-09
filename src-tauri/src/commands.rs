@@ -8,6 +8,12 @@ use crate::history;
 /// 全局下载取消标志：用户点击「取消」后置为 true，下载循环检测到后中断
 static CANCEL_DOWNLOAD: AtomicBool = AtomicBool::new(false);
 
+/// 用户自定义模型下载直链 base URL（不包含文件名）
+/// 为空时选择"直链"源会返回错误提示
+/// 用户提供直链后填入，格式如："https://example.com/whisper"
+/// 下载时会自动拼接文件名：{CUSTOM_MODEL_BASE_URL}/{file_name}
+const CUSTOM_MODEL_BASE_URL: &str = "";
+
 /// 取消正在进行的下载（模型/引擎）
 #[tauri::command]
 pub fn cancel_download() {
@@ -224,6 +230,7 @@ pub async fn download_whisper_model(
     config: tauri::State<'_, Arc<ConfigManager>>,
     app: tauri::AppHandle,
     model_name: String,
+    source: Option<String>,
 ) -> Result<String, String> {
     use futures_util::StreamExt;
     use tokio::io::AsyncWriteExt;
@@ -263,16 +270,33 @@ pub async fn download_whisper_model(
         let _ = std::fs::remove_file(&final_path);
     }
 
-    // 三级镜像源（HF-Mirror → ModelScope → HuggingFace）
-    // ModelScope 使用社区镜像 cjc1887415157/whisper.cpp（SHA256 与官方一致，已验证）
-    let mirror_urls = [
-        format!("https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/{}", file_name),
-        format!(
-            "https://modelscope.cn/api/v1/models/cjc1887415157/whisper.cpp/repo?Revision=master&FilePath={}",
-            file_name
-        ),
-        format!("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{}", file_name),
-    ];
+    // 根据用户选择的源构造下载地址列表
+    // source="custom"：使用 CUSTOM_MODEL_BASE_URL 直链（待用户提供后填入）
+    // source="hf" 或未指定：使用三级镜像源（HF-Mirror → ModelScope → HuggingFace）
+    let mirror_urls: Vec<String> = match source.as_deref() {
+        Some("custom") => {
+            if CUSTOM_MODEL_BASE_URL.is_empty() {
+                return Err("直链源尚未配置，请选择 HuggingFace 源或联系开发者提供直链".to_string());
+            }
+            vec![format!(
+                "{}/{}",
+                CUSTOM_MODEL_BASE_URL.trim_end_matches('/'),
+                file_name
+            )]
+        }
+        _ => {
+            // 三级镜像源（HF-Mirror → ModelScope → HuggingFace）
+            // ModelScope 使用社区镜像 cjc1887415157/whisper.cpp（SHA256 与官方一致，已验证）
+            vec![
+                format!("https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/{}", file_name),
+                format!(
+                    "https://modelscope.cn/api/v1/models/cjc1887415157/whisper.cpp/repo?Revision=master&FilePath={}",
+                    file_name
+                ),
+                format!("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{}", file_name),
+            ]
+        }
+    };
 
     let mut errors: Vec<String> = Vec::new();
 

@@ -2420,6 +2420,7 @@ html, body {
 .modal-footer {
     display: flex;
     justify-content: flex-end;
+    align-items: center;
     gap: 8px;
     padding: 12px 20px;
     border-top: 1px solid var(--border-color);
@@ -2427,6 +2428,36 @@ html, body {
 
 .modal-footer .solid-btn {
     min-width: 80px;
+}
+
+/* 确认对话框中的源选择器（放在 footer 左侧，与右侧按钮分开） */
+.confirm-source-select-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-right: auto;
+}
+
+.confirm-source-label {
+    font-size: 12px;
+    color: var(--text-tertiary);
+    white-space: nowrap;
+}
+
+.confirm-source-select {
+    height: 30px;
+    font-size: 12px;
+    padding: 0 24px 0 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    cursor: pointer;
+    outline: none;
+}
+
+.confirm-source-select:focus {
+    border-color: var(--accent-blue);
 }
 
 .help-section {

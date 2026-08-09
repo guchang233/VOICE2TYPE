@@ -653,13 +653,17 @@
     async function downloadModel(modelKey) {
         if (!invoke || downloadingModel) return;
 
-        // 下载前确认
+        // 下载前确认（含源选择器）
         const meta = WHISPER_MODELS_META.find(m => m.key === modelKey);
         const sizeText = meta ? `约 ${meta.sizeMB} MB` : '';
-        const confirmed = await showConfirmDialog(
+        const { confirmed, selected: source } = await showConfirmDialog(
             '下载模型',
             `确定下载 ${modelKey} 模型（${sizeText}）吗？下载期间可随时取消。`,
-            '开始下载'
+            '开始下载',
+            [
+                { label: 'HuggingFace', value: 'hf' },
+                { label: '直链', value: 'custom' },
+            ]
         );
         if (!confirmed) return;
 
@@ -695,7 +699,7 @@
         renderModelCards();
 
         try {
-            await invoke('download_whisper_model', { modelName: modelKey });
+            await invoke('download_whisper_model', { modelName: modelKey, source: source || 'hf' });
         } catch (err) {
             console.error('[downloadModel] 失败:', err);
             if (String(err).includes('取消')) {
@@ -743,7 +747,7 @@
     /// 删除模型
     async function deleteModel(fileName) {
         if (!invoke) return;
-        const confirmed = await showConfirmDialog(
+        const { confirmed } = await showConfirmDialog(
             '删除模型',
             `确定删除 ${fileName} 吗？此操作不可恢复。`,
             '删除'
@@ -792,13 +796,29 @@
         if (modal) modal.style.display = 'none';
     }
 
-    /// 显示通用确认对话框，返回用户是否点击了"确认"
+    /// 显示通用确认对话框，返回 {confirmed, selected}
     /// confirmText 为确认按钮文字（默认"确认"）
-    function showConfirmDialog(title, message, confirmText) {
+    /// selectOptions 可选：在 footer 左侧渲染下拉选择器，selected 为选中值
+    function showConfirmDialog(title, message, confirmText, selectOptions) {
         return new Promise((resolve) => {
             const overlay = document.createElement('div');
             overlay.className = 'modal-overlay';
             overlay.style.display = 'flex';
+
+            // 源选择器 HTML（仅当传入 selectOptions 时渲染）
+            let selectHtml = '';
+            if (selectOptions && selectOptions.length > 0) {
+                const optionsHtml = selectOptions.map((opt, i) =>
+                    `<option value="${escapeHtml(String(opt.value))}"${i === 0 ? ' selected' : ''}>${escapeHtml(opt.label)}</option>`
+                ).join('');
+                selectHtml = `
+                    <div class="confirm-source-select-wrap">
+                        <span class="confirm-source-label">源</span>
+                        <select class="confirm-source-select">${optionsHtml}</select>
+                    </div>
+                `;
+            }
+
             overlay.innerHTML = `
                 <div class="modal-content confirm-modal">
                     <div class="modal-header">
@@ -808,6 +828,7 @@
                         <p class="confirm-message">${message.replace(/\n/g, '<br>')}</p>
                     </div>
                     <div class="modal-footer">
+                        ${selectHtml}
                         <button class="secondary-btn" data-action="cancel">取消</button>
                         <button class="solid-btn" data-action="confirm">${confirmText || '确认'}</button>
                     </div>
@@ -819,15 +840,18 @@
                 overlay.remove();
                 resolve(result);
             };
-            overlay.querySelector('[data-action="confirm"]').addEventListener('click', () => close(true));
-            overlay.querySelector('[data-action="cancel"]').addEventListener('click', () => close(false));
+            overlay.querySelector('[data-action="confirm"]').addEventListener('click', () => {
+                const sel = overlay.querySelector('.confirm-source-select');
+                close({ confirmed: true, selected: sel ? sel.value : undefined });
+            });
+            overlay.querySelector('[data-action="cancel"]').addEventListener('click', () => close({ confirmed: false }));
             overlay.addEventListener('click', (e) => {
-                if (e.target === overlay) close(false);
+                if (e.target === overlay) close({ confirmed: false });
             });
             const onKey = (e) => {
                 if (e.key === 'Escape') {
                     document.removeEventListener('keydown', onKey);
-                    close(false);
+                    close({ confirmed: false });
                 }
             };
             document.addEventListener('keydown', onKey);
