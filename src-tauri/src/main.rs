@@ -27,6 +27,7 @@ use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use app_state::AppState;
 use config::ConfigManager;
 use indicator::StatusIndicator;
+use utils::logger;
 
 pub static INDICATOR: OnceCell<StatusIndicator> = OnceCell::new();
 pub static CONFIG_GLOBAL: OnceCell<Arc<ConfigManager>> = OnceCell::new();
@@ -48,7 +49,7 @@ fn main() {
         );
     }
 
-    let _ = env_logger::try_init();
+    logger::init_logger();
 
     let config_manager = Arc::new(ConfigManager::new());
     let _ = CONFIG_GLOBAL.set(config_manager.clone());
@@ -71,6 +72,7 @@ fn main() {
             commands::get_models_dir,
             commands::pick_models_directory,
             commands::reset_models_directory,
+            commands::open_directory,
             commands::start_recording,
             commands::stop_recording,
             commands::cancel_recording,
@@ -85,6 +87,8 @@ fn main() {
             commands::is_subtitle_running,
             commands::toggle_subtitle,
             commands::download_whisper_model,
+            commands::cancel_download,
+            commands::delete_whisper_model,
             commands::list_available_models,
             commands::download_whisper_binary,
             commands::check_whisper_binary_health,
@@ -102,11 +106,39 @@ fn main() {
         .setup(move |app| {
             let app_handle = app.handle();
 
+            // 设置 AppHandle 到日志记录器，启用向前端推送日志事件
+            logger::set_app_handle(app_handle.clone());
+
             {
                 let state = app_state.clone();
                 let handle = app_handle.clone();
                 tauri::async_runtime::spawn(async move {
                     state.set_app_handle(handle).await;
+                });
+            }
+
+            // 预热模型文件到 OS 文件缓存，加速后续 whisper-cli 模型加载
+            {
+                let state = app_state.clone();
+                tauri::async_runtime::spawn(async move {
+                    state.prewarm_model_cache().await;
+                });
+            }
+
+            // 空闲周期性 OS 缓存保活：全天托盘工具期间，别的程序可能把模型挤出 OS page cache，
+            // 导致下次转写又走磁盘 IO。每 10 分钟廉价重读一次（不占应用 RAM，只刷 OS 缓存）。
+            {
+                let state = app_state.clone();
+                tauri::async_runtime::spawn(async move {
+                    let mut interval = tokio::time::interval(std::time::Duration::from_secs(600));
+                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                    // 跳过首次立即触发（启动预热已在上一个任务做过）
+                    interval.tick().await;
+                    loop {
+                        interval.tick().await;
+                        // prewarm 内部会在模型不存在时安全跳过
+                        state.prewarm_model_cache().await;
+                    }
                 });
             }
 

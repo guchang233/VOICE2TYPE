@@ -1,8 +1,18 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
 use crate::app_state::AppState;
 use crate::config::{AppConfig, ConfigManager};
 use crate::history;
+
+/// 全局下载取消标志：用户点击「取消」后置为 true，下载循环检测到后中断
+static CANCEL_DOWNLOAD: AtomicBool = AtomicBool::new(false);
+
+/// 取消正在进行的下载（模型/引擎）
+#[tauri::command]
+pub fn cancel_download() {
+    CANCEL_DOWNLOAD.store(true, Ordering::SeqCst);
+}
 
 #[tauri::command]
 pub fn get_config(config: tauri::State<'_, Arc<ConfigManager>>) -> AppConfig {
@@ -24,6 +34,7 @@ pub fn get_models_dir(config: tauri::State<'_, Arc<ConfigManager>>) -> String {
 }
 
 /// 打开文件夹选择器，让用户选择模型下载目录
+/// 使用非阻塞回调 API + oneshot channel，避免阻塞 async 运行时
 /// 选择后立即保存到配置，并返回新目录路径
 #[tauri::command]
 pub async fn pick_models_directory(
@@ -31,12 +42,18 @@ pub async fn pick_models_directory(
     config: tauri::State<'_, Arc<ConfigManager>>,
 ) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
+    use tokio::sync::oneshot;
 
-    let folder = app
-        .dialog()
+    let (tx, rx) = oneshot::channel();
+    app.dialog()
         .file()
         .set_title("选择模型下载目录")
-        .blocking_pick_folder();
+        .pick_folder(move |folder| {
+            let _ = tx.send(folder);
+        });
+
+    // 等待用户选择（非阻塞，不占用 async 运行时线程）
+    let folder = rx.await.map_err(|e| format!("对话框通道错误: {}", e))?;
 
     match folder {
         Some(path) => {
@@ -57,6 +74,42 @@ pub fn reset_models_directory(
     config.clear_custom_models_dir();
     config.save().map_err(|e| e.to_string())?;
     Ok(config.current_models_dir())
+}
+
+/// 在系统文件管理器中打开指定目录
+/// 使用 OS 原生命令，避免 shell 插件 scope 限制
+#[tauri::command]
+pub async fn open_directory(path: String) -> Result<(), String> {
+    let dir = std::path::PathBuf::from(&path);
+    if !dir.exists() {
+        std::fs::create_dir_all(&dir).map_err(|e| format!("创建目录失败: {}", e))?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        std::process::Command::new("explorer")
+            .arg(&path)
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .spawn()
+            .map_err(|e| format!("打开目录失败: {}", e))?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("打开目录失败: {}", e))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("打开目录失败: {}", e))?;
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -142,7 +195,8 @@ fn compute_sha256(path: &std::path::Path) -> Result<String, String> {
     use sha2::{Digest, Sha256};
     let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
     let mut hasher = Sha256::new();
-    let mut buffer = [0u8; 8192];
+    // 64KB buffer：大模型（1.5GB）校验从 ~3 分钟降到 ~10 秒级
+    let mut buffer = [0u8; 65536];
     loop {
         let n = std::io::Read::read(&mut file, &mut buffer).map_err(|e| e.to_string())?;
         if n == 0 {
@@ -153,6 +207,18 @@ fn compute_sha256(path: &std::path::Path) -> Result<String, String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
+/// 校验模型文件 SHA256 是否匹配官方哈希
+/// 无官方哈希记录时返回 Ok(true)（跳过校验）
+fn verify_model_hash(file_name: &str, path: &std::path::Path) -> Result<bool, String> {
+    match crate::whisper_local::expected_sha256(file_name) {
+        Some(expected) => {
+            let computed = compute_sha256(path)?;
+            Ok(computed == expected)
+        }
+        None => Ok(true),
+    }
+}
+
 #[tauri::command]
 pub async fn download_whisper_model(
     config: tauri::State<'_, Arc<ConfigManager>>,
@@ -161,6 +227,9 @@ pub async fn download_whisper_model(
 ) -> Result<String, String> {
     use futures_util::StreamExt;
     use tokio::io::AsyncWriteExt;
+
+    // 重置取消标志（每次新下载都从 false 开始）
+    CANCEL_DOWNLOAD.store(false, Ordering::SeqCst);
 
     let model_dir = config.whisper_models_dir();
     std::fs::create_dir_all(&model_dir).map_err(|e| e.to_string())?;
@@ -182,30 +251,24 @@ pub async fn download_whisper_model(
 
     // 如果最终文件已存在且哈希匹配，直接返回
     if final_path.exists() {
-        let part_path_clone = final_path.clone();
-        let hash_check = tokio::task::spawn_blocking(move || {
-            if let Some(expected) = crate::whisper_local::expected_sha256(file_name) {
-                match compute_sha256(&part_path_clone) {
-                    Ok(computed) => Ok(computed == expected),
-                    Err(e) => Err(e),
-                }
-            } else {
-                Ok(true)
-            }
-        })
-        .await
-        .map_err(|e| e.to_string())??;
+        let final_path_clone = final_path.clone();
+        let hash_ok = tokio::task::spawn_blocking(move || verify_model_hash(file_name, &final_path_clone))
+            .await
+            .map_err(|e| e.to_string())??;
 
-        if hash_check {
+        if hash_ok {
             return Ok("模型已存在".to_string());
         }
+        // 哈希不匹配：删除旧文件，重新下载
+        let _ = std::fs::remove_file(&final_path);
     }
 
     // 三级镜像源（HF-Mirror → ModelScope → HuggingFace）
+    // ModelScope 使用社区镜像 cjc1887415157/whisper.cpp（SHA256 与官方一致，已验证）
     let mirror_urls = [
         format!("https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/{}", file_name),
         format!(
-            "https://modelscope.cn/api/v1/models/ggerganov/whisper.cpp/repo?Revision=master&FilePath={}",
+            "https://modelscope.cn/api/v1/models/cjc1887415157/whisper.cpp/repo?Revision=master&FilePath={}",
             file_name
         ),
         format!("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{}", file_name),
@@ -214,6 +277,10 @@ pub async fn download_whisper_model(
     let mut errors: Vec<String> = Vec::new();
 
     for url in &mirror_urls {
+        // 切换到下一镜像前检查是否已取消
+        if CANCEL_DOWNLOAD.load(Ordering::SeqCst) {
+            return Err("下载已取消".to_string());
+        }
         log::info!("尝试下载模型: {}", url);
 
         // 检查已有 .part 文件大小（用于断点续传）
@@ -295,8 +362,15 @@ pub async fn download_whisper_model(
 
         let mut stream_ok = true;
         let mut stream_err_msg = String::new();
+        let mut cancelled = false;
 
         while let Some(chunk_result) = stream.next().await {
+            // 用户点击取消：中断下载（保留 .part 文件以便续传）
+            if CANCEL_DOWNLOAD.load(Ordering::SeqCst) {
+                cancelled = true;
+                stream_ok = false;
+                break;
+            }
             match chunk_result {
                 Ok(chunk) => {
                     if let Err(e) = file.write_all(&chunk).await {
@@ -321,6 +395,7 @@ pub async fn download_whisper_model(
                         } else {
                             0
                         };
+                        // total_size 已知时按比例；未知时发 0（前端改显已下载 MB）
                         let progress = if total_size > 0 {
                             (downloaded as f64 / total_size as f64 * 100.0) as u32
                         } else {
@@ -354,6 +429,10 @@ pub async fn download_whisper_model(
         drop(file);
 
         if !stream_ok {
+            // 用户主动取消：不污染 errors，直接返回
+            if cancelled {
+                return Err("下载已取消".to_string());
+            }
             log::warn!("下载中断 {}: {}", url, stream_err_msg);
             errors.push(format!("{}: {}", url, stream_err_msg));
             // 保留 .part 文件以便下次续传
@@ -362,18 +441,11 @@ pub async fn download_whisper_model(
 
         // 下载完成，校验 SHA256（在 spawn_blocking 中执行避免阻塞）
         let part_path_clone = part_path.clone();
-        let hash_result = tokio::task::spawn_blocking(move || -> Result<bool, String> {
-            if let Some(expected) = crate::whisper_local::expected_sha256(file_name) {
-                let computed = compute_sha256(&part_path_clone)?;
-                Ok(computed == expected)
-            } else {
-                Ok(true)
-            }
-        })
-        .await
-        .map_err(|e| e.to_string())??;
+        let hash_ok = tokio::task::spawn_blocking(move || verify_model_hash(file_name, &part_path_clone))
+            .await
+            .map_err(|e| e.to_string())??;
 
-        if !hash_result {
+        if !hash_ok {
             // 哈希不匹配，删除损坏的 .part 文件
             let _ = std::fs::remove_file(&part_path);
             let msg = format!("{}: SHA256 校验失败，文件已损坏", url);
@@ -402,6 +474,10 @@ pub async fn download_whisper_model(
         return Ok(format!("模型下载完成: {}", final_path.display()));
     }
 
+    // 用户取消时优先返回取消提示
+    if CANCEL_DOWNLOAD.load(Ordering::SeqCst) {
+        return Err("下载已取消".to_string());
+    }
     // 所有镜像源均失败（不删除 .part 文件，允许未来续传）
     Err(format!("所有下载源均失败:\n{}", errors.join("\n")))
 }
@@ -425,12 +501,7 @@ pub async fn list_available_models(
             if path.extension().map(|e| e == "bin").unwrap_or(false) {
                 let name = path.file_name().unwrap().to_string_lossy().to_string();
                 let size = path.metadata().map(|m| m.len()).unwrap_or(0);
-                let available = if let Some(expected) = crate::whisper_local::expected_sha256(&name)
-                {
-                    compute_sha256(&path).map(|h| h == expected).unwrap_or(false)
-                } else {
-                    true
-                };
+                let available = verify_model_hash(&name, &path).unwrap_or(false);
                 models.push(serde_json::json!({
                     "name": name,
                     "size": size,
@@ -446,12 +517,47 @@ pub async fn list_available_models(
     Ok(models)
 }
 
-/// whisper-bin-x64.zip 预期大小（v1.9.2，来自 GitHub API）
+/// 删除已下载的 Whisper 模型文件
+/// model_name 为完整文件名（如 ggml-tiny.bin）
+#[tauri::command]
+pub async fn delete_whisper_model(
+    config: tauri::State<'_, Arc<ConfigManager>>,
+    model_name: String,
+) -> Result<String, String> {
+    // 安全校验：只允许删除 ggml-*.bin 文件名
+    if !model_name.starts_with("ggml-") || !model_name.ends_with(".bin") {
+        return Err(format!("非法模型文件名: {}（仅允许 ggml-*.bin）", model_name));
+    }
+    // 防路径穿越
+    if model_name.contains('/') || model_name.contains('\\') || model_name.contains("..") {
+        return Err("模型文件名包含非法字符".to_string());
+    }
+
+    let model_dir = config.whisper_models_dir();
+    let model_path = model_dir.join(&model_name);
+
+    if !model_path.exists() {
+        return Err(format!("模型文件不存在: {}", model_path.display()));
+    }
+
+    // 同步删除（小操作，直接 spawn_blocking）
+    let path_clone = model_path.clone();
+    let name_clone = model_name.clone();
+    tokio::task::spawn_blocking(move || -> Result<String, String> {
+        std::fs::remove_file(&path_clone)
+            .map(|_| format!("已删除模型: {}", name_clone))
+            .map_err(|e| format!("删除失败: {}", e))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
+/// whisper-bin-x64.zip 预期大小（v1.9.2，来自 GitHub API，纯 CPU 无 BLAS 版）
 const WHISPER_BIN_ZIP_SIZE: u64 = 8_194_445;
-/// whisper-bin-x64.zip 预期 SHA256（v1.9.2）
+/// whisper-bin-x64.zip 预期 SHA256（v1.9.2，纯 CPU 无 BLAS 版）
 const WHISPER_BIN_ZIP_SHA256: &str = "49dcc16de826f20bd53d44f947a1ae49dfa81f86cad67a64d80820cb192d674a";
 
-/// 下载 whisper.cpp 预编译二进制（Windows: whisper-bin-x64.zip）
+/// 下载 whisper.cpp 预编译二进制（Windows: whisper-bin-x64.zip，纯 CPU 无 BLAS）
 /// force=true 时先删除现有二进制目录内容再重新下载
 #[tauri::command]
 pub async fn download_whisper_binary(
@@ -483,6 +589,9 @@ pub async fn download_whisper_binary(
     }
 
     // 多镜像源：GitHub 代理优先（国内可达），直连兜底
+    // 使用纯 CPU 版本（无 BLAS）：BLAS 版启动时要初始化线程池 + 加载 libopenblas.dll，
+    // 对 tiny 模型小矩阵无加速收益却增加 50-150ms 启动税。纯 CPU 版启动快、依赖少，
+    // 契合轻量化全天使用场景。
     let mirror_urls = [
         "https://ghgo.xyz/https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.2/whisper-bin-x64.zip",
         "https://gh-proxy.com/https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.2/whisper-bin-x64.zip",

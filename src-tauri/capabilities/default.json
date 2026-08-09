@@ -26,6 +26,7 @@
     "notification:default",
     "global-shortcut:default",
     "shell:default",
+    "shell:allow-open",
     "os:default"
   ]
 }

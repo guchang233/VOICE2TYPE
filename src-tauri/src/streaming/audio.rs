@@ -37,13 +37,11 @@ pub fn start_capture(
             "[音频] 设备: {}, 采样率: {}Hz, 通道数: {}, 样本格式: {:?}",
             name, src_rate, channels, sample_format
         ),
-        None,
     );
 
     let err_fn = |err| {
         crate::utils::logger::write_log_line(
             &format!("[音频] 采集错误: {}", err),
-            None,
         );
     };
 

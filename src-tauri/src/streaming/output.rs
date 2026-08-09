@@ -125,7 +125,6 @@ impl StreamingOutput {
                     crate::utils::logger::write_log(
                         crate::utils::logger::LogLevel::WARN,
                         &format!("AI polish failed, keeping raw: {}", e),
-                        Some(&config),
                     );
                 }
             }

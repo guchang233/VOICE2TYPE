@@ -3,6 +3,7 @@ use once_cell::sync::Lazy;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::Mutex;
+use tauri::{AppHandle, Emitter};
 
 #[cfg(target_os = "windows")]
 use windows::core::PCWSTR;
@@ -20,17 +21,141 @@ pub enum LogLevel {
     ERROR,
 }
 
+/// AppHandle 持有者，用于向前端推送日志事件
+/// 在 setup() 中通过 set_app_handle() 设置
+static APP_HANDLE: Lazy<Mutex<Option<AppHandle>>> = Lazy::new(|| Mutex::new(None));
+
+/// 日志文件句柄缓存，避免每次写日志都重新打开文件
+static LOG_FILE_HANDLE: Lazy<Mutex<Option<(std::path::PathBuf, std::fs::File)>>> =
+    Lazy::new(|| Mutex::new(None));
+
 #[cfg(target_os = "windows")]
 pub static LOG_PIPE_HANDLE: Lazy<Mutex<Option<windows::Win32::Foundation::HANDLE>>> =
     Lazy::new(|| Mutex::new(None));
 
 #[cfg(target_os = "windows")]
-pub static LOG_FILE_HANDLE: Lazy<Mutex<Option<(std::path::PathBuf, std::fs::File)>>> =
-    Lazy::new(|| Mutex::new(None));
-
-#[cfg(target_os = "windows")]
 pub static LOG_VIEWER_CHILD: Lazy<Mutex<Option<std::process::Child>>> =
     Lazy::new(|| Mutex::new(None));
+
+/// 自定义日志记录器，实现 log::Log trait
+/// 捕获所有 log::info!/warn!/error!/debug! 调用，统一处理：
+/// 1. 写入本地日志文件
+/// 2. 通过 Tauri 事件推送到前端日志视图
+/// 3. 写入命名管道（供外部日志查看器子进程使用，仅 Windows）
+pub struct TauriLogger;
+
+static LOGGER: TauriLogger = TauriLogger;
+
+impl log::Log for TauriLogger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= log::Level::Info
+    }
+
+    fn log(&self, record: &log::Record) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+
+        let level = match record.level() {
+            log::Level::Error => "ERROR",
+            log::Level::Warn => "WARN",
+            log::Level::Info => "INFO",
+            _ => "DEBUG",
+        };
+
+        let message = format!("{}", record.args());
+        let time_str = Local::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string();
+
+        // source：取模块路径最后一段作为来源标签
+        let target = record.target();
+        let source = target.rsplit("::").next().unwrap_or(target);
+
+        let log_entry = format!("[{}][{}] {}", time_str, level, message);
+
+        // 1. 写入本地日志文件
+        write_to_file(&log_entry);
+
+        // 2. 通过 Tauri 事件推送到前端
+        if let Some(handle) = APP_HANDLE.lock().unwrap().as_ref() {
+            let _ = handle.emit(
+                "backend-log",
+                serde_json::json!({
+                    "level": level.to_lowercase(),
+                    "message": message,
+                    "source": source,
+                    "time": time_str,
+                }),
+            );
+        }
+
+        // 3. 写入命名管道 (供外部日志查看器子进程使用)
+        #[cfg(target_os = "windows")]
+        unsafe {
+            if let Some(handle) = *LOG_PIPE_HANDLE.lock().unwrap() {
+                let mut buf = Vec::with_capacity(log_entry.len() + 2);
+                buf.extend_from_slice(log_entry.as_bytes());
+                buf.extend_from_slice(b"\r\n");
+                let mut written = 0u32;
+                let _ = WriteFile(handle, Some(&buf), Some(&mut written), None);
+            }
+        }
+    }
+
+    fn flush(&self) {}
+}
+
+/// 写入日志到文件（带句柄缓存）
+fn write_to_file(log_entry: &str) {
+    let Some(cfg) = crate::CONFIG_GLOBAL.get() else {
+        return;
+    };
+    let log_file = cfg.log_file_path();
+    let mut guard = LOG_FILE_HANDLE.lock().unwrap();
+    let file_ok = if let Some((ref path, _)) = *guard {
+        path == &log_file
+    } else {
+        false
+    };
+
+    if !file_ok {
+        if let Ok(file) = OpenOptions::new().create(true).append(true).open(&log_file) {
+            *guard = Some((log_file.clone(), file));
+        }
+    }
+
+    if let Some((_, ref mut file)) = *guard {
+        let _ = writeln!(file, "{}", log_entry);
+        let _ = file.flush();
+    }
+}
+
+/// 初始化自定义日志记录器（替代 env_logger）
+pub fn init_logger() {
+    let _ = log::set_logger(&LOGGER);
+    log::set_max_level(log::LevelFilter::Info);
+}
+
+/// 设置 AppHandle，启用向前端推送日志事件
+/// 在 Tauri setup() 中调用
+pub fn set_app_handle(handle: AppHandle) {
+    *APP_HANDLE.lock().unwrap() = Some(handle);
+}
+
+/// 写入日志（路由到 log 宏，由 TauriLogger 统一处理）
+pub fn write_log(level: LogLevel, s: &str) {
+    let lvl = match level {
+        LogLevel::DEBUG => log::Level::Debug,
+        LogLevel::INFO => log::Level::Info,
+        LogLevel::WARN => log::Level::Warn,
+        LogLevel::ERROR => log::Level::Error,
+    };
+    log::log!(lvl, "{}", s);
+}
+
+/// 写入 INFO 级别日志行
+pub fn write_log_line(s: &str) {
+    log::info!("{}", s);
+}
 
 /// 初始化日志管道
 #[cfg(target_os = "windows")]
@@ -100,59 +225,6 @@ pub fn start_log_viewer() {
     }
 }
 
-/// 写入日志
-#[cfg(target_os = "windows")]
-pub fn write_log(level: LogLevel, s: &str, config: Option<&crate::config::ConfigManager>) {
-    let level_str = match level {
-        LogLevel::DEBUG => "DEBUG",
-        LogLevel::INFO => "INFO ",
-        LogLevel::WARN => "WARN ",
-        LogLevel::ERROR => "ERROR",
-    };
-
-    let time_str = Local::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string();
-    let log_entry = format!("[{}][{}] {}", time_str, level_str, s);
-
-    // 1. 写入本地文件
-    if let Some(cfg) = config {
-        let log_file = cfg.log_file_path();
-        let mut guard = LOG_FILE_HANDLE.lock().unwrap();
-        let file_ok = if let Some((ref path, _)) = *guard {
-            path == &log_file
-        } else {
-            false
-        };
-
-        if !file_ok {
-            if let Ok(file) = OpenOptions::new().create(true).append(true).open(&log_file) {
-                *guard = Some((log_file.clone(), file));
-            }
-        }
-
-        if let Some((_, ref mut file)) = *guard {
-            let _ = writeln!(file, "{}", log_entry);
-            let _ = file.flush();
-        }
-    }
-
-    // 2. 写入命名管道 (供实时查看器使用)
-    unsafe {
-        if let Some(handle) = *LOG_PIPE_HANDLE.lock().unwrap() {
-            let mut buf = Vec::with_capacity(log_entry.len() + 2);
-            buf.extend_from_slice(log_entry.as_bytes());
-            buf.extend_from_slice(b"\r\n");
-            let mut written = 0u32;
-            let _ = WriteFile(handle, Some(&buf), Some(&mut written), None);
-        }
-    }
-}
-
-/// 写入日志行
-#[cfg(target_os = "windows")]
-pub fn write_log_line(s: &str, config: Option<&crate::config::ConfigManager>) {
-    write_log(LogLevel::INFO, s, config);
-}
-
 /// 设置日志启用状态
 #[cfg(target_os = "windows")]
 pub fn log_set_enabled(enabled: bool, _config: Option<&crate::config::ConfigManager>) {
@@ -180,7 +252,7 @@ pub fn log_set_enabled(enabled: bool, _config: Option<&crate::config::ConfigMana
                 }
             }
         }
-        // 关闭并释放缓存的文件句柄
+        // 关闭并释放缓存的文件句柄（下次写日志会自动重新打开）
         {
             let mut guard = LOG_FILE_HANDLE.lock().unwrap();
             *guard = None;

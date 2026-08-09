@@ -90,7 +90,7 @@ impl StreamingSession {
                         output.apply_full_text(&resp.text, &cfg, resp.is_final);
                     }
                     Err(e) => {
-                        write_log(LogLevel::ERROR, &format!("流式识别: {}", e), Some(&cfg));
+                        write_log(LogLevel::ERROR, &format!("流式识别: {}", e));
                     }
                 }
             }
@@ -98,7 +98,7 @@ impl StreamingSession {
         self.consumer_task = Some(consumer);
 
         IS_STREAMING.store(true, Ordering::SeqCst);
-        write_log_line("--> [流式] 开始实时识别… (ESC 取消)", Some(&config));
+        write_log_line("--> [流式] 开始实时识别… (ESC 取消)");
 
         #[cfg(target_os = "windows")]
         if config.streaming_enable_indicator() {
@@ -226,7 +226,7 @@ impl StreamingSession {
         self.output.reset();
 
         if cancelled {
-            write_log_line("--> [流式] 已取消", Some(config));
+            write_log_line("--> [流式] 已取消");
             #[cfg(target_os = "windows")]
             if config.streaming_enable_indicator() {
                 if let Some(ind) = crate::INDICATOR.get() {
@@ -234,7 +234,7 @@ impl StreamingSession {
                 }
             }
         } else {
-            write_log_line("--> [流式] 识别结束", Some(config));
+            write_log_line("--> [流式] 识别结束");
             #[cfg(target_os = "windows")]
             if config.streaming_enable_indicator() {
                 if let Some(ind) = crate::INDICATOR.get() {

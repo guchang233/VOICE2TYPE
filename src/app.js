@@ -447,6 +447,11 @@
             setupDefaultSettings();
         }
 
+        // 初始渲染（未下载状态）
+        renderModelCards();
+        // 异步检测已下载状态并刷新
+        loadModelStatus();
+
         try {
             const dir = await invoke('get_models_dir');
             const dirEl = $('#models-dir-path');
@@ -466,67 +471,312 @@
         if (!badge) return;
 
         badge.textContent = '检测中...';
-        badge.className = 'engine-status-badge';
+        badge.className = 'mm-engine-badge';
         if (hint) hint.textContent = '';
 
         try {
             const health = await invoke('check_whisper_binary_health');
             if (health.status === 'ok') {
                 badge.textContent = '引擎就绪';
-                badge.className = 'engine-status-badge status-ok';
+                badge.className = 'mm-engine-badge status-ok';
                 if (hint) hint.textContent = '';
                 if (dlBtn) dlBtn.textContent = '重新下载';
             } else if (health.status === 'missing') {
                 badge.textContent = '未下载';
-                badge.className = 'engine-status-badge status-missing';
+                badge.className = 'mm-engine-badge status-missing';
                 if (hint) hint.textContent = '点击"下载引擎"自动下载，或手动下载 whisper-bin-x64.zip 解压所有文件到 whisper-bin 文件夹';
                 if (dlBtn) dlBtn.textContent = '下载引擎';
             } else if (health.status === 'corrupt') {
                 badge.textContent = '引擎损坏';
-                badge.className = 'engine-status-badge status-corrupt';
+                badge.className = 'mm-engine-badge status-corrupt';
                 if (hint) hint.textContent = health.message + '。请点击"重新下载"';
                 if (dlBtn) dlBtn.textContent = '重新下载';
             }
         } catch (err) {
             badge.textContent = '检测失败';
-            badge.className = 'engine-status-badge status-corrupt';
+            badge.className = 'mm-engine-badge status-corrupt';
             if (hint) hint.textContent = String(err);
         }
     }
 
-    async function loadDownloadedModels() {
-        if (!invoke) {
-            console.error('[loadDownloadedModels] invoke 不可用');
-            const listEl = $('#downloaded-models-list');
-            if (listEl) listEl.innerHTML = '<span class="empty-hint">invoke 不可用</span>';
-            return;
-        }
+    // 模型元数据：key、文件名、大小、速度等级(1-4)、速度文案、推理耗时、推荐场景
+    const WHISPER_MODELS_META = [
+        { key: 'tiny',   file: 'ggml-tiny.bin',   sizeMB: 75,   speedLevel: 1, speed: '极快', desc: '2秒音频≈1秒',   recommend: '追求速度可选' },
+        { key: 'base',   file: 'ggml-base.bin',   sizeMB: 142,  speedLevel: 2, speed: '快',   desc: '2秒音频≈2-3秒', recommend: '推荐 · 精度速度均衡' },
+        { key: 'small',  file: 'ggml-small.bin',  sizeMB: 466,  speedLevel: 3, speed: '慢',   desc: '2秒音频≈9秒',   recommend: '需高精度且硬件强' },
+        { key: 'medium', file: 'ggml-medium.bin', sizeMB: 1530, speedLevel: 4, speed: '很慢', desc: '2秒音频≈20秒+',  recommend: '仅高配机' },
+    ];
 
-        const listEl = $('#downloaded-models-list');
-        if (!listEl) return;
+    // 模型状态缓存（由后端 list_available_models + 当前配置决定）
+    // { 'ggml-tiny.bin': { downloaded: true, available: true, size: 77852928 } }
+    let modelStatusMap = {};
+    let currentModelFile = '';
+    let downloadingModel = null;
+    let modelProgressUnlisten = null;
 
-        listEl.innerHTML = '<span class="empty-hint">检测中...</span>';
+    /// 统一渲染模型卡片网格
+    function renderModelCards() {
+        const grid = $('#model-store');
+        if (!grid) return;
 
-        try {
-            console.log('[loadDownloadedModels] 调用 list_available_models');
-            const models = await invoke('list_available_models');
-            console.log('[loadDownloadedModels] 返回:', JSON.stringify(models));
-            if (!models || models.length === 0) {
-                listEl.innerHTML = '<span class="empty-hint">暂无已下载模型</span>';
-                return;
+        grid.innerHTML = WHISPER_MODELS_META.map(m => {
+            const status = modelStatusMap[m.file];
+            const isDownloaded = status?.downloaded === true;
+            const isAvailable = status?.available !== false;
+            const isCorrupt = isDownloaded && !isAvailable;
+            const isCurrent = m.file === currentModelFile;
+            const isDownloading = downloadingModel === m.key;
+
+            // 卡片状态 class
+            const stateClass = isCurrent ? 'is-current'
+                : isCorrupt ? 'is-corrupt'
+                : isDownloaded ? 'is-downloaded'
+                : 'is-empty';
+
+            // 主操作按钮（智能切换）
+            let primaryBtn;
+            if (isDownloading) {
+                primaryBtn = `<div class="mm-download-row">
+                    <button class="mm-card-btn mm-btn-progress" disabled>
+                        <span class="mm-progress-text">0%</span>
+                    </button>
+                    <button class="mm-card-btn mm-btn-cancel" data-action="cancel" data-key="${m.key}">取消</button>
+                </div>
+                <div class="mm-progress-track"><div class="mm-progress-fill" style="width:0%"></div></div>`;
+            } else if (isCurrent) {
+                primaryBtn = `<button class="mm-card-btn mm-btn-current" disabled>使用中</button>`;
+            } else if (isCorrupt) {
+                primaryBtn = `<button class="mm-card-btn mm-btn-repair" data-action="redownload" data-key="${m.key}">重新下载</button>`;
+            } else if (isDownloaded) {
+                primaryBtn = `<button class="mm-card-btn mm-btn-use" data-action="use" data-file="${m.file}">使用</button>`;
+            } else {
+                primaryBtn = `<button class="mm-card-btn mm-btn-download" data-action="download" data-key="${m.key}">下载</button>`;
             }
 
-            listEl.innerHTML = models.map(m => {
-                const sizeMB = (m.size / (1024 * 1024)).toFixed(1);
-                // available 字段表示 SHA256 校验是否通过
-                const available = m.available !== false;
-                const statusClass = available ? 'model-available' : 'model-corrupt';
-                const statusText = available ? '可用' : '校验失败';
-                return `<div class="model-item ${statusClass}"><span class="model-name">${m.name}</span><span class="model-size">${sizeMB} MB</span><span class="model-status">${statusText}</span></div>`;
-            }).join('');
+            // 删除按钮（仅已下载且非使用中）
+            const deleteBtn = (isDownloaded && !isCurrent && !isDownloading)
+                ? `<button class="mm-card-delete" data-action="delete" data-file="${m.file}" title="删除">×</button>`
+                : '';
+
+            // 状态标签
+            let statusBadge;
+            if (isDownloading) statusBadge = '<span class="mm-card-status status-downloading">下载中</span>';
+            else if (isCurrent) statusBadge = '<span class="mm-card-status status-current">使用中</span>';
+            else if (isCorrupt) statusBadge = '<span class="mm-card-status status-corrupt">校验失败</span>';
+            else if (isDownloaded) statusBadge = '<span class="mm-card-status status-ready">已就绪</span>';
+            else statusBadge = '<span class="mm-card-status status-empty">未下载</span>';
+
+            // 实际大小（已下载时显示真实大小）
+            const sizeText = isDownloaded && status?.size
+                ? `${(status.size / 1048576).toFixed(1)} MB`
+                : `${m.sizeMB} MB`;
+
+            // 速度等级（1-4 个点）
+            const speedDots = Array.from({ length: 4 }, (_, i) =>
+                `<span class="mm-speed-dot${i < m.speedLevel ? ' active' : ''}"></span>`
+            ).join('');
+
+            return `
+                <div class="mm-card ${stateClass}" data-model-key="${m.key}" data-file="${m.file}">
+                    <div class="mm-card-top">
+                        <div class="mm-card-name">${m.key}</div>
+                        ${deleteBtn}
+                    </div>
+                    <div class="mm-card-speed">
+                        <span class="mm-speed-label">${m.speed}</span>
+                        <span class="mm-speed-dots">${speedDots}</span>
+                    </div>
+                    <div class="mm-card-desc">${m.desc}</div>
+                    <div class="mm-card-recommend">${m.recommend}</div>
+                    <div class="mm-card-footer">
+                        <div class="mm-card-meta">
+                            ${statusBadge}
+                            <span class="mm-card-size">${sizeText}</span>
+                        </div>
+                    </div>
+                    ${primaryBtn}
+                </div>
+            `;
+        }).join('');
+
+        // 绑定主操作按钮
+        $$('.mm-card-btn[data-action]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const action = btn.dataset.action;
+                if (action === 'download' || action === 'redownload') {
+                    downloadModel(btn.dataset.key);
+                } else if (action === 'cancel') {
+                    cancelModelDownload(btn.dataset.key);
+                } else if (action === 'use') {
+                    setModelAsCurrent(btn.dataset.file);
+                }
+            });
+        });
+
+        // 绑定删除按钮
+        $$('.mm-card-delete').forEach(btn => {
+            btn.addEventListener('click', () => deleteModel(btn.dataset.file));
+        });
+    }
+
+    /// 加载已下载模型状态 + 当前使用模型，然后渲染
+    async function loadModelStatus() {
+        if (!invoke) return;
+        try {
+            // 并行：已下载模型列表 + 当前配置
+            const [models, cfg] = await Promise.all([
+                invoke('list_available_models'),
+                invoke('get_config').catch(() => null),
+            ]);
+
+            // 构建状态 map
+            const map = {};
+            (models || []).forEach(m => {
+                map[m.name] = {
+                    downloaded: true,
+                    available: m.available !== false,
+                    size: m.size || 0,
+                };
+            });
+            modelStatusMap = map;
+            currentModelFile = cfg?.model?.local_whisper_model || '';
+
+            renderModelCards();
         } catch (err) {
-            console.error('[loadDownloadedModels] 失败:', err);
-            listEl.innerHTML = `<span class="empty-hint">加载失败: ${err}</span>`;
+            console.error('[loadModelStatus] 失败:', err);
+            const grid = $('#model-store');
+            if (grid) grid.innerHTML = `<div class="mm-empty">加载失败: ${err}</div>`;
+        }
+    }
+
+    /// 触发模型下载（带确认）
+    async function downloadModel(modelKey) {
+        if (!invoke || downloadingModel) return;
+
+        // 下载前确认
+        const meta = WHISPER_MODELS_META.find(m => m.key === modelKey);
+        const sizeText = meta ? `约 ${meta.sizeMB} MB` : '';
+        const confirmed = await showConfirmDialog(
+            '下载模型',
+            `确定下载 ${modelKey} 模型（${sizeText}）吗？下载期间可随时取消。`,
+            '开始下载'
+        );
+        if (!confirmed) return;
+
+        downloadingModel = modelKey;
+
+        // 监听进度
+        if (listen && !modelProgressUnlisten) {
+            modelProgressUnlisten = await listen('model-download-progress', (event) => {
+                const p = event.payload;
+                if (!p || !p.model) return;
+                const card = $(`.mm-card[data-model-key="${p.model}"]`);
+                if (!card) return;
+                const text = card.querySelector('.mm-progress-text');
+                const fill = card.querySelector('.mm-progress-fill');
+                const sizeEl = card.querySelector('.mm-card-size');
+
+                // total 已知：显示百分比；未知：显示已下载 MB
+                if (p.total && p.total > 0) {
+                    if (text) text.textContent = `${p.progress || 0}%`;
+                    if (fill) fill.style.width = `${p.progress || 0}%`;
+                } else {
+                    const dlMB = (p.downloaded || 0) / 1048576;
+                    if (text) text.textContent = `${dlMB.toFixed(1)} MB`;
+                    if (fill) fill.style.width = '0%';
+                }
+                // 实时显示速度 + 剩余时间
+                if (sizeEl && (p.progress || 0) < 100 && p.speed) {
+                    sizeEl.textContent = `${(p.speed || 0).toFixed(1)} MB/s${p.eta ? ` · ${p.eta}s` : ''}`;
+                }
+            });
+        }
+
+        renderModelCards();
+
+        try {
+            await invoke('download_whisper_model', { modelName: modelKey });
+        } catch (err) {
+            console.error('[downloadModel] 失败:', err);
+            if (String(err).includes('取消')) {
+                addLog('info', `已取消下载: ${modelKey}`, 'settings');
+            } else {
+                alert('模型下载失败: ' + err);
+            }
+        } finally {
+            downloadingModel = null;
+            await loadModelStatus();
+        }
+    }
+
+    /// 取消当前模型下载
+    async function cancelModelDownload(modelKey) {
+        if (!invoke || !downloadingModel) return;
+        try {
+            await invoke('cancel_download');
+        } catch (err) {
+            console.error('[cancelModelDownload] 失败:', err);
+        }
+        // 立即清空下载态并重渲染：用户可马上重新下载
+        downloadingModel = null;
+        addLog('info', `已取消下载: ${modelKey}`, 'settings');
+        renderModelCards();
+        // 后端收到取消后很快返回，finally 里会再次 loadModelStatus 刷新真实状态
+    }
+
+    /// 设为当前使用
+    async function setModelAsCurrent(fileName) {
+        if (!invoke) return;
+        try {
+            const cfg = await invoke('get_config');
+            cfg.model.local_whisper_model = fileName;
+            await invoke('save_config', { newConfig: cfg });
+            currentModelFile = fileName;
+            renderModelCards();
+            addLog('info', `已切换本地模型: ${fileName}`, 'settings');
+        } catch (err) {
+            console.error('[setModelAsCurrent] 失败:', err);
+            alert('设为当前失败: ' + err);
+        }
+    }
+
+    /// 删除模型
+    async function deleteModel(fileName) {
+        if (!invoke) return;
+        const confirmed = await showConfirmDialog(
+            '删除模型',
+            `确定删除 ${fileName} 吗？此操作不可恢复。`,
+            '删除'
+        );
+        if (!confirmed) return;
+        try {
+            await invoke('delete_whisper_model', { modelName: fileName });
+            await loadModelStatus();
+            addLog('info', `已删除模型: ${fileName}`, 'settings');
+        } catch (err) {
+            console.error('[deleteModel] 失败:', err);
+            alert('删除失败: ' + err);
+        }
+    }
+
+    /// 打开模型目录（优先使用后端 open_directory 命令，回退到 shell.open）
+    async function openModelsDirectory() {
+        if (!invoke) return;
+        try {
+            const dir = await invoke('get_models_dir');
+            try {
+                await invoke('open_directory', { path: dir });
+            } catch (backendErr) {
+                // 后端命令不可用时回退到 shell 插件
+                if (window.__TAURI__?.shell?.open) {
+                    await window.__TAURI__.shell.open(dir);
+                } else {
+                    throw new Error('无法打开目录：后端命令和 shell 插件均不可用');
+                }
+            }
+        } catch (err) {
+            console.error('[openModelsDirectory] 失败:', err);
+            alert('打开目录失败: ' + err);
         }
     }
 
@@ -543,9 +793,9 @@
     }
 
     /// 显示通用确认对话框，返回用户是否点击了"确认"
-    function showConfirmDialog(title, message) {
+    /// confirmText 为确认按钮文字（默认"确认"）
+    function showConfirmDialog(title, message, confirmText) {
         return new Promise((resolve) => {
-            // 动态创建确认模态框
             const overlay = document.createElement('div');
             overlay.className = 'modal-overlay';
             overlay.style.display = 'flex';
@@ -559,7 +809,7 @@
                     </div>
                     <div class="modal-footer">
                         <button class="secondary-btn" data-action="cancel">取消</button>
-                        <button class="solid-btn" data-action="confirm">确认下载</button>
+                        <button class="solid-btn" data-action="confirm">${confirmText || '确认'}</button>
                     </div>
                 </div>
             `;
@@ -571,11 +821,9 @@
             };
             overlay.querySelector('[data-action="confirm"]').addEventListener('click', () => close(true));
             overlay.querySelector('[data-action="cancel"]').addEventListener('click', () => close(false));
-            // 点击遮罩取消
             overlay.addEventListener('click', (e) => {
                 if (e.target === overlay) close(false);
             });
-            // ESC 取消
             const onKey = (e) => {
                 if (e.key === 'Escape') {
                     document.removeEventListener('keydown', onKey);
@@ -616,20 +864,23 @@
             if (customUrl) customUrl.value = config.model.custom_api_url || '';
             if (customModel) customModel.value = config.model.custom_model_name || '';
             if (customKey) customKey.value = config.model.custom_api_key || '';
+
+            // 本地 Whisper 性能调优字段
+            const wThreads = $('#setting-whisper-threads');
+            const wGreedy = $('#setting-whisper-greedy');
+            const wNoFallback = $('#setting-whisper-no-fallback');
+            if (wThreads) wThreads.value = config.model.local_whisper_threads ?? 0;
+            if (wGreedy) wGreedy.checked = !!config.model.local_whisper_greedy;
+            if (wNoFallback) wNoFallback.checked = !!config.model.local_whisper_no_fallback;
         }
 
         if (config.basic) {
             const hotkeyInput = $('#setting-hotkey-batch');
             const outputMode = $('#setting-output-mode');
             const outputLang = $('#setting-output-lang');
-            const modelSelect = $('#whisper-model-select');
             if (hotkeyInput) hotkeyInput.value = virtualKeyToName(config.basic.hotkey || 0x71);
             if (outputMode) outputMode.value = config.basic.output_mode || 'clipboard';
             if (outputLang) outputLang.value = config.basic.output_language || 'auto';
-            if (modelSelect && config.model && config.model.local_whisper_model) {
-                const match = config.model.local_whisper_model.match(/ggml-(tiny|base|small|medium)\.bin/);
-                if (match) modelSelect.value = match[1];
-            }
 
             const dictationMode = config.basic.dictation_mode || 'batch';
             state.dictationMode = dictationMode;
@@ -869,10 +1120,16 @@
         if (customModel) newConfig.model.custom_model_name = customModel.value;
         if (customKey) newConfig.model.custom_api_key = customKey.value;
 
-        const modelSelect = $('#whisper-model-select');
-        if (modelSelect) {
-            newConfig.model.local_whisper_model = `ggml-${modelSelect.value}.bin`;
+        // 本地 Whisper 性能调优字段（0=自动线程；贪婪/关闭回退默认关）
+        const wThreads = $('#setting-whisper-threads');
+        const wGreedy = $('#setting-whisper-greedy');
+        const wNoFallback = $('#setting-whisper-no-fallback');
+        if (wThreads) {
+            const t = parseInt(wThreads.value, 10);
+            newConfig.model.local_whisper_threads = (Number.isFinite(t) && t >= 0 && t <= 8) ? t : 0;
         }
+        if (wGreedy) newConfig.model.local_whisper_greedy = wGreedy.checked;
+        if (wNoFallback) newConfig.model.local_whisper_no_fallback = wNoFallback.checked;
 
         const outputMode = $('#setting-output-mode');
         const outputLang = $('#setting-output-lang');
@@ -1453,11 +1710,14 @@
         if (refreshBtn) {
             refreshBtn.addEventListener('click', async () => {
                 refreshBtn.classList.add('spinning');
-                await loadDownloadedModels();
-                // 旋转动画持续至少 500ms，给用户视觉反馈
+                await loadModelStatus();
                 setTimeout(() => refreshBtn.classList.remove('spinning'), 600);
             });
         }
+
+        // 打开模型目录
+        const openDirBtn = $('#btn-open-models-dir');
+        if (openDirBtn) openDirBtn.addEventListener('click', openModelsDirectory);
 
         // 更改模型目录
         const changeDirBtn = $('#btn-change-models-dir');
@@ -1529,8 +1789,8 @@
                 // 用户选择了新目录
                 const dirEl = $('#models-dir-path');
                 if (dirEl) dirEl.textContent = result;
-                // 重新加载已下载模型列表（新目录可能已有模型）
-                await loadDownloadedModels();
+                // 重新加载（新目录可能已有模型）
+                await loadModelStatus();
                 addLog('info', `模型目录已更改为: ${result}`, 'settings');
             }
         } catch (err) {
@@ -1559,8 +1819,8 @@
             const newDir = await invoke('reset_models_directory');
             const dirEl = $('#models-dir-path');
             if (dirEl) dirEl.textContent = newDir;
-            // 重新加载已下载模型列表
-            await loadDownloadedModels();
+            // 重新加载
+            await loadModelStatus();
             addLog('info', `模型目录已恢复为默认: ${newDir}`, 'settings');
         } catch (err) {
             console.error('Failed to reset models directory:', err);
@@ -1588,21 +1848,10 @@
         });
 
         // 申请链接按钮：点击通过 shell 插件打开系统浏览器
-        $$('.apply-link-btn').forEach(btn => {
+        $$('.apply-link-btn, .mm-link-btn[data-url]').forEach(btn => {
             btn.addEventListener('click', async () => {
                 const url = btn.dataset.url;
                 if (!url) return;
-
-                // Whisper 模型文件下载链接（位于 .model-link-item 内）需二次确认
-                const isModelLink = btn.closest('.model-link-item');
-                if (isModelLink) {
-                    const modelName = isModelLink.querySelector('span')?.textContent?.trim() || '该模型';
-                    const confirmed = await showConfirmDialog(
-                        '下载模型文件',
-                        `将打开浏览器下载 ${modelName}。\n下载完成后，请将 .bin 文件放入上方「模型目录」中，再点击「已下载模型」旁的刷新按钮。`
-                    );
-                    if (!confirmed) return;
-                }
 
                 try {
                     if (window.__TAURI__ && window.__TAURI__.shell && window.__TAURI__.shell.open) {
@@ -1623,10 +1872,16 @@
     // 防止渲染风暴：批量更新时只渲染一次
     let renderScheduled = false;
 
-    function addLog(level, message, source) {
-        const now = new Date();
-        const dateStr = `${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-        const timeStr = `${dateStr} ${now.toLocaleTimeString('zh-CN', { hour12: false })}.${String(now.getMilliseconds()).padStart(3, '0')}`;
+    function addLog(level, message, source, time) {
+        let timeStr;
+        if (time) {
+            // 后端提供的精确时间戳
+            timeStr = time;
+        } else {
+            const now = new Date();
+            const dateStr = `${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+            timeStr = `${dateStr} ${now.toLocaleTimeString('zh-CN', { hour12: false })}.${String(now.getMilliseconds()).padStart(3, '0')}`;
+        }
         logs.push({
             level,
             message: String(message),
@@ -2017,6 +2272,16 @@
         });
 
         listen('subtitle-text', () => {
+        }).then(unlisten => {
+            state.unlisteners.push(unlisten);
+        });
+
+        // 监听后端日志事件，将后端 log::* 输出同步到前端日志视图
+        listen('backend-log', (event) => {
+            const p = event.payload;
+            if (p && p.message) {
+                addLog(p.level || 'info', p.message, p.source || 'backend', p.time);
+            }
         }).then(unlisten => {
             state.unlisteners.push(unlisten);
         });

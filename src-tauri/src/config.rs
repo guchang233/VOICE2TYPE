@@ -119,6 +119,18 @@ pub struct ModelConfig {
     pub custom_model_name: String,
     pub local_whisper_model: String,
     pub local_whisper_dir: String,
+    /// 本地 whisper 线程数，0 = 自动取物理核数（上限 8）
+    #[serde(default)]
+    pub local_whisper_threads: u32,
+    /// 贪婪解码（-bs 1 -bo 1），牺牲 CJK 准确率换速度，默认关
+    #[serde(default)]
+    pub local_whisper_greedy: bool,
+    /// 关闭温度回退（-nf），跳过低置信重试，默认关
+    #[serde(default)]
+    pub local_whisper_no_fallback: bool,
+    /// 持久化的 auto 语言检测结果（跨重启复用，避免首调检测开销）
+    #[serde(default)]
+    pub local_whisper_detected_language: String,
     /// 用户自定义的模型下载目录（为空时使用默认目录）
     pub custom_models_dir: String,
 }
@@ -132,8 +144,12 @@ impl Default for ModelConfig {
             custom_api_key: String::new(),
             custom_api_url: SILICONFLOW_TRANSCRIPTIONS_URL.to_string(),
             custom_model_name: "自定义模型".to_string(),
-            local_whisper_model: "ggml-base.bin".to_string(),
+            local_whisper_model: "ggml-tiny.bin".to_string(),
             local_whisper_dir: String::new(),
+            local_whisper_threads: 0,
+            local_whisper_greedy: false,
+            local_whisper_no_fallback: false,
+            local_whisper_detected_language: String::new(),
             custom_models_dir: String::new(),
         }
     }
@@ -541,6 +557,14 @@ impl ConfigManager {
         if !custom.is_empty() && PathBuf::from(&custom).is_dir() {
             return PathBuf::from(custom);
         }
+        // 默认目录：Windows 优先 D:\V2T\models（避免占用 C 盘）
+        // 若 D 盘不存在，则回退到用户数据目录下的 models
+        #[cfg(target_os = "windows")]
+        {
+            if std::path::Path::new("D:\\").exists() {
+                return PathBuf::from("D:\\V2T\\models");
+            }
+        }
         let data_dir = dirs::data_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("Voice2Type")
@@ -848,6 +872,42 @@ impl ConfigManager {
 
     pub fn set_local_whisper_model(&self, name: String) {
         self.config.lock().unwrap().model.local_whisper_model = name;
+    }
+
+    pub fn local_whisper_threads(&self) -> u32 {
+        self.config.lock().unwrap().model.local_whisper_threads
+    }
+
+    pub fn set_local_whisper_threads(&self, threads: u32) {
+        self.config.lock().unwrap().model.local_whisper_threads = threads;
+    }
+
+    pub fn local_whisper_greedy(&self) -> bool {
+        self.config.lock().unwrap().model.local_whisper_greedy
+    }
+
+    pub fn set_local_whisper_greedy(&self, greedy: bool) {
+        self.config.lock().unwrap().model.local_whisper_greedy = greedy;
+    }
+
+    pub fn local_whisper_no_fallback(&self) -> bool {
+        self.config.lock().unwrap().model.local_whisper_no_fallback
+    }
+
+    pub fn set_local_whisper_no_fallback(&self, no_fallback: bool) {
+        self.config.lock().unwrap().model.local_whisper_no_fallback = no_fallback;
+    }
+
+    pub fn local_whisper_detected_language(&self) -> String {
+        self.config.lock()
+            .unwrap()
+            .model
+            .local_whisper_detected_language
+            .clone()
+    }
+
+    pub fn set_local_whisper_detected_language(&self, lang: String) {
+        self.config.lock().unwrap().model.local_whisper_detected_language = lang;
     }
 
     pub fn local_whisper_dir(&self) -> String {
