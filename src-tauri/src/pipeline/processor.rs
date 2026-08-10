@@ -195,15 +195,17 @@ impl AsyncPostProcessor for LlmCorrector {
         let url = self.config.llm_post_api_url();
         let key = self.config.llm_post_api_key();
         let model = self.config.llm_post_model();
+        let sys_prompt = self.config.llm_post_system_prompt();
 
         log::info!(
-            "[llm-corrector] 调用 LLM 校对: model={}, url={}, len={}",
+            "[llm-corrector] 调用 LLM 校对: model={}, url={}, len={}, custom_prompt={}",
             model,
             url,
-            text.chars().count()
+            text.chars().count(),
+            !sys_prompt.is_empty()
         );
 
-        match correct_with_custom(&text, &url, &key, &model).await {
+        match correct_with_custom(&text, &url, &key, &model, &sys_prompt).await {
             Ok(corrected) => {
                 if corrected != text {
                     log::info!(

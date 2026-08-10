@@ -2393,6 +2393,40 @@ html, body {
     margin-bottom: 8px;
 }
 
+/* LLM 后处理配置区域 */
+.llm-post-config {
+    padding-left: 12px;
+    margin-top: 8px;
+    padding-top: 8px;
+    padding-bottom: 4px;
+    border-left: 2px solid var(--border-color);
+    border-radius: 2px;
+    background: var(--setting-row-hover);
+}
+
+.llm-post-config .setting-row {
+    background: transparent;
+}
+
+.llm-post-config .setting-row:hover {
+    background: transparent;
+}
+
+/* textarea 复用 text-input 样式并适配多行 */
+textarea.text-input {
+    width: 100%;
+    resize: vertical;
+    min-height: 80px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.5;
+    padding: 8px 10px;
+}
+
+textarea.text-input:focus {
+    border-color: var(--accent-primary);
+}
+
 /* 版本号文本（等宽，次要色） */
 .version-text {
     color: var(--text-secondary);

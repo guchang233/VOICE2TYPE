@@ -322,6 +322,8 @@ pub struct LlmPostProcessConfig {
     pub api_key: String,
     /// 模型名称，如 `Qwen/Qwen2.5-7B-Instruct`、`gpt-4o-mini`、`moonshot-v1-8k`。
     pub model: String,
+    /// 自定义系统提示词。留空则使用内置默认 prompt。
+    pub system_prompt: String,
 }
 
 impl Default for LlmPostProcessConfig {
@@ -332,6 +334,7 @@ impl Default for LlmPostProcessConfig {
             api_url: "https://api.siliconflow.cn/v1/chat/completions".to_string(),
             api_key: String::new(),
             model: "Qwen/Qwen2.5-7B-Instruct".to_string(),
+            system_prompt: String::new(),
         }
     }
 }
@@ -1067,6 +1070,14 @@ impl ConfigManager {
 
     pub fn set_llm_post_model(&self, model: String) {
         self.config.lock().unwrap().llm_post.model = model;
+    }
+
+    pub fn llm_post_system_prompt(&self) -> String {
+        self.config.lock().unwrap().llm_post.system_prompt.clone()
+    }
+
+    pub fn set_llm_post_system_prompt(&self, prompt: String) {
+        self.config.lock().unwrap().llm_post.system_prompt = prompt;
     }
 
     pub fn last_check_time(&self) -> u64 {

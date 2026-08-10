@@ -986,10 +986,12 @@
             const llmUrl = $('#setting-llm-api-url');
             const llmKey = $('#setting-llm-api-key');
             const llmModel = $('#setting-llm-model');
+            const llmPrompt = $('#setting-llm-system-prompt');
             if (llmEnable) llmEnable.checked = config.llm_post.enable === true;
             if (llmUrl) llmUrl.value = config.llm_post.api_url || '';
             if (llmKey) llmKey.value = config.llm_post.api_key || '';
             if (llmModel) llmModel.value = config.llm_post.model || '';
+            if (llmPrompt) llmPrompt.value = config.llm_post.system_prompt || '';
             updateLlmPostConfigVisibility();
         }
 
@@ -1219,11 +1221,13 @@
         const llmUrl = $('#setting-llm-api-url');
         const llmKey = $('#setting-llm-api-key');
         const llmModel = $('#setting-llm-model');
+        const llmPrompt = $('#setting-llm-system-prompt');
         if (!newConfig.llm_post) newConfig.llm_post = {};
         if (llmEnable) newConfig.llm_post.enable = llmEnable.checked;
         if (llmUrl) newConfig.llm_post.api_url = llmUrl.value.trim();
         if (llmKey) newConfig.llm_post.api_key = llmKey.value.trim();
         if (llmModel) newConfig.llm_post.model = llmModel.value.trim();
+        if (llmPrompt) newConfig.llm_post.system_prompt = llmPrompt.value;
 
         newConfig.advanced.trigger_mode = state.triggerMode;
         newConfig.basic.dictation_mode = state.dictationMode;

@@ -557,7 +557,7 @@
                                 <div class="setting-hint" style="padding-left:12px;color:var(--text-muted);font-size:12px;margin-top:-4px;">
                                     开启后使用 LLM 对识别文本做智能校对（需配置下方 OpenAI 兼容 Chat 接口）
                                 </div>
-                                <div id="llm-post-config" style="padding-left:12px;margin-top:8px;display:none;">
+                                <div id="llm-post-config" class="llm-post-config" style="display:none;">
                                     <div class="setting-row">
                                         <label>API 地址</label>
                                         <input type="text" class="text-input" id="setting-llm-api-url" placeholder="https://api.siliconflow.cn/v1/chat/completions">
@@ -571,7 +571,14 @@
                                         <input type="text" class="text-input" id="setting-llm-model" placeholder="Qwen/Qwen2.5-7B-Instruct">
                                     </div>
                                     <div class="setting-hint" style="color:var(--text-muted);font-size:12px;margin-top:-4px;">
-                                        默认硅基流动免费模型，也支持 OpenAI / DeepSeek / KIMI 等 OpenAI 兼容接口
+                                        默认硅基流动免费模型
+                                    </div>
+                                    <div class="setting-row setting-row-vertical" style="margin-top:8px;">
+                                        <label>系统提示词</label>
+                                        <textarea class="text-input" id="setting-llm-system-prompt" rows="6" placeholder="留空使用内置默认提示词（修正 ASR 同音错字并补全标点）&#10;可自定义校对风格，例如：&#10;- 更激进的错字修正&#10;- 保留口语化表达&#10;- 特定领域术语修正"></textarea>
+                                        <div class="setting-hint" style="color:var(--text-muted);font-size:12px;margin-top:4px;">
+                                            留空使用内置默认提示词。自定义后 LLM 将按你的指令校对文本
+                                        </div>
                                     </div>
                                 </div>
                             </div>

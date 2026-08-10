@@ -163,7 +163,7 @@ pub async fn polish_with_custom(
 ///
 /// 与 `polish_with_custom` 的保守 prompt 不同，此 prompt 明确鼓励 LLM
 /// 主动修正 ASR 同音错字并补全标点，同时保留数字安全规则。
-const CORRECT_SYSTEM_PROMPT: &str = r#"你是语音识别（ASR）转写文本的校对专家。你的核心任务是修正 ASR 产生的同音错字、形近错字，并补全缺失的标点。
+const CORRECT_SYSTEM_PROMPT: &str = r#"你是语音识别（ASR）转写文本的校对专家。你的核心任务是修正 ASR 产生的同音错字，并补全缺失的标点。
 
 ASR 常见同音错字示例（必须主动修正类似错误）：
 - "后处里" → "后处理"（里→理）
@@ -179,7 +179,7 @@ ASR 常见同音错字示例（必须主动修正类似错误）：
 1. 主动修正中文同音错字、形近错字，使语义通顺。不确定时根据上下文选择最合理的字。
 2. 补全缺失的标点（逗号、句号等），使句子完整可读。
 3. 阿拉伯数字 0-9、小数点、版本号、金额、IP、URL、英文单词必须原样保留，禁止改动。
-4. 不要增删实质内容，不要概括或改写句意，保持原话长度。
+4. 不要增删实质内容，不要概括或改写句意，保持原话长度。有时当用户会说一些你无法理解的内容，禁止改动。记住你只改错别字、同音字。
 5. 只输出校对后的正文，不要解释、不要引号。"#;
 
 /// 使用自定义 OpenAI 兼容接口做错别字修正。
@@ -188,12 +188,16 @@ ASR 常见同音错字示例（必须主动修正类似错误）：
 /// - 使用 [`CORRECT_SYSTEM_PROMPT`]，鼓励 LLM 主动修正同音错字
 /// - 复用 [`polish_is_safe`] 数字安全检查作为兜底
 ///
+/// `system_prompt` 为空时使用内置 [`CORRECT_SYSTEM_PROMPT`]，
+/// 非空时使用用户自定义 prompt，允许用户调整校对风格。
+///
 /// 供后处理链的 `LlmCorrector` 调用。
 pub async fn correct_with_custom(
     text: &str,
     url: &str,
     key: &str,
     model: &str,
+    system_prompt: &str,
 ) -> Result<String> {
     let input = text.trim();
     if input.is_empty() {
@@ -213,10 +217,17 @@ pub async fn correct_with_custom(
         input
     );
 
+    // 用户自定义 prompt 优先；为空则使用内置默认
+    let sys = if system_prompt.trim().is_empty() {
+        CORRECT_SYSTEM_PROMPT
+    } else {
+        system_prompt
+    };
+
     let body = serde_json::json!({
         "model": model,
         "messages": [
-            {"role": "system", "content": CORRECT_SYSTEM_PROMPT},
+            {"role": "system", "content": sys},
             {"role": "user", "content": user_prompt}
         ],
         "temperature": 0.1,
