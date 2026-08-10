@@ -66,6 +66,10 @@ pub struct FeatureConfig {
     pub allow_emoji: bool,
     pub allow_punctuation: bool,
     pub enable_indicator: bool,
+    /// 是否启用增强后处理链（PostProcessorChain + TextFormatter）。
+    /// false（默认）：使用现有 output::handler::post_process，行为不变。
+    /// true：启用新的 LocalCorrector（错别字修正等）+ TextFormatter（中文标点/代码模式）。
+    pub enable_post_processor: bool,
 }
 
 impl Default for FeatureConfig {
@@ -74,6 +78,7 @@ impl Default for FeatureConfig {
             allow_emoji: true,
             allow_punctuation: true,
             enable_indicator: true,
+            enable_post_processor: false,
         }
     }
 }
@@ -297,6 +302,40 @@ impl Default for VadConfig {
     }
 }
 
+/// LLM 智能后处理配置。
+///
+/// 允许用户自行配置 OpenAI 兼容的 Chat 接口，对 ASR 识别文本做智能校对：
+/// - 中文同音错字修正
+/// - 语序与标点优化
+/// - 上下文相关纠错
+///
+/// 默认禁用。启用后需配置 `api_url` / `api_key` / `model`。
+/// 默认指向硅基流动（SiliconFlow）免费的 Qwen2.5-7B-Instruct，用户也可改为 OpenAI / DeepSeek / KIMI 等。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LlmPostProcessConfig {
+    /// 是否启用 LLM 智能校对。
+    pub enable: bool,
+    /// OpenAI 兼容的 chat/completions 端点。
+    pub api_url: String,
+    /// API Key（Bearer 鉴权）。
+    pub api_key: String,
+    /// 模型名称，如 `Qwen/Qwen2.5-7B-Instruct`、`gpt-4o-mini`、`moonshot-v1-8k`。
+    pub model: String,
+}
+
+impl Default for LlmPostProcessConfig {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            // 硅基流动（SiliconFlow）免费模型
+            api_url: "https://api.siliconflow.cn/v1/chat/completions".to_string(),
+            api_key: String::new(),
+            model: "Qwen/Qwen2.5-7B-Instruct".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ModelSelectionConfig {
@@ -328,6 +367,7 @@ pub struct AppConfig {
     pub subtitle: SubtitleConfig,
     pub vad: VadConfig,
     pub model_selection: ModelSelectionConfig,
+    pub llm_post: LlmPostProcessConfig,
     pub theme: String,
 
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -385,6 +425,7 @@ impl Default for AppConfig {
             subtitle: SubtitleConfig::default(),
             vad: VadConfig::default(),
             model_selection: ModelSelectionConfig::default(),
+            llm_post: LlmPostProcessConfig::default(),
             theme: "auto".to_string(),
             model_name: None,
             output_language: None,
@@ -984,6 +1025,48 @@ impl ConfigManager {
 
     pub fn set_enable_indicator(&self, enable: bool) {
         self.config.lock().unwrap().features.enable_indicator = enable;
+    }
+
+    /// 是否启用增强后处理链（PostProcessorChain + TextFormatter）。默认 false。
+    pub fn enable_post_processor(&self) -> bool {
+        self.config.lock().unwrap().features.enable_post_processor
+    }
+
+    pub fn set_enable_post_processor(&self, enable: bool) {
+        self.config.lock().unwrap().features.enable_post_processor = enable;
+    }
+
+    /// 是否启用 LLM 智能后处理校对。默认 false。
+    pub fn llm_post_enable(&self) -> bool {
+        self.config.lock().unwrap().llm_post.enable
+    }
+
+    pub fn set_llm_post_enable(&self, enable: bool) {
+        self.config.lock().unwrap().llm_post.enable = enable;
+    }
+
+    pub fn llm_post_api_url(&self) -> String {
+        self.config.lock().unwrap().llm_post.api_url.clone()
+    }
+
+    pub fn set_llm_post_api_url(&self, url: String) {
+        self.config.lock().unwrap().llm_post.api_url = url;
+    }
+
+    pub fn llm_post_api_key(&self) -> String {
+        self.config.lock().unwrap().llm_post.api_key.clone()
+    }
+
+    pub fn set_llm_post_api_key(&self, key: String) {
+        self.config.lock().unwrap().llm_post.api_key = key;
+    }
+
+    pub fn llm_post_model(&self) -> String {
+        self.config.lock().unwrap().llm_post.model.clone()
+    }
+
+    pub fn set_llm_post_model(&self, model: String) {
+        self.config.lock().unwrap().llm_post.model = model;
     }
 
     pub fn last_check_time(&self) -> u64 {

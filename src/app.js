@@ -974,9 +974,23 @@
             const punctuation = $('#setting-punctuation');
             const emoji = $('#setting-emoji');
             const indicator = $('#setting-indicator');
+            const postProcessor = $('#setting-post-processor');
             if (punctuation) punctuation.checked = config.features.allow_punctuation !== false;
             if (emoji) emoji.checked = config.features.allow_emoji !== false;
             if (indicator) indicator.checked = config.features.enable_indicator !== false;
+            if (postProcessor) postProcessor.checked = config.features.enable_post_processor === true;
+        }
+
+        if (config.llm_post) {
+            const llmEnable = $('#setting-llm-post-enable');
+            const llmUrl = $('#setting-llm-api-url');
+            const llmKey = $('#setting-llm-api-key');
+            const llmModel = $('#setting-llm-model');
+            if (llmEnable) llmEnable.checked = config.llm_post.enable === true;
+            if (llmUrl) llmUrl.value = config.llm_post.api_url || '';
+            if (llmKey) llmKey.value = config.llm_post.api_key || '';
+            if (llmModel) llmModel.value = config.llm_post.model || '';
+            updateLlmPostConfigVisibility();
         }
 
         if (config.advanced) {
@@ -1058,6 +1072,22 @@
                 if (store[title]) section.classList.add('collapsed');
             });
         } catch (e) {}
+    }
+
+    /// 根据 LLM 校对开关状态显示/隐藏配置区
+    function updateLlmPostConfigVisibility() {
+        const enable = $('#setting-llm-post-enable');
+        const config = $('#llm-post-config');
+        if (!enable || !config) return;
+        config.style.display = enable.checked ? 'block' : 'none';
+    }
+
+    /// 初始化 LLM 智能校对开关联动
+    function initLlmPostToggle() {
+        const enable = $('#setting-llm-post-enable');
+        if (!enable || enable.dataset.bound) return;
+        enable.dataset.bound = '1';
+        enable.addEventListener('change', updateLlmPostConfigVisibility);
     }
 
     /// 初始化主题切换器
@@ -1179,9 +1209,21 @@
         const punctuation = $('#setting-punctuation');
         const emoji = $('#setting-emoji');
         const indicator = $('#setting-indicator');
+        const postProcessor = $('#setting-post-processor');
         if (punctuation) newConfig.features.allow_punctuation = punctuation.checked;
         if (emoji) newConfig.features.allow_emoji = emoji.checked;
         if (indicator) newConfig.features.enable_indicator = indicator.checked;
+        if (postProcessor) newConfig.features.enable_post_processor = postProcessor.checked;
+
+        const llmEnable = $('#setting-llm-post-enable');
+        const llmUrl = $('#setting-llm-api-url');
+        const llmKey = $('#setting-llm-api-key');
+        const llmModel = $('#setting-llm-model');
+        if (!newConfig.llm_post) newConfig.llm_post = {};
+        if (llmEnable) newConfig.llm_post.enable = llmEnable.checked;
+        if (llmUrl) newConfig.llm_post.api_url = llmUrl.value.trim();
+        if (llmKey) newConfig.llm_post.api_key = llmKey.value.trim();
+        if (llmModel) newConfig.llm_post.model = llmModel.value.trim();
 
         newConfig.advanced.trigger_mode = state.triggerMode;
         newConfig.basic.dictation_mode = state.dictationMode;
@@ -2332,6 +2374,7 @@
         initSliderFills();
         initCollapsibleSections();
         initThemeSwitcher();
+        initLlmPostToggle();
 
         // 禁用 WebView 默认右键菜单（刷新、检查、另存为等），
         // 历史记录项的 contextmenu 监听器已自行处理 preventDefault，不受影响。

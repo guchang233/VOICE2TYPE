@@ -537,6 +537,43 @@
                                         <span class="switch-slider"></span>
                                     </label>
                                 </div>
+                                <div class="setting-row toggle-row">
+                                    <label>增强后处理</label>
+                                    <label class="switch">
+                                        <input type="checkbox" id="setting-post-processor">
+                                        <span class="switch-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="setting-hint" style="padding-left:12px;color:var(--text-muted);font-size:12px;margin-top:-4px;">
+                                    开启后启用错别字修正、中文标点归一、代码模式等高级后处理
+                                </div>
+                                <div class="setting-row toggle-row">
+                                    <label>LLM 智能校对</label>
+                                    <label class="switch">
+                                        <input type="checkbox" id="setting-llm-post-enable">
+                                        <span class="switch-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="setting-hint" style="padding-left:12px;color:var(--text-muted);font-size:12px;margin-top:-4px;">
+                                    开启后使用 LLM 对识别文本做智能校对（需配置下方 OpenAI 兼容 Chat 接口）
+                                </div>
+                                <div id="llm-post-config" style="padding-left:12px;margin-top:8px;display:none;">
+                                    <div class="setting-row">
+                                        <label>API 地址</label>
+                                        <input type="text" class="text-input" id="setting-llm-api-url" placeholder="https://api.siliconflow.cn/v1/chat/completions">
+                                    </div>
+                                    <div class="setting-row">
+                                        <label>API Key</label>
+                                        <input type="password" class="text-input" id="setting-llm-api-key" placeholder="sk-...（硅基流动在 siliconflow.cn 申请）">
+                                    </div>
+                                    <div class="setting-row">
+                                        <label>模型</label>
+                                        <input type="text" class="text-input" id="setting-llm-model" placeholder="Qwen/Qwen2.5-7B-Instruct">
+                                    </div>
+                                    <div class="setting-hint" style="color:var(--text-muted);font-size:12px;margin-top:-4px;">
+                                        默认硅基流动免费模型，也支持 OpenAI / DeepSeek / KIMI 等 OpenAI 兼容接口
+                                    </div>
+                                </div>
                             </div>
                         </div>
 

@@ -1,18 +1,32 @@
-//! 语音处理 Pipeline 模块。
+//! 文本处理流水线：后处理与格式化。
 //!
-//! 包含 ASR 识别后的文本处理流水线：
-//! - [`processor::PostProcessor`]：后处理 trait（错别字修正、热词替换、emoji/标点过滤）
-//! - [`formatter::Formatter`]：文本格式化 trait（中文标点、自动换行、Markdown、代码模式）
-//! - [`vad::VadEngine`]：语音活动检测 trait（第三阶段实现）
+//! 本模块提供可扩展的文本后处理体系：
 //!
-//! 当前已有的后处理逻辑（`output::handler::post_process` 和
-//! `streaming::post_process::process_streaming_text`）将在后续阶段迁移为
-//! `PostProcessor` 的具体实现，本阶段仅建立 trait 骨架与适配入口。
+//! - [`processor::PostProcessor`]：同步后处理器 trait
+//! - [`processor::AsyncPostProcessor`]：异步后处理器 trait（LLM 场景）
+//! - [`processor::LocalCorrector`]：本地确定性后处理（emoji/标点/空格/错别字）
+//! - [`processor::LlmCorrector`]：LLM 智能校对（预留接口）
+//! - [`processor::PostProcessorChain`]：处理器链
+//! - [`formatter::Formatter`]：格式化器 trait
+//! - [`formatter::TextFormatter`]：通用格式化（中文标点/换行/代码模式）
+//! - [`vad::VadEngine`]：语音活动检测 trait
+//! - [`vad::WebRtcVad`]：WebRTC VAD 实现
+//!
+//! ## 开关控制
+//!
+//! 通过配置项 `enable_post_processor` 控制是否启用新后处理链：
+//! - `false`（默认）：使用现有 `output::handler::post_process`，行为不变
+//! - `true`：启用 `PostProcessorChain` + `TextFormatter`
+//!
+//! 参见 [`processor::process_with_config`] 统一入口。
 
 pub mod formatter;
 pub mod processor;
 pub mod vad;
 
-pub use formatter::{Formatter, TextFormatter};
-pub use processor::{Context, LocalCorrector, PostProcessor};
+pub use formatter::{Formatter, OutputFormat, TextFormatter};
+pub use processor::{
+    process_with_config, process_with_config_async, AsyncPostProcessor, Context, LocalCorrector,
+    LlmCorrector, PostProcessor, PostProcessorChain,
+};
 pub use vad::{VadAggressiveness, VadConfig, VadDecision, VadEngine, WebRtcVad};

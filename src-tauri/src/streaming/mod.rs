@@ -3,7 +3,7 @@
 pub(crate) mod audio;
 pub(crate) mod client;
 mod output;
-mod polish;
+pub mod polish;
 mod post_process;
 pub(crate) mod protocol;
 pub(crate) mod session;

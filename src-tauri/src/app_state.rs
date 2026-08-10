@@ -67,6 +67,9 @@ pub struct AppState {
     cached_language: Arc<std::sync::Mutex<Option<String>>>,
     pub subtitle: Arc<SubtitleService>,
     streaming_runtime: Arc<Mutex<StreamingRuntime>>,
+    /// 识别处理互斥锁：防止 stop_recording_and_recognize 并发执行。
+    /// 持有 guard 期间（从 stop 到输出完成）拒绝新的识别请求，避免多次 LLM/转写叠加导致卡死。
+    processing_lock: Arc<Mutex<()>>,
 }
 
 impl AppState {
@@ -92,6 +95,7 @@ impl AppState {
             cached_language,
             subtitle,
             streaming_runtime: Arc::new(Mutex::new(StreamingRuntime::new())),
+            processing_lock: Arc::new(Mutex::new(())),
         }
     }
 
@@ -202,6 +206,13 @@ impl AppState {
         if self.config.is_stream_mode() {
             return self.start_streaming_recording().await;
         }
+
+        // 处理中时拒绝开始新录音，避免转写/LLM 未完成时叠加新请求
+        if self.processing_lock.try_lock().is_err() {
+            log::warn!("[record] 仍在处理上一次识别，忽略录音请求");
+            return Err("Busy processing".to_string());
+        }
+
         let mut recorder = self.recorder.lock().await;
         if recorder.is_recording() {
             return Err("Already recording".to_string());
@@ -311,6 +322,18 @@ impl AppState {
         if self.config.is_stream_mode() {
             return self.stop_streaming_recording().await;
         }
+
+        // 互斥锁：防止前一次识别（含 LLM 调用）未完成时又发起新的识别。
+        // 拿不到锁说明上一次还在处理中，直接拒绝，避免多次转写/LLM 叠加导致卡死。
+        // guard 持有至函数结束（含所有 return 路径），drop 时自动释放。
+        let _guard = match self.processing_lock.try_lock() {
+            Ok(g) => g,
+            Err(_) => {
+                log::warn!("[recognize] 上一次识别仍在处理中，忽略本次请求");
+                return Err("Busy processing".to_string());
+            }
+        };
+
         let samples = {
             let mut recorder = self.recorder.lock().await;
             if !recorder.is_recording() {
@@ -494,7 +517,8 @@ impl AppState {
             }
         };
 
-        let processed_text = handler::post_process(&recognition_result, &self.config);
+        let processed_text =
+            crate::pipeline::process_with_config_async(&recognition_result, &self.config).await;
 
         if !processed_text.is_empty() {
             crate::history::push(processed_text.clone());
