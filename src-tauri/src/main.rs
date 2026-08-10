@@ -2,6 +2,7 @@
 
 mod api;
 mod app_state;
+mod asr;
 mod audio;
 mod commands;
 mod config;
@@ -9,7 +10,9 @@ mod history;
 mod indicator;
 mod notify;
 mod output;
+mod pipeline;
 mod recorder;
+mod session;
 mod streaming;
 mod subtitle;
 mod update;

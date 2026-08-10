@@ -58,7 +58,13 @@ pub async fn polish_with_ai(text: &str, config: &ConfigManager) -> Result<String
         return Ok(input.to_string());
     }
 
-    let backend = resolve_backend(config)?;
+    let backend = match resolve_backend(config) {
+        Ok(b) => b,
+        Err(e) => {
+            return Err(e);
+        }
+    };
+
     let user_prompt = format!(
         "极保守校对。数字与小数点必须逐字保留（例如 0.0.65 不能改成 f.0.65 或 0.65）。仅改确定的中文错字。\n\n原文：\n{}",
         input
@@ -74,13 +80,19 @@ pub async fn polish_with_ai(text: &str, config: &ConfigManager) -> Result<String
         "max_tokens": 2048,
     });
 
-    let resp = HTTP_CLIENT
+    let resp = match HTTP_CLIENT
         .post(backend.url)
         .header("Authorization", format!("Bearer {}", backend.key))
         .json(&body)
         .send()
         .await
-        .context("AI 润色请求失败")?;
+        .context("AI 润色请求失败")
+    {
+        Ok(r) => r,
+        Err(e) => {
+            return Err(e);
+        }
+    };
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -88,7 +100,16 @@ pub async fn polish_with_ai(text: &str, config: &ConfigManager) -> Result<String
         anyhow::bail!("AI 润色 HTTP {}: {}", status, err);
     }
 
-    let parsed: ChatResponse = resp.json().await.context("解析 AI 润色响应失败")?;
+    let parsed: ChatResponse = match resp
+        .json()
+        .await
+        .context("解析 AI 润色响应失败")
+    {
+        Ok(p) => p,
+        Err(e) => {
+            return Err(e);
+        }
+    };
     let mut out = parsed
         .choices
         .first()

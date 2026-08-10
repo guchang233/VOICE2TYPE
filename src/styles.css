@@ -4,10 +4,16 @@
     --radius-md: 6px;
     --radius-lg: 8px;
     --transition: 0.15s ease;
-    --font-sans: "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont,
+    /* 字体配对：标题用 Bahnschrift（Windows 内置几何 DIN 风格），正文用 Segoe UI Variable（高可读性） */
+    --font-display: "Bahnschrift", "Segoe UI Variable Display", "Segoe UI Semibold",
+                    "Segoe UI", -apple-system, BlinkMacSystemFont, "PingFang SC",
+                    "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+    --font-body: "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont,
                  "Helvetica Neue", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei",
                  sans-serif;
-    --font-mono: "JetBrains Mono", "Cascadia Code", "SF Mono", "Consolas", Menlo, monospace;
+    /* 别名：保留 --font-sans 指向 body，避免破坏既有引用 */
+    --font-sans: var(--font-body);
+    --font-mono: "Cascadia Code", "Cascadia Mono", "JetBrains Mono", "SF Mono", "Consolas", Menlo, monospace;
     /* 跨主题统一的控件前景色（iOS 风格开关旋钮） */
     --switch-knob-bg: #ffffff;
 }
@@ -30,13 +36,14 @@
     --text-tertiary-strong: #6b6b73;
     --text-on-accent: #ffffff;
     --text-inverse: #ffffff;
-    --accent: #3b82f6;
-    --accent-hover: #60a5fa;
-    --accent-active: #2563eb;
-    --accent-soft: rgba(59, 130, 246, 0.15);
-    --accent-blue: #3b82f6;
-    --accent-blue-hover: #60a5fa;
-    --accent-blue-active: #2563eb;
+    /* 签名色：精致靛蓝（比 #3b82f6 更具个性，更饱和） */
+    --accent: #6366f1;
+    --accent-hover: #818cf8;
+    --accent-active: #4f46e5;
+    --accent-soft: rgba(99, 102, 241, 0.15);
+    --accent-blue: #6366f1;
+    --accent-blue-hover: #818cf8;
+    --accent-blue-active: #4f46e5;
     --accent-red: #ef4444;
     --accent-yellow: #eab308;
     --accent-green: #22c55e;
@@ -52,8 +59,8 @@
     --status-corrupt-bg: rgba(250, 140, 22, 0.15);
     --status-corrupt-fg: #fb923c;
     /* 日志色 */
-    --log-info-bg: rgba(59, 130, 246, 0.15);
-    --log-info-fg: #60a5fa;
+    --log-info-bg: rgba(99, 102, 241, 0.15);
+    --log-info-fg: #818cf8;
     --log-warn-bg: rgba(234, 179, 8, 0.15);
     --log-warn-fg: #facc15;
     --log-error-bg: rgba(239, 68, 68, 0.18);
@@ -68,19 +75,19 @@
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
     --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
     --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.4);
-    --shadow-glow-blue: 0 0 0 3px rgba(59, 130, 246, 0.25);
+    --shadow-glow-blue: 0 0 0 3px rgba(99, 102, 241, 0.28);
     --shadow-knob: 0 1px 3px rgba(0, 0, 0, 0.35), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
     --shadow-knob-hover: 0 1px 4px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
     --shadow-thumb: 0 1px 3px rgba(0, 0, 0, 0.3);
-    --shadow-thumb-hover: 0 2px 6px rgba(59, 130, 246, 0.4);
+    --shadow-thumb-hover: 0 2px 6px rgba(99, 102, 241, 0.45);
     --shadow-primary-btn: 0 1px 2px rgba(0, 0, 0, 0.2);
-    --shadow-primary-btn-hover: 0 2px 8px rgba(59, 130, 246, 0.35);
+    --shadow-primary-btn-hover: 0 2px 8px rgba(99, 102, 241, 0.4);
     --shadow-context-menu: 0 8px 24px rgba(0, 0, 0, 0.4);
     --shadow-titlebar-inset: inset 0 -1px 0 rgba(255, 255, 255, 0.02);
-    --shadow-nav-indicator: 0 1px 0 rgba(255, 255, 255, 0.1) inset, 0 2px 8px rgba(59, 130, 246, 0.25);
+    --shadow-nav-indicator: 0 1px 0 rgba(255, 255, 255, 0.1) inset, 0 2px 8px rgba(99, 102, 241, 0.3);
     --shadow-range-glow: var(--shadow-glow-blue), 0 1px 3px rgba(0, 0, 0, 0.3);
     --setting-row-hover: rgba(255, 255, 255, 0.015);
-    --help-tip-bg: rgba(59, 130, 246, 0.1);
+    --help-tip-bg: rgba(99, 102, 241, 0.1);
     --select-arrow-color: %23a1a1aa;
 }
 
@@ -102,13 +109,14 @@
     --text-tertiary-strong: #8a8a94;
     --text-on-accent: #ffffff;
     --text-inverse: #1a1a1f;
-    --accent: #2563eb;
-    --accent-hover: #3b82f6;
-    --accent-active: #1d4ed8;
-    --accent-soft: rgba(37, 99, 235, 0.10);
-    --accent-blue: #2563eb;
-    --accent-blue-hover: #3b82f6;
-    --accent-blue-active: #1d4ed8;
+    /* 签名色：深靛蓝（在白底上保证对比度） */
+    --accent: #4f46e5;
+    --accent-hover: #6366f1;
+    --accent-active: #4338ca;
+    --accent-soft: rgba(79, 70, 229, 0.10);
+    --accent-blue: #4f46e5;
+    --accent-blue-hover: #6366f1;
+    --accent-blue-active: #4338ca;
     --accent-red: #dc2626;
     --accent-yellow: #ca8a04;
     --accent-green: #16a34a;
@@ -122,8 +130,8 @@
     --status-missing-fg: #b91c1c;
     --status-corrupt-bg: rgba(202, 138, 4, 0.12);
     --status-corrupt-fg: #a16207;
-    --log-info-bg: rgba(37, 99, 235, 0.10);
-    --log-info-fg: #2563eb;
+    --log-info-bg: rgba(79, 70, 229, 0.10);
+    --log-info-fg: #4f46e5;
     --log-warn-bg: rgba(202, 138, 4, 0.12);
     --log-warn-fg: #a16207;
     --log-error-bg: rgba(220, 38, 38, 0.10);
@@ -137,19 +145,19 @@
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
     --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
     --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
-    --shadow-glow-blue: 0 0 0 3px rgba(37, 99, 235, 0.15);
+    --shadow-glow-blue: 0 0 0 3px rgba(79, 70, 229, 0.18);
     --shadow-knob: 0 1px 3px rgba(0, 0, 0, 0.15), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
     --shadow-knob-hover: 0 1px 4px rgba(0, 0, 0, 0.2), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
     --shadow-thumb: 0 1px 3px rgba(0, 0, 0, 0.15);
-    --shadow-thumb-hover: 0 2px 6px rgba(37, 99, 235, 0.3);
+    --shadow-thumb-hover: 0 2px 6px rgba(79, 70, 229, 0.35);
     --shadow-primary-btn: 0 1px 2px rgba(0, 0, 0, 0.06);
-    --shadow-primary-btn-hover: 0 2px 8px rgba(37, 99, 235, 0.2);
+    --shadow-primary-btn-hover: 0 2px 8px rgba(79, 70, 229, 0.25);
     --shadow-context-menu: 0 8px 24px rgba(0, 0, 0, 0.12);
     --shadow-titlebar-inset: inset 0 -1px 0 rgba(0, 0, 0, 0.04);
-    --shadow-nav-indicator: 0 1px 0 rgba(0, 0, 0, 0.05) inset, 0 2px 8px rgba(37, 99, 235, 0.2);
+    --shadow-nav-indicator: 0 1px 0 rgba(0, 0, 0, 0.05) inset, 0 2px 8px rgba(79, 70, 229, 0.22);
     --shadow-range-glow: var(--shadow-glow-blue), 0 1px 3px rgba(0, 0, 0, 0.15);
     --setting-row-hover: rgba(0, 0, 0, 0.02);
-    --help-tip-bg: rgba(37, 99, 235, 0.08);
+    --help-tip-bg: rgba(79, 70, 229, 0.08);
     --select-arrow-color: %236b6b76;
 }
 
@@ -171,33 +179,34 @@
     --text-tertiary-strong: #857c6b;
     --text-on-accent: #ffffff;
     --text-inverse: #3a362d;
-    --accent: #5b8c5a;
-    --accent-hover: #6fa56e;
-    --accent-active: #4a7349;
-    --accent-soft: rgba(91, 140, 90, 0.12);
-    --accent-blue: #5b8c5a;
-    --accent-blue-hover: #6fa56e;
-    --accent-blue-active: #4a7349;
+    /* 签名色：精致鼠尾草绿（护眼主题的暖色系标识） */
+    --accent: #5d8a5a;
+    --accent-hover: #72a06e;
+    --accent-active: #4d7349;
+    --accent-soft: rgba(93, 138, 90, 0.13);
+    --accent-blue: #5d8a5a;
+    --accent-blue-hover: #72a06e;
+    --accent-blue-active: #4d7349;
     --accent-red: #c0563e;
     --accent-yellow: #b8911e;
-    --accent-green: #5b8c5a;
+    --accent-green: #5d8a5a;
     --accent-cyan: #4a8a8a;
     --accent-cyan-soft: rgba(74, 138, 138, 0.12);
     --accent-purple: #8a6ba5;
     --accent-purple-soft: rgba(138, 107, 165, 0.12);
-    --status-ok-bg: rgba(91, 140, 90, 0.15);
+    --status-ok-bg: rgba(93, 138, 90, 0.15);
     --status-ok-fg: #4a7349;
     --status-missing-bg: rgba(192, 86, 62, 0.12);
     --status-missing-fg: #a04830;
     --status-corrupt-bg: rgba(184, 145, 30, 0.15);
     --status-corrupt-fg: #8a6515;
-    --log-info-bg: rgba(91, 140, 90, 0.12);
+    --log-info-bg: rgba(93, 138, 90, 0.12);
     --log-info-fg: #4a7349;
     --log-warn-bg: rgba(184, 145, 30, 0.12);
     --log-warn-fg: #8a6515;
     --log-error-bg: rgba(192, 86, 62, 0.12);
     --log-error-fg: #a04830;
-    --log-success-bg: rgba(91, 140, 90, 0.12);
+    --log-success-bg: rgba(93, 138, 90, 0.12);
     --log-success-fg: #4a7349;
     --log-source-fg: #8a8270;
     --log-line-hover: rgba(0, 0, 0, 0.03);
@@ -206,19 +215,19 @@
     --shadow-sm: 0 1px 2px rgba(60, 50, 30, 0.08);
     --shadow-md: 0 4px 12px rgba(60, 50, 30, 0.10);
     --shadow-lg: 0 8px 24px rgba(60, 50, 30, 0.15);
-    --shadow-glow-blue: 0 0 0 3px rgba(91, 140, 90, 0.15);
+    --shadow-glow-blue: 0 0 0 3px rgba(93, 138, 90, 0.18);
     --shadow-knob: 0 1px 3px rgba(60, 50, 30, 0.12), 0 0 0 0.5px rgba(60, 50, 30, 0.06);
-    --shadow-knob-hover: 0 1px 4px rgba(60, 50, 30, 0.16), 0 0 0 0.5px rgba(60, 50,  30, 0.06);
+    --shadow-knob-hover: 0 1px 4px rgba(60, 50, 30, 0.16), 0 0 0 0.5px rgba(60, 50, 30, 0.06);
     --shadow-thumb: 0 1px 3px rgba(60, 50, 30, 0.12);
-    --shadow-thumb-hover: 0 2px 6px rgba(91, 140, 90, 0.3);
+    --shadow-thumb-hover: 0 2px 6px rgba(93, 138, 90, 0.35);
     --shadow-primary-btn: 0 1px 2px rgba(60, 50, 30, 0.08);
-    --shadow-primary-btn-hover: 0 2px 8px rgba(91, 140, 90, 0.2);
+    --shadow-primary-btn-hover: 0 2px 8px rgba(93, 138, 90, 0.22);
     --shadow-context-menu: 0 8px 24px rgba(60, 50, 30, 0.15);
     --shadow-titlebar-inset: inset 0 -1px 0 rgba(60, 50, 30, 0.04);
-    --shadow-nav-indicator: 0 1px 0 rgba(60, 50, 30, 0.05) inset, 0 2px 8px rgba(91, 140, 90, 0.2);
+    --shadow-nav-indicator: 0 1px 0 rgba(60, 50, 30, 0.05) inset, 0 2px 8px rgba(93, 138, 90, 0.22);
     --shadow-range-glow: var(--shadow-glow-blue), 0 1px 3px rgba(60, 50, 30, 0.12);
     --setting-row-hover: rgba(60, 50, 30, 0.02);
-    --help-tip-bg: rgba(91, 140, 90, 0.08);
+    --help-tip-bg: rgba(93, 138, 90, 0.08);
     --select-arrow-color: %236b6453;
 }
 
@@ -241,13 +250,13 @@
         --text-tertiary-strong: #8a8a94;
         --text-on-accent: #ffffff;
         --text-inverse: #1a1a1f;
-        --accent: #2563eb;
-        --accent-hover: #3b82f6;
-        --accent-active: #1d4ed8;
-        --accent-soft: rgba(37, 99, 235, 0.10);
-        --accent-blue: #2563eb;
-        --accent-blue-hover: #3b82f6;
-        --accent-blue-active: #1d4ed8;
+        --accent: #4f46e5;
+        --accent-hover: #6366f1;
+        --accent-active: #4338ca;
+        --accent-soft: rgba(79, 70, 229, 0.10);
+        --accent-blue: #4f46e5;
+        --accent-blue-hover: #6366f1;
+        --accent-blue-active: #4338ca;
         --accent-red: #dc2626;
         --accent-yellow: #ca8a04;
         --accent-green: #16a34a;
@@ -261,8 +270,8 @@
         --status-missing-fg: #b91c1c;
         --status-corrupt-bg: rgba(202, 138, 4, 0.12);
         --status-corrupt-fg: #a16207;
-        --log-info-bg: rgba(37, 99, 235, 0.10);
-        --log-info-fg: #2563eb;
+        --log-info-bg: rgba(79, 70, 229, 0.10);
+        --log-info-fg: #4f46e5;
         --log-warn-bg: rgba(202, 138, 4, 0.12);
         --log-warn-fg: #a16207;
         --log-error-bg: rgba(220, 38, 38, 0.10);
@@ -276,19 +285,19 @@
         --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
         --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
         --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
-        --shadow-glow-blue: 0 0 0 3px rgba(37, 99, 235, 0.15);
+        --shadow-glow-blue: 0 0 0 3px rgba(79, 70, 229, 0.18);
         --shadow-knob: 0 1px 3px rgba(0, 0, 0, 0.15), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
         --shadow-knob-hover: 0 1px 4px rgba(0, 0, 0, 0.2), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
         --shadow-thumb: 0 1px 3px rgba(0, 0, 0, 0.15);
-        --shadow-thumb-hover: 0 2px 6px rgba(37, 99, 235, 0.3);
+        --shadow-thumb-hover: 0 2px 6px rgba(79, 70, 229, 0.35);
         --shadow-primary-btn: 0 1px 2px rgba(0, 0, 0, 0.06);
-        --shadow-primary-btn-hover: 0 2px 8px rgba(37, 99, 235, 0.2);
+        --shadow-primary-btn-hover: 0 2px 8px rgba(79, 70, 229, 0.25);
         --shadow-context-menu: 0 8px 24px rgba(0, 0, 0, 0.12);
         --shadow-titlebar-inset: inset 0 -1px 0 rgba(0, 0, 0, 0.04);
-        --shadow-nav-indicator: 0 1px 0 rgba(0, 0, 0, 0.05) inset, 0 2px 8px rgba(37, 99, 235, 0.2);
+        --shadow-nav-indicator: 0 1px 0 rgba(0, 0, 0, 0.05) inset, 0 2px 8px rgba(79, 70, 229, 0.22);
         --shadow-range-glow: var(--shadow-glow-blue), 0 1px 3px rgba(0, 0, 0, 0.15);
         --setting-row-hover: rgba(0, 0, 0, 0.02);
-        --help-tip-bg: rgba(37, 99, 235, 0.08);
+        --help-tip-bg: rgba(79, 70, 229, 0.08);
         --select-arrow-color: %236b6b76;
     }
 }
@@ -303,8 +312,10 @@ html, body {
     height: 100%;
     width: 100%;
     overflow: hidden;
-    background: var(--bg-primary);
-    font-family: var(--font-sans);
+    background:
+        radial-gradient(ellipse 90% 60% at 50% -15%, var(--accent-soft), transparent 65%),
+        var(--bg-primary);
+    font-family: var(--font-body);
     font-size: 13px;
     color: var(--text-primary);
     -webkit-font-smoothing: antialiased;
@@ -377,6 +388,7 @@ html, body {
 }
 
 .app-title {
+    font-family: var(--font-display);
     font-size: 13px;
     font-weight: 600;
     color: var(--text-primary);
@@ -604,7 +616,10 @@ html, body {
     flex: 1;
     overflow: hidden;
     position: relative;
-    background: var(--bg-primary);
+    background:
+        radial-gradient(ellipse 70% 50% at 100% 0%, var(--accent-soft), transparent 60%),
+        radial-gradient(ellipse 60% 40% at 0% 100%, var(--accent-soft), transparent 65%),
+        var(--bg-primary);
 }
 
 .view {
@@ -618,6 +633,28 @@ html, body {
     display: flex;
 }
 
+/* 视图入场：子元素交错淡入上浮，营造节奏感 */
+.view.active > * {
+    animation: view-enter 0.42s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.view.active > *:nth-child(1) { animation-delay: 0s; }
+.view.active > *:nth-child(2) { animation-delay: 0.06s; }
+.view.active > *:nth-child(3) { animation-delay: 0.12s; }
+.view.active > *:nth-child(4) { animation-delay: 0.18s; }
+.view.active > *:nth-child(5) { animation-delay: 0.24s; }
+
+@keyframes view-enter {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
 .view-header {
     display: flex;
     align-items: center;
@@ -628,6 +665,7 @@ html, body {
 }
 
 .view-header h2 {
+    font-family: var(--font-display);
     font-size: 18px;
     font-weight: 700;
     letter-spacing: -0.5px;
@@ -755,25 +793,77 @@ html, body {
     height: 100px;
     border-radius: 50%;
     border: 2px solid var(--border-strong);
-    background: var(--bg-tertiary);
+    background:
+        radial-gradient(circle at 35% 30%, var(--bg-hover) 0%, transparent 55%),
+        var(--bg-tertiary);
     color: var(--text-primary);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     position: relative;
-    transition: var(--transition);
+    transition: border-color 0.2s ease, background 0.25s ease, color 0.2s ease, transform 0.2s ease, box-shadow 0.25s ease;
 }
 
 .mic-button:hover {
     border-color: var(--accent-blue);
-    background: var(--bg-hover);
+    background:
+        radial-gradient(circle at 35% 30%, var(--accent-soft) 0%, transparent 55%),
+        var(--bg-hover);
+    transform: translateY(-1px);
 }
 
+.mic-button:active {
+    transform: translateY(0) scale(0.98);
+}
+
+/* 录音中：红色 + 富层次脉冲 + 外发光 */
 .mic-button.recording {
-    background: var(--accent-red);
+    background:
+        radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.25) 0%, transparent 50%),
+        var(--accent-red);
     border-color: var(--accent-red);
     color: var(--text-on-accent);
+    box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.18), 0 8px 24px rgba(239, 68, 68, 0.35);
+}
+
+/* 识别中：琥珀色 + 旋转描边环 */
+.mic-button.processing {
+    background:
+        radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.2) 0%, transparent 50%),
+        var(--accent-yellow);
+    border-color: var(--accent-yellow);
+    color: var(--text-on-accent);
+    box-shadow: 0 0 0 4px rgba(234, 179, 8, 0.18), 0 8px 24px rgba(234, 179, 8, 0.3);
+}
+
+.mic-button.processing .mic-ring {
+    inset: -6px;
+    border: 2px solid transparent;
+    border-top-color: var(--accent-yellow);
+    border-right-color: rgba(234, 179, 8, 0.4);
+    animation: spin-ring 0.9s linear infinite;
+}
+
+/* 成功：绿色短暂高亮 */
+.mic-button.ready {
+    background:
+        radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.2) 0%, transparent 50%),
+        var(--accent-green);
+    border-color: var(--accent-green);
+    color: var(--text-on-accent);
+    box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.18), 0 8px 24px rgba(34, 197, 94, 0.3);
+}
+
+/* 错误：红色 + 轻微抖动 */
+.mic-button.error {
+    background:
+        radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.18) 0%, transparent 50%),
+        var(--accent-red);
+    border-color: var(--accent-red);
+    color: var(--text-on-accent);
+    box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.22);
+    animation: mic-shake 0.45s cubic-bezier(0.36, 0.07, 0.19, 0.97);
 }
 
 .mic-ring, .mic-ring-outer {
@@ -802,8 +892,21 @@ html, body {
     }
     100% {
         opacity: 0;
-        transform: scale(1.15);
+        transform: scale(1.18);
     }
+}
+
+@keyframes spin-ring {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+@keyframes mic-shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-3px); }
+    40% { transform: translateX(3px); }
+    60% { transform: translateX(-2px); }
+    80% { transform: translateX(2px); }
 }
 
 .mic-hint {
@@ -817,6 +920,7 @@ html, body {
     color: var(--text-tertiary);
 }
 
+/* 状态面板：边框/色调随当前状态同步 */
 .status-panel {
     display: flex;
     align-items: center;
@@ -825,6 +929,27 @@ html, body {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
+    transition: border-color 0.25s ease, background 0.25s ease;
+}
+
+.status-panel.recording {
+    border-color: rgba(239, 68, 68, 0.45);
+    background: linear-gradient(180deg, rgba(239, 68, 68, 0.08), transparent 70%), var(--bg-secondary);
+}
+
+.status-panel.processing {
+    border-color: rgba(234, 179, 8, 0.45);
+    background: linear-gradient(180deg, rgba(234, 179, 8, 0.08), transparent 70%), var(--bg-secondary);
+}
+
+.status-panel.ready {
+    border-color: rgba(34, 197, 94, 0.45);
+    background: linear-gradient(180deg, rgba(34, 197, 94, 0.08), transparent 70%), var(--bg-secondary);
+}
+
+.status-panel.error {
+    border-color: rgba(239, 68, 68, 0.5);
+    background: linear-gradient(180deg, rgba(239, 68, 68, 0.1), transparent 70%), var(--bg-secondary);
 }
 
 .status-dot {
@@ -832,6 +957,7 @@ html, body {
     height: 8px;
     border-radius: 50%;
     flex-shrink: 0;
+    transition: background 0.25s ease;
 }
 
 .status-dot.idle {
@@ -844,8 +970,12 @@ html, body {
 }
 
 .status-dot.processing {
-    background: var(--accent-blue);
+    background: var(--accent-yellow);
     animation: pulse-dot 0.8s ease-in-out infinite;
+}
+
+.status-dot.ready {
+    background: var(--accent-green);
 }
 
 .status-dot.success {
@@ -907,6 +1037,28 @@ html, body {
 .output-text:empty::before {
     content: attr(data-placeholder);
     color: var(--text-tertiary);
+}
+
+/* 识别中：微光扫过 + 琥珀色边框；空内容时显示「识别中…」 */
+.output-text.processing {
+    border-color: rgba(234, 179, 8, 0.5);
+    background-color: var(--bg-secondary);
+    background-image: linear-gradient(90deg, transparent 30%, var(--accent-soft) 50%, transparent 70%);
+    background-size: 200% 100%;
+    background-repeat: no-repeat;
+    background-position: -150% 0;
+    animation: output-shimmer 1.8s ease-in-out infinite;
+}
+
+.output-text.processing:empty::before {
+    content: '识别中…';
+    color: var(--accent-yellow);
+    font-style: italic;
+}
+
+@keyframes output-shimmer {
+    0% { background-position: -150% 0; }
+    100% { background-position: 150% 0; }
 }
 
 .subtitle-scroll-area {
@@ -982,6 +1134,7 @@ html, body {
 }
 
 .subtitle-card-title {
+    font-family: var(--font-display);
     font-size: 11px;
     font-weight: 700;
     color: var(--text-tertiary);
@@ -1278,6 +1431,17 @@ html, body {
     transform: translateY(1px);
 }
 
+.primary-btn:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 2px;
+}
+
+.primary-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none;
+}
+
 .btn-indicator {
     width: 8px;
     height: 8px;
@@ -1312,6 +1476,11 @@ html, body {
 .solid-btn:active {
     background: var(--bg-active);
     transform: translateY(1px);
+}
+
+.solid-btn:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 2px;
 }
 
 /* 次要操作按钮：用于视图头部、窗口控制、更新检查等场景 */
@@ -1387,9 +1556,16 @@ html, body {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 12px;
+    gap: 14px;
     color: var(--text-tertiary);
-    padding: 40px 0;
+    padding: 48px 0;
+    opacity: 0.9;
+}
+
+.empty-state svg {
+    width: 44px;
+    height: 44px;
+    opacity: 0.35;
 }
 
 .empty-state p {
@@ -1503,15 +1679,22 @@ html, body {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 10px;
+    gap: 14px;
     color: var(--text-tertiary);
-    padding: 40px 0;
+    padding: 48px 0;
     height: 100%;
     user-select: none;
+    opacity: 0.9;
+}
+
+.log-empty svg {
+    width: 44px;
+    height: 44px;
+    opacity: 0.35;
 }
 
 .log-empty p {
-    font-size: 12px;
+    font-size: 13px;
     font-family: var(--font-mono);
 }
 
@@ -1639,7 +1822,7 @@ html, body {
     padding: 20px 24px 32px;
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 16px;
 }
 
 /* 设置页分组卡片 */
@@ -1661,6 +1844,7 @@ html, body {
 }
 
 .settings-section h3 {
+    font-family: var(--font-display);
     font-size: 11px;
     font-weight: 700;
     color: var(--text-tertiary);
@@ -1685,6 +1869,31 @@ html, body {
 
 .settings-section:hover h3::before {
     background: var(--accent-cyan);
+}
+
+/* ===== 主分组：更强的视觉权重（语音识别模型 / API密钥 / 模型管理） ===== */
+.settings-section--primary {
+    border-left: 3px solid var(--accent);
+    background:
+        linear-gradient(180deg, var(--accent-soft) 0%, transparent 35%),
+        linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-secondary) 100%);
+    padding-left: 16px;
+}
+
+.settings-section--primary h3 {
+    font-size: 12px;
+    color: var(--text-secondary);
+    letter-spacing: 0.6px;
+}
+
+.settings-section--primary h3::before {
+    height: 13px;
+    background: var(--accent);
+    border-radius: 2px;
+}
+
+.settings-section--primary:hover {
+    border-left-color: var(--accent-hover);
 }
 
 /* ===== 可折叠设置分组 ===== */
@@ -2422,6 +2631,7 @@ html, body {
 
 .modal-header h2 {
     margin: 0;
+    font-family: var(--font-display);
     font-size: 16px;
     font-weight: 600;
     color: var(--text-primary);
@@ -2511,6 +2721,7 @@ html, body {
 }
 
 .help-section h3 {
+    font-family: var(--font-display);
     font-size: 14px;
     font-weight: 600;
     color: var(--text-primary);
@@ -3123,4 +3334,23 @@ html, body {
     align-items: center;
     justify-content: center;
     white-space: nowrap;
+}
+
+/* ============================================
+ * 无障碍：尊重用户的减少动画偏好
+ * ============================================ */
+@media (prefers-reduced-motion: reduce) {
+    .view.active > *,
+    .mic-button.recording .mic-ring,
+    .mic-button.recording .mic-ring-outer,
+    .mic-button.processing .mic-ring,
+    .mic-button.error,
+    .output-text.processing,
+    .status-dot.recording,
+    .status-dot.processing,
+    .pulse-dot,
+    .nav-indicator,
+    .seg-indicator {
+        animation: none !important;
+    }
 }

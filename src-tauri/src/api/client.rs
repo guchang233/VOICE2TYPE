@@ -48,27 +48,43 @@ impl ApiClient {
             &api_key[..api_key.len().min(8)]
         );
 
-        let resp = HTTP_CLIENT
+        let form = self.build_form(audio_data, config, "recording.wav")?;
+        let resp = match HTTP_CLIENT
             .post(&url)
             .header("Authorization", format!("Bearer {}", api_key))
-            .multipart(self.build_form(audio_data, config, "recording.wav")?)
+            .multipart(form)
             .send()
             .await
-            .context("Failed to send API request")?;
+            .context("Failed to send API request")
+        {
+            Ok(r) => r,
+            Err(e) => {
+                return Err(e);
+            }
+        };
 
         let status = resp.status();
         log::info!("API response status: {}", status);
 
         if !status.is_success() {
-            let error_text = resp.text().await.context("Failed to read error response")?;
+            let error_text = resp
+                .text()
+                .await
+                .context("Failed to read error response")?;
             log::error!("API error {}: {}", status, error_text);
             anyhow::bail!("API error {}: {}", status, error_text);
         }
 
-        let result = resp
+        let result = match resp
             .json::<ApiResponse>()
             .await
-            .context("Failed to parse API response")?;
+            .context("Failed to parse API response")
+        {
+            Ok(r) => r,
+            Err(e) => {
+                return Err(e);
+            }
+        };
 
         Ok(result.text.trim().to_string())
     }

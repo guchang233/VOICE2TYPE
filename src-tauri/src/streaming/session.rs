@@ -1,8 +1,8 @@
 //! 流式识别会话：采集 → WebSocket → 增量输出
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use tokio::sync::mpsc;
@@ -30,6 +30,10 @@ pub struct StreamingSession {
     pump_task: Option<JoinHandle<()>>,
     consumer_task: Option<JoinHandle<()>>,
     output: Arc<StreamingOutput>,
+    start_instant: Option<Instant>,
+    partial_count: Arc<AtomicU64>,
+    final_count: Arc<AtomicU64>,
+    first_packet_ms: Arc<AtomicU64>,
 }
 
 impl StreamingSession {
@@ -44,6 +48,10 @@ impl StreamingSession {
             pump_task: None,
             consumer_task: None,
             output: Arc::new(StreamingOutput::new()),
+            start_instant: None,
+            partial_count: Arc::new(AtomicU64::new(0)),
+            final_count: Arc::new(AtomicU64::new(0)),
+            first_packet_ms: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -75,6 +83,10 @@ impl StreamingSession {
         self.output.reset();
         self.output.begin_session();
         *self.audio_seq.lock().unwrap() = 2;
+        self.start_instant = Some(Instant::now());
+        self.partial_count.store(0, Ordering::SeqCst);
+        self.final_count.store(0, Ordering::SeqCst);
+        self.first_packet_ms.store(0, Ordering::SeqCst);
 
         let (result_tx, mut result_rx) = mpsc::channel(32);
         let (client, ws_task) = StreamingAsrClient::connect(config.clone(), result_tx).await?;
@@ -83,10 +95,25 @@ impl StreamingSession {
 
         let output = self.output.clone();
         let cfg = config.clone();
+        let partial_count = self.partial_count.clone();
+        let final_count = self.final_count.clone();
+        let first_packet_ms = self.first_packet_ms.clone();
+        let start_time = self.start_instant.unwrap_or_else(Instant::now);
         let consumer = tokio::spawn(async move {
             while let Some(msg) = result_rx.recv().await {
                 match msg {
                     Ok(resp) => {
+                        if first_packet_ms.load(Ordering::SeqCst) == 0 {
+                            first_packet_ms.store(
+                                start_time.elapsed().as_millis() as u64,
+                                Ordering::SeqCst,
+                            );
+                        }
+                        if resp.is_final {
+                            final_count.fetch_add(1, Ordering::SeqCst);
+                        } else {
+                            partial_count.fetch_add(1, Ordering::SeqCst);
+                        }
                         output.apply_full_text(&resp.text, &cfg, resp.is_final);
                     }
                     Err(e) => {

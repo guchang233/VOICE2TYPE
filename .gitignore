@@ -29,6 +29,9 @@ src-tauri/gen/
 .release/
 VOICE2TYPE.zip
 
+# Docs (whiteboard diagrams)
+docs/
+
 # OS files
 Thumbs.db
 .DS_Store
