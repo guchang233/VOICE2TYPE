@@ -1,7 +1,9 @@
 use std::sync::{Arc, Mutex};
+use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::SampleFormat;
-use anyhow::{Context, Result};
+
+use crate::streaming::audio::{pick_best_input_config, push_samples_mono};
 
 pub struct Recorder {
     stream: Option<cpal::Stream>,
@@ -20,13 +22,20 @@ impl Recorder {
         }
     }
 
-    pub fn start(&mut self, device_name: Option<&str>) -> Result<()> {
+    /// 启动录音（带偏好参数）。偏好与 `start_capture_with_prefs` 保持一致。
+    pub fn start_with_prefs(
+        &mut self,
+        device_name: Option<&str>,
+        downmix_pref: &str,
+        sample_fmt_pref: &str,
+        sample_rate_pref: &str,
+        channels_pref: &str,
+    ) -> Result<()> {
         if *self.is_recording.lock().unwrap() {
             anyhow::bail!("Already recording");
         }
 
         let host = cpal::default_host();
-
         let device = if let Some(name) = device_name {
             if name.is_empty() {
                 host.default_input_device()
@@ -39,26 +48,33 @@ impl Recorder {
             host.default_input_device()
         }.context("No input device available")?;
 
-        let config = device.default_input_config()?;
-        let sample_rate = config.sample_rate().0;
+        let (config, sample_format) =
+            pick_best_input_config(&device, sample_fmt_pref, sample_rate_pref, channels_pref)?;
+
+        let sample_rate = config.sample_rate.0;
+        let channels = config.channels;
         *self.sample_rate.lock().unwrap() = sample_rate;
 
         self.buffer.lock().unwrap().clear();
 
         let buffer_clone = self.buffer.clone();
         let is_recording_clone = self.is_recording.clone();
+        let dm = downmix_pref.to_string();
 
         let err_fn = |err| {
-            log::error!("Audio stream error: {}", err);
+            log::error!("[整段录音] 音频流错误: {}", err);
         };
 
-        let stream = match config.sample_format() {
+        let stream = match sample_format {
             SampleFormat::F32 => {
+                let buf = buffer_clone.clone();
+                let irc = is_recording_clone.clone();
+                let dm = dm.clone();
                 device.build_input_stream(
-                    &config.into(),
+                    &config,
                     move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                        if *is_recording_clone.lock().unwrap() {
-                            buffer_clone.lock().unwrap().extend_from_slice(data);
+                        if *irc.lock().unwrap() {
+                            push_samples_mono(buf.clone(), data, channels, &dm);
                         }
                     },
                     err_fn,
@@ -66,14 +82,16 @@ impl Recorder {
                 )?
             }
             SampleFormat::I16 => {
+                let buf = buffer_clone.clone();
+                let irc = is_recording_clone.clone();
+                let dm = dm.clone();
                 device.build_input_stream(
-                    &config.into(),
+                    &config,
                     move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                        if *is_recording_clone.lock().unwrap() {
-                            let mut buf = buffer_clone.lock().unwrap();
-                            for &sample in data {
-                                buf.push(sample as f32 / i16::MAX as f32);
-                            }
+                        if *irc.lock().unwrap() {
+                            let f: Vec<f32> =
+                                data.iter().map(|&s| s as f32 / i16::MAX as f32).collect();
+                            push_samples_mono(buf.clone(), &f, channels, &dm);
                         }
                     },
                     err_fn,
@@ -81,15 +99,91 @@ impl Recorder {
                 )?
             }
             SampleFormat::U16 => {
+                let buf = buffer_clone.clone();
+                let irc = is_recording_clone.clone();
+                let dm = dm.clone();
                 device.build_input_stream(
-                    &config.into(),
+                    &config,
                     move |data: &[u16], _: &cpal::InputCallbackInfo| {
-                        if *is_recording_clone.lock().unwrap() {
-                            let mut buf = buffer_clone.lock().unwrap();
-                            for &sample in data {
-                                let normalized = (sample as f32 / u16::MAX as f32) * 2.0 - 1.0;
-                                buf.push(normalized);
-                            }
+                        if *irc.lock().unwrap() {
+                            let f: Vec<f32> = data
+                                .iter()
+                                .map(|&s| (s as f32 / u16::MAX as f32) * 2.0 - 1.0)
+                                .collect();
+                            push_samples_mono(buf.clone(), &f, channels, &dm);
+                        }
+                    },
+                    err_fn,
+                    None,
+                )?
+            }
+            SampleFormat::I32 => {
+                let buf = buffer_clone.clone();
+                let irc = is_recording_clone.clone();
+                let dm = dm.clone();
+                device.build_input_stream(
+                    &config,
+                    move |data: &[i32], _: &cpal::InputCallbackInfo| {
+                        if *irc.lock().unwrap() {
+                            let f: Vec<f32> =
+                                data.iter().map(|&s| s as f32 / i32::MAX as f32).collect();
+                            push_samples_mono(buf.clone(), &f, channels, &dm);
+                        }
+                    },
+                    err_fn,
+                    None,
+                )?
+            }
+            SampleFormat::U32 => {
+                let buf = buffer_clone.clone();
+                let irc = is_recording_clone.clone();
+                let dm = dm.clone();
+                device.build_input_stream(
+                    &config,
+                    move |data: &[u32], _: &cpal::InputCallbackInfo| {
+                        if *irc.lock().unwrap() {
+                            let f: Vec<f32> = data
+                                .iter()
+                                .map(|&s| (s as f32 / u32::MAX as f32) * 2.0 - 1.0)
+                                .collect();
+                            push_samples_mono(buf.clone(), &f, channels, &dm);
+                        }
+                    },
+                    err_fn,
+                    None,
+                )?
+            }
+            SampleFormat::I8 => {
+                let buf = buffer_clone.clone();
+                let irc = is_recording_clone.clone();
+                let dm = dm.clone();
+                device.build_input_stream(
+                    &config,
+                    move |data: &[i8], _: &cpal::InputCallbackInfo| {
+                        if *irc.lock().unwrap() {
+                            let f: Vec<f32> =
+                                data.iter().map(|&s| s as f32 / i8::MAX as f32).collect();
+                            push_samples_mono(buf.clone(), &f, channels, &dm);
+                        }
+                    },
+                    err_fn,
+                    None,
+                )?
+            }
+            SampleFormat::U8 => {
+                // 兜底：理论上 pick_best_input_config 已排除 U8
+                let buf = buffer_clone.clone();
+                let irc = is_recording_clone.clone();
+                let dm = dm.clone();
+                device.build_input_stream(
+                    &config,
+                    move |data: &[u8], _: &cpal::InputCallbackInfo| {
+                        if *irc.lock().unwrap() {
+                            let f: Vec<f32> = data
+                                .iter()
+                                .map(|&s| (s as f32 / u8::MAX as f32) * 2.0 - 1.0)
+                                .collect();
+                            push_samples_mono(buf.clone(), &f, channels, &dm);
                         }
                     },
                     err_fn,
@@ -103,8 +197,20 @@ impl Recorder {
         self.stream = Some(stream);
         *self.is_recording.lock().unwrap() = true;
 
-        log::info!("Recording started on device: {}, sample_rate: {}", device.name().unwrap_or_default(), sample_rate);
+        log::info!(
+            "[整段录音] 设备: {}, 采样率: {}Hz, {}ch, 格式: {:?}, 下混: {}",
+            device.name().unwrap_or_default(),
+            sample_rate,
+            channels,
+            sample_format,
+            downmix_pref
+        );
         Ok(())
+    }
+
+    /// 简单签名（向后兼容）：传 auto 偏好
+    pub fn start(&mut self, device_name: Option<&str>) -> Result<()> {
+        self.start_with_prefs(device_name, "strongest", "auto", "auto", "auto")
     }
 
     pub fn stop(&mut self) -> Result<Vec<f32>> {
@@ -122,7 +228,7 @@ impl Recorder {
         let data = buffer.clone();
         buffer.clear();
 
-        log::info!("Recording stopped, captured {} samples", data.len());
+        log::info!("[整段录音] 停止，样本数(mono): {}", data.len());
         Ok(data)
     }
 
@@ -138,7 +244,7 @@ impl Recorder {
         *self.is_recording.lock().unwrap() = false;
         self.buffer.lock().unwrap().clear();
 
-        log::info!("Recording cancelled");
+        log::info!("[整段录音] 取消");
         Ok(())
     }
 

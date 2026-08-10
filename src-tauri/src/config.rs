@@ -22,6 +22,34 @@ pub const STREAMING_POST_NONE: &str = "none";
 pub const DICTATION_MODE_BATCH: &str = "batch";
 pub const DICTATION_MODE_STREAM: &str = "stream";
 
+// ========== 音频采集质量偏好常量 ==========
+/// 音频配置 Profile：预设的一键切换方案
+pub const AUDIO_PROFILE_STANDARD: &str = "standard";   // 标准（兼容普通单麦，行为与旧版接近，仅修复U8）
+pub const AUDIO_PROFILE_ARRAY_MIC: &str = "array_mic"; // 麦克风阵列优化（强声道下混 + 强制高质量格式）
+pub const AUDIO_PROFILE_CUSTOM: &str = "custom";       // 自定义（按下方各自定义字段生效）
+
+/// 下混策略（多声道 → 单声道）
+pub const DOWNMIX_AVERAGE: &str = "average";             // 简单平均（旧行为）
+pub const DOWNMIX_STRONGEST: &str = "strongest";         // 选 RMS 最大声道（推荐麦克风阵列，避免相位抵消）
+pub const DOWNMIX_FIRST_CHANNEL: &str = "first_channel"; // 直接取第 1 声道（部分阵列麦主麦在 ch1）
+
+/// 采样格式偏好
+pub const SAMPLE_FMT_AUTO: &str = "auto";   // 按优先级：F32/I16/I32/U16
+pub const SAMPLE_FMT_F32: &str = "f32";
+pub const SAMPLE_FMT_I16: &str = "i16";
+pub const SAMPLE_FMT_I32: &str = "i32";
+
+/// 采样率偏好
+pub const SAMPLE_RATE_AUTO: &str = "auto"; // 默认配置或 ≤48kHz
+pub const SAMPLE_RATE_16K: &str = "16000";
+pub const SAMPLE_RATE_44K: &str = "44100";
+pub const SAMPLE_RATE_48K: &str = "48000";
+
+/// 声道数偏好
+pub const CHANNELS_AUTO: &str = "auto";
+pub const CHANNELS_MONO: &str = "mono";
+pub const CHANNELS_STEREO: &str = "stereo";
+
 const SILICONFLOW_TRANSCRIPTIONS_URL: &str = "https://api.siliconflow.cn/v1/audio/transcriptions";
 const GROQ_TRANSCRIPTIONS_URL: &str = "https://api.groq.com/openai/v1/audio/transcriptions";
 
@@ -43,6 +71,17 @@ pub struct BasicConfig {
     pub input_device: String,
     /// 语音输入页面的识别模式：`batch`（整段）或 `stream`（流式）
     pub dictation_mode: String,
+    // ===== 音频采集质量偏好 =====
+    /// 整体预设 Profile：standard | array_mic | custom
+    pub audio_profile: String,
+    /// 多声道下混策略：average | strongest | first_channel
+    pub audio_downmix: String,
+    /// 采样格式偏好：auto | f32 | i16 | i32（始终过滤 U8）
+    pub audio_sample_format: String,
+    /// 采样率偏好：auto | 16000 | 44100 | 48000
+    pub audio_sample_rate: String,
+    /// 声道数偏好：auto | mono | stereo
+    pub audio_channels: String,
 }
 
 impl Default for BasicConfig {
@@ -56,6 +95,11 @@ impl Default for BasicConfig {
             show_log: false,
             input_device: String::new(),
             dictation_mode: "batch".to_string(),
+            audio_profile: AUDIO_PROFILE_STANDARD.to_string(),
+            audio_downmix: DOWNMIX_STRONGEST.to_string(),
+            audio_sample_format: SAMPLE_FMT_AUTO.to_string(),
+            audio_sample_rate: SAMPLE_RATE_AUTO.to_string(),
+            audio_channels: CHANNELS_AUTO.to_string(),
         }
     }
 }
@@ -251,6 +295,10 @@ pub struct SubtitleConfig {
     pub subtitle_interim_color: String,
     /// 临时文字透明度 0-1
     pub subtitle_interim_opacity: f32,
+    /// 字幕识别的音频输入设备名（空=使用系统默认设备）
+    /// 与 basic.input_device 独立，允许字幕使用不同音源（如立体声混音）
+    #[serde(default)]
+    pub subtitle_input_device: String,
 }
 
 impl Default for SubtitleConfig {
@@ -282,6 +330,7 @@ impl Default for SubtitleConfig {
             subtitle_padding_y: 12,
             subtitle_interim_color: "#ffffff".to_string(),
             subtitle_interim_opacity: 0.7,
+            subtitle_input_device: String::new(),
         }
     }
 }
@@ -533,6 +582,37 @@ impl AppConfig {
             _ => "center".to_string(),
         };
         self.vad.vad_sensitivity = self.vad.vad_sensitivity.clamp(0.0, 1.0);
+        // 音频采集偏好归一化（Profile 非法值一律回 standard）
+        self.basic.audio_profile = match self.basic.audio_profile.as_str() {
+            AUDIO_PROFILE_STANDARD | AUDIO_PROFILE_ARRAY_MIC | AUDIO_PROFILE_CUSTOM => {
+                self.basic.audio_profile.clone()
+            }
+            _ => AUDIO_PROFILE_STANDARD.to_string(),
+        };
+        self.basic.audio_downmix = match self.basic.audio_downmix.as_str() {
+            DOWNMIX_AVERAGE | DOWNMIX_STRONGEST | DOWNMIX_FIRST_CHANNEL => {
+                self.basic.audio_downmix.clone()
+            }
+            _ => DOWNMIX_STRONGEST.to_string(),
+        };
+        self.basic.audio_sample_format = match self.basic.audio_sample_format.as_str() {
+            SAMPLE_FMT_AUTO | SAMPLE_FMT_F32 | SAMPLE_FMT_I16 | SAMPLE_FMT_I32 => {
+                self.basic.audio_sample_format.clone()
+            }
+            _ => SAMPLE_FMT_AUTO.to_string(),
+        };
+        self.basic.audio_sample_rate = match self.basic.audio_sample_rate.as_str() {
+            SAMPLE_RATE_AUTO | SAMPLE_RATE_16K | SAMPLE_RATE_44K | SAMPLE_RATE_48K => {
+                self.basic.audio_sample_rate.clone()
+            }
+            _ => SAMPLE_RATE_AUTO.to_string(),
+        };
+        self.basic.audio_channels = match self.basic.audio_channels.as_str() {
+            CHANNELS_AUTO | CHANNELS_MONO | CHANNELS_STEREO => {
+                self.basic.audio_channels.clone()
+            }
+            _ => CHANNELS_AUTO.to_string(),
+        };
     }
 
     fn normalize_streaming_post_process_mode(mode: &str) -> String {
@@ -996,6 +1076,79 @@ impl ConfigManager {
 
     pub fn set_input_device(&self, name: String) {
         self.config.lock().unwrap().basic.input_device = name;
+    }
+
+    // ===== 音频采集偏好：返回「有效」值（考虑 Profile 覆盖）=====
+
+    /// 解析得到「生效」的音频采集参数（Profile 会覆盖单项，除 custom 外）。
+    /// 返回 (downmix, sample_fmt, sample_rate, channels)。
+    pub fn effective_audio_prefs(&self) -> (String, String, String, String) {
+        let cfg = self.config.lock().unwrap();
+        let b = &cfg.basic;
+        let profile = b.audio_profile.as_str();
+        let (mut dm, mut sf, mut sr, mut ch) = (
+            b.audio_downmix.clone(),
+            b.audio_sample_format.clone(),
+            b.audio_sample_rate.clone(),
+            b.audio_channels.clone(),
+        );
+        match profile {
+            AUDIO_PROFILE_STANDARD => {
+                dm = DOWNMIX_STRONGEST.to_string();
+                sf = SAMPLE_FMT_AUTO.to_string();
+                sr = SAMPLE_RATE_AUTO.to_string();
+                ch = CHANNELS_AUTO.to_string();
+            }
+            AUDIO_PROFILE_ARRAY_MIC => {
+                dm = DOWNMIX_STRONGEST.to_string();
+                sf = SAMPLE_FMT_F32.to_string();
+                sr = SAMPLE_RATE_48K.to_string();
+                ch = CHANNELS_AUTO.to_string();
+            }
+            _ => {
+                // custom：保持单项值不变
+            }
+        }
+        (dm, sf, sr, ch)
+    }
+
+    pub fn audio_profile(&self) -> String {
+        self.config.lock().unwrap().basic.audio_profile.clone()
+    }
+    pub fn set_audio_profile(&self, v: String) {
+        self.config.lock().unwrap().basic.audio_profile = v;
+    }
+    pub fn audio_downmix(&self) -> String {
+        self.config.lock().unwrap().basic.audio_downmix.clone()
+    }
+    pub fn set_audio_downmix(&self, v: String) {
+        self.config.lock().unwrap().basic.audio_downmix = v;
+    }
+    pub fn audio_sample_format(&self) -> String {
+        self.config.lock().unwrap().basic.audio_sample_format.clone()
+    }
+    pub fn set_audio_sample_format(&self, v: String) {
+        self.config.lock().unwrap().basic.audio_sample_format = v;
+    }
+    pub fn audio_sample_rate(&self) -> String {
+        self.config.lock().unwrap().basic.audio_sample_rate.clone()
+    }
+    pub fn set_audio_sample_rate(&self, v: String) {
+        self.config.lock().unwrap().basic.audio_sample_rate = v;
+    }
+    pub fn audio_channels(&self) -> String {
+        self.config.lock().unwrap().basic.audio_channels.clone()
+    }
+    pub fn set_audio_channels(&self, v: String) {
+        self.config.lock().unwrap().basic.audio_channels = v;
+    }
+
+    pub fn subtitle_input_device(&self) -> String {
+        self.config.lock().unwrap().subtitle.subtitle_input_device.clone()
+    }
+
+    pub fn set_subtitle_input_device(&self, name: String) {
+        self.config.lock().unwrap().subtitle.subtitle_input_device = name;
     }
 
     pub fn output_mode(&self) -> String {

@@ -1076,14 +1076,17 @@ html, body {
 }
 
 .subtitle-preview {
-    padding: 36px 28px;
+    /* padding-bottom 与真实窗口 #subtitle-container 一致（12px），
+       padding-top 稍大以容纳 "PREVIEW" 标签 */
+    padding: 24px 24px 12px;
     background:
         radial-gradient(ellipse at top, var(--accent-soft), transparent 60%),
         var(--bg-code);
     border: 1px solid var(--border-strong);
     border-radius: 10px;
     display: flex;
-    align-items: center;
+    /* 与真实窗口一致：贴底对齐 */
+    align-items: flex-end;
     justify-content: center;
     min-height: 120px;
     position: relative;
@@ -1104,13 +1107,29 @@ html, body {
 }
 
 .subtitle-line {
-    font-size: 28px;
-    color: var(--text-on-accent);
+    font-size: 32px;
+    color: #ffffff;
     text-align: center;
-    font-weight: 500;
-    padding: 8px 16px;
-    background: var(--bg-overlay);
-    border-radius: var(--radius-sm);
+    font-weight: 400;
+    line-height: 1.4;
+    letter-spacing: 0px;
+    padding: 12px 24px;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-radius: 12px;
+    border: 1px solid transparent;
+    max-width: 100%;
+    word-wrap: break-word;
+    word-break: break-word;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+    transition: opacity 0.15s ease, color 0.15s ease;
+    /* 行数限制：与真实窗口 #subtitle-text 一致 */
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    -webkit-line-clamp: 3;
+    cursor: pointer;
 }
 
 .subtitle-cards {

@@ -2011,12 +2011,23 @@
 
                     <div class="subtitle-scroll-area" style="position: relative;">
                         <div class="subtitle-preview-section">
-                            <div class="subtitle-preview" style="-webkit-line-clamp: 3;">
+                            <div class="subtitle-preview">
                                 <div class="subtitle-line" id="subtitle-preview-text" style="font-family: &quot;Microsoft YaHei&quot;, sans-serif; font-size: 32px; font-weight: 400; font-style: normal; color: rgb(255, 255, 255); text-align: center; letter-spacing: 0px; line-height: 1.4; padding: 12px 24px; border-radius: 12px; background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(20px); border-width: 0px; border-style: none; border-color: rgb(255, 255, 255); text-shadow: rgb(0, 0, 0) 0px 1px 1px, rgb(0, 0, 0) 0px -1px 1px, rgb(0, 0, 0) 1px 0px 1px, rgb(0, 0, 0) -1px 0px 1px, rgb(0, 0, 0) 1px 1px 1px, rgb(0, 0, 0) -1px 1px 1px, rgb(0, 0, 0) 1px -1px 1px, rgb(0, 0, 0) -1px -1px 1px;">实时字幕预览效果</div>
                             </div>
                         </div>
 
                         <div class="subtitle-cards">
+                            <div class="subtitle-card">
+                                <h4 class="subtitle-card-title">识别音源</h4>
+                                <div class="subtitle-grid">
+                                    <div class="control-group" style="grid-column: 1 / -1;">
+                                        <label>音频输入设备</label>
+                                        <select class="text-input" id="setting-subtitle-input-device" title="实时字幕识别使用的音频源，可选立体声混音等系统音频设备">
+                                            <option value="">系统默认</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
                             <div class="subtitle-card">
                                 <h4 class="subtitle-card-title">字体</h4>
                                 <div class="subtitle-grid">
@@ -2398,6 +2409,63 @@
                                     <label>字幕模型</label>
                                     <select class="select-input" id="setting-subtitle-model">
                                         <option value="doubao">豆包 (云端)</option>
+                                    </select>
+                                </div>
+                                <div class="setting-row">
+                                    <label>语音输入设备</label>
+                                    <select class="select-input" id="setting-input-device" title="整段和流式语音识别使用的麦克风">
+                                        <option value="">系统默认</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="settings-section">
+                            <div class="section-header">
+                                <h3>音频采集与识别质量</h3>
+                                <svg class="section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                            </div>
+                            <div class="section-body">
+                                <div class="setting-row">
+                                    <label>预设方案</label>
+                                    <select class="select-input" id="setting-audio-profile" title="一键切换整套音频采集与识别优化方案">
+                                        <option value="standard">标准（普通麦克风，自动参数）</option>
+                                        <option value="array_mic">麦克风阵列优化（选最强声道 + 48kHz + F32）</option>
+                                        <option value="custom">自定义（手动调整下方参数）</option>
+                                    </select>
+                                </div>
+                                <div class="setting-row">
+                                    <label>多声道下混策略</label>
+                                    <select class="select-input" id="setting-audio-downmix" title="多声道(含阵列)混合为单声道的策略">
+                                        <option value="strongest">选能量最强的声道（推荐阵列麦克风）</option>
+                                        <option value="average">简单平均所有声道（兼容性好）</option>
+                                        <option value="first_channel">取第一声道（左声道或主麦克风）</option>
+                                    </select>
+                                </div>
+                                <div class="setting-row">
+                                    <label>采样格式</label>
+                                    <select class="select-input" id="setting-audio-sample-format" title="优先使用的音频采样位深，始终排除低质量的 U8/无符号8位">
+                                        <option value="auto">自动（按声卡默认）</option>
+                                        <option value="f32">F32（32位浮点，保真度高，阵列推荐）</option>
+                                        <option value="i16">I16（16位整型，通用）</option>
+                                        <option value="i32">I32（32位整型，专业卡）</option>
+                                    </select>
+                                </div>
+                                <div class="setting-row">
+                                    <label>采样率</label>
+                                    <select class="select-input" id="setting-audio-sample-rate" title="目标采样率，越高保真越好但计算与带宽更大">
+                                        <option value="auto">自动（按声卡默认）</option>
+                                        <option value="16000">16000 Hz（识别引擎原生）</option>
+                                        <option value="44100">44100 Hz（CD 质量）</option>
+                                        <option value="48000">48000 Hz（推荐阵列/专业麦）</option>
+                                    </select>
+                                </div>
+                                <div class="setting-row">
+                                    <label>声道数</label>
+                                    <select class="select-input" id="setting-audio-channels" title="目标声道数（选多少，不影响下混）">
+                                        <option value="auto">自动（按声卡默认）</option>
+                                        <option value="mono">单声道（最省资源）</option>
+                                        <option value="stereo">立体声</option>
                                     </select>
                                 </div>
                             </div>

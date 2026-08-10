@@ -196,6 +196,29 @@ pub async fn toggle_subtitle(state: tauri::State<'_, Arc<AppState>>) -> Result<b
     state.toggle_subtitle().await
 }
 
+/// 枚举系统音频输入设备列表
+/// 返回 (设备名列表, 默认设备名)
+/// 前端用于填充语音输入和字幕识别音源的下拉选择器
+#[tauri::command]
+pub fn list_input_devices() -> Result<(Vec<String>, Option<String>), String> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    let host = cpal::default_host();
+    let default_name = host
+        .default_input_device()
+        .and_then(|d| d.name().ok());
+    let mut devices = Vec::new();
+    if let Ok(iter) = host.input_devices() {
+        for d in iter {
+            if let Ok(name) = d.name() {
+                if !name.is_empty() {
+                    devices.push(name);
+                }
+            }
+        }
+    }
+    Ok((devices, default_name))
+}
+
 /// 计算文件的 SHA256 哈希（同步，分块读取）
 fn compute_sha256(path: &std::path::Path) -> Result<String, String> {
     use sha2::{Digest, Sha256};

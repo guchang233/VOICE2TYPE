@@ -220,8 +220,11 @@ impl AppState {
 
         let device_name = self.config.input_device();
         let device = if device_name.is_empty() { None } else { Some(device_name.as_str()) };
+        let (dm, sf, sr, ch) = self.config.effective_audio_prefs();
 
-        recorder.start(device).map_err(|e| e.to_string())?;
+        recorder
+            .start_with_prefs(device, &dm, &sf, &sr, &ch)
+            .map_err(|e| e.to_string())?;
         self.emit_status(AppStatus::Recording).await;
         Self::set_indicator_state(&self.app_handle, crate::indicator::IndicatorState::Recording).await;
 
@@ -249,8 +252,17 @@ impl AppState {
         let pcm_buffer = session.pcm_buffer();
 
         // 3. 启动音频采集（同步）——立即用 SendStream 包裹，避免裸 cpal::Stream 跨 await
-        let (sample_rate, _channels, stream) =
-            stream_audio::start_capture(pcm_buffer).map_err(|e| e.to_string())?;
+        let device_name = self.config.input_device();
+        let (dm, sf, sr_pref, ch) = self.config.effective_audio_prefs();
+        let (sample_rate, _channels, stream) = stream_audio::start_capture_with_prefs(
+            pcm_buffer,
+            Some(&device_name),
+            Some(&dm),
+            Some(&sf),
+            Some(&sr_pref),
+            Some(&ch),
+        )
+        .map_err(|e| e.to_string())?;
         let stream = SendStream(stream);
         session.set_sample_rate(sample_rate);
 

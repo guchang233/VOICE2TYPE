@@ -89,6 +89,7 @@ fn main() {
             commands::stop_subtitle,
             commands::is_subtitle_running,
             commands::toggle_subtitle,
+            commands::list_input_devices,
             commands::download_whisper_model,
             commands::cancel_download,
             commands::delete_whisper_model,

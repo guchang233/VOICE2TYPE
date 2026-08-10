@@ -9,6 +9,7 @@
         triggerMode: 'hold',
         dictationMode: 'batch',
         subtitleAlign: 'center',
+        previewInterim: false,
         config: null,
         subtitleSettings: {
             fontSize: 32,
@@ -210,6 +211,7 @@
             loadHistory();
         } else if (viewName === 'settings') {
             loadSettings();
+            loadInputDevices();
             // 模型和引擎检测改为手动触发
         }
 
@@ -319,17 +321,25 @@
         const previewText = $('#subtitle-preview-text');
         if (!preview || !previewText) return;
 
+        // 同步 bold 开关状态：与后端 push_subtitle_config 一致，bold = font_weight >= 700
+        // 确保用户直接修改 font_weight 下拉框时 bold 开关也同步更新
+        const weightSelect = $('#subtitle-font-weight');
+        const boldSwitch = $('#subtitle-bold');
+        if (weightSelect && boldSwitch) {
+            const shouldBold = parseInt(weightSelect.value) >= 700;
+            boldSwitch.dataset.on = shouldBold ? 'true' : 'false';
+        }
+
         // 收集当前所有控件值
         const cfg = collectSubtitleSettings();
         if (!cfg) return;
 
-        // 应用样式到预览区域
+        // 应用样式到预览区域（与真实窗口 subtitle.html applyConfig 保持一致）
         const el = previewText.style;
         el.fontFamily = `"${cfg.subtitle_font_family}", sans-serif`;
         el.fontSize = cfg.subtitle_font_size + 'px';
         el.fontWeight = cfg.subtitle_bold ? '700' : String(cfg.subtitle_font_weight);
         el.fontStyle = cfg.subtitle_italic ? 'italic' : 'normal';
-        el.color = cfg.subtitle_font_color;
         el.textAlign = cfg.subtitle_text_align;
         el.letterSpacing = cfg.subtitle_letter_spacing + 'px';
         el.lineHeight = String(cfg.subtitle_line_height);
@@ -337,8 +347,7 @@
         el.borderRadius = cfg.subtitle_border_radius + 'px';
 
         // 背景
-        const bgOpacity = cfg.subtitle_bg_opacity;
-        el.background = hexToRgba(cfg.subtitle_bg_color, bgOpacity);
+        el.background = hexToRgba(cfg.subtitle_bg_color, cfg.subtitle_bg_opacity);
 
         // 模糊
         el.backdropFilter = `blur(${cfg.subtitle_blur}px)`;
@@ -352,8 +361,19 @@
         // 文字阴影
         el.textShadow = buildTextShadow(cfg.subtitle_text_shadow_color, cfg.subtitle_text_shadow_strength);
 
-        // 行数限制（CSS -webkit-line-clamp）
-        preview.style.WebkitLineClamp = cfg.subtitle_max_lines;
+        // 行数限制：设置在文本元素上（与真实窗口 #subtitle-text 一致）
+        el.webkitLineClamp = String(cfg.subtitle_max_lines);
+
+        // interim 状态预览：点击预览文本可切换 最终/临时 状态
+        if (state.previewInterim) {
+            el.color = cfg.subtitle_interim_color;
+            el.opacity = String(cfg.subtitle_interim_opacity);
+            previewText.textContent = '临时识别结果预览效果...';
+        } else {
+            el.color = cfg.subtitle_font_color;
+            el.opacity = '1';
+            previewText.textContent = '实时字幕预览效果';
+        }
 
         // 更新所有 value-display
         updateValueDisplay('subtitle-font-size', `${cfg.subtitle_font_size}px`);
@@ -475,6 +495,33 @@
             console.error('Failed to get models dir:', err);
             const dirEl = $('#models-dir-path');
             if (dirEl) dirEl.textContent = '无法加载';
+        }
+    }
+
+    /// 加载系统音频输入设备列表，填充到两个下拉：
+    /// - #setting-input-device：语音输入设备（整段+流式）
+    /// - #setting-subtitle-input-device：字幕识别音源
+    /// 保留当前选中值，若设备已不存在则回退到"系统默认"
+    async function loadInputDevices() {
+        if (!invoke) return;
+        try {
+            const [devices, defaultName] = await invoke('list_input_devices');
+            const fills = [
+                { id: 'setting-input-device', current: state.config?.basic?.input_device || '' },
+                { id: 'setting-subtitle-input-device', current: state.config?.subtitle?.subtitle_input_device || '' },
+            ];
+            for (const { id, current } of fills) {
+                const sel = $('#' + id);
+                if (!sel) continue;
+                const stillExists = !current || devices.includes(current);
+                sel.innerHTML = '<option value="">系统默认</option>' +
+                    devices.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
+                sel.value = stillExists ? current : '';
+            }
+            // 缓存默认设备名，便于 UI 提示
+            state.defaultInputDevice = defaultName || '';
+        } catch (err) {
+            console.error('Failed to load input devices:', err);
         }
     }
 
@@ -965,6 +1012,22 @@
             if (outputMode) outputMode.value = config.basic.output_mode || 'clipboard';
             if (outputLang) outputLang.value = config.basic.output_language || 'auto';
 
+            // 语音输入设备：options 由 loadInputDevices 异步填充，这里只设选中值
+            const inputDeviceSel = $('#setting-input-device');
+            if (inputDeviceSel) inputDeviceSel.value = config.basic.input_device || '';
+
+            // 音频采集质量偏好
+            const audioProfile = $('#setting-audio-profile');
+            const audioDownmix = $('#setting-audio-downmix');
+            const audioSampleFmt = $('#setting-audio-sample-format');
+            const audioSampleRate = $('#setting-audio-sample-rate');
+            const audioChannels = $('#setting-audio-channels');
+            if (audioProfile) audioProfile.value = config.basic.audio_profile || 'standard';
+            if (audioDownmix) audioDownmix.value = config.basic.audio_downmix || 'strongest';
+            if (audioSampleFmt) audioSampleFmt.value = config.basic.audio_sample_format || 'auto';
+            if (audioSampleRate) audioSampleRate.value = config.basic.audio_sample_rate || 'auto';
+            if (audioChannels) audioChannels.value = config.basic.audio_channels || 'auto';
+
             const dictationMode = config.basic.dictation_mode || 'batch';
             state.dictationMode = dictationMode;
             updateHotkeyHint();
@@ -1008,10 +1071,13 @@
             setVal('subtitle-interim-color', config.subtitle.subtitle_interim_color);
             setVal('subtitle-interim-opacity', Math.round((config.subtitle.subtitle_interim_opacity ?? 0.7) * 100));
 
+            // 字幕识别音源：options 由 loadInputDevices 异步填充，这里只设选中值
+            const subDeviceSel = $('#setting-subtitle-input-device');
+            if (subDeviceSel) subDeviceSel.value = config.subtitle.subtitle_input_device || '';
+
             // 开关：加粗 / 斜体
+            // 注：后端无单独 bold 字段，bold 通过 font_weight>=700 体现（与后端 push_subtitle_config 一致）
             const boldSwitch = $('#subtitle-bold');
-            if (boldSwitch) boldSwitch.dataset.on = config.subtitle.subtitle_italic === true ? 'true' : 'false';
-            // 注：后端无单独 bold 字段，bold 通过 font_weight=700 体现
             const isBold = (config.subtitle.subtitle_font_weight || 400) >= 700;
             if (boldSwitch) boldSwitch.dataset.on = isBold ? 'true' : 'false';
             const italicSwitch = $('#subtitle-italic');
@@ -1180,6 +1246,57 @@
         });
     }
 
+    function initAudioQualityInteractions() {
+        const audioProfile = $('#setting-audio-profile');
+        const audioDownmix = $('#setting-audio-downmix');
+        const audioSampleFmt = $('#setting-audio-sample-format');
+        const audioSampleRate = $('#setting-audio-sample-rate');
+        const audioChannels = $('#setting-audio-channels');
+        if (!audioProfile) return;
+
+        const presetVals = {
+            standard:  { audio_downmix: 'strongest', audio_sample_format: 'auto',  audio_sample_rate: 'auto',  audio_channels: 'auto' },
+            array_mic: { audio_downmix: 'strongest', audio_sample_format: 'f32',   audio_sample_rate: '48000', audio_channels: 'auto' },
+        };
+
+        // 选择预设后：如果非 custom，自动同步其余参数
+        audioProfile.addEventListener('change', () => {
+            if (state.populatingSettings) return;
+            const prof = audioProfile.value;
+            const presets = presetVals[prof];
+            if (!presets) return; // custom 时不干涉
+            const before = state.populatingSettings;
+            state.populatingSettings = true;
+            try {
+                if (audioDownmix) audioDownmix.value = presets.audio_downmix;
+                if (audioSampleFmt) audioSampleFmt.value = presets.audio_sample_format;
+                if (audioSampleRate) audioSampleRate.value = presets.audio_sample_rate;
+                if (audioChannels) audioChannels.value = presets.audio_channels;
+            } finally {
+                state.populatingSettings = before;
+                state.settingsDirty = true;
+            }
+        });
+
+        // 用户手动改动任何细项 → 自动切到自定义 Profile，避免视觉/逻辑不一致
+        const manualControls = [audioDownmix, audioSampleFmt, audioSampleRate, audioChannels];
+        manualControls.forEach(el => {
+            if (!el) return;
+            el.addEventListener('change', () => {
+                if (state.populatingSettings) return;
+                if (audioProfile.value !== 'custom') {
+                    state.populatingSettings = true;
+                    try {
+                        audioProfile.value = 'custom';
+                    } finally {
+                        state.populatingSettings = false;
+                    }
+                }
+                state.settingsDirty = true;
+            });
+        });
+    }
+
     /// 初始化主题切换器
     function initThemeSwitcher() {
         const btns = $$('.theme-selector .seg-btn');
@@ -1280,6 +1397,22 @@
         if (outputMode) newConfig.basic.output_mode = outputMode.value;
         if (outputLang) newConfig.basic.output_language = outputLang.value;
 
+        // 语音输入设备（整段+流式共用）
+        const inputDeviceSel = $('#setting-input-device');
+        if (inputDeviceSel) newConfig.basic.input_device = inputDeviceSel.value;
+
+        // 音频采集质量偏好
+        const audioProfile = $('#setting-audio-profile');
+        const audioDownmix = $('#setting-audio-downmix');
+        const audioSampleFmt = $('#setting-audio-sample-format');
+        const audioSampleRate = $('#setting-audio-sample-rate');
+        const audioChannels = $('#setting-audio-channels');
+        if (audioProfile) newConfig.basic.audio_profile = audioProfile.value;
+        if (audioDownmix) newConfig.basic.audio_downmix = audioDownmix.value;
+        if (audioSampleFmt) newConfig.basic.audio_sample_format = audioSampleFmt.value;
+        if (audioSampleRate) newConfig.basic.audio_sample_rate = audioSampleRate.value;
+        if (audioChannels) newConfig.basic.audio_channels = audioChannels.value;
+
         // 快捷键：将按键名称转换为虚拟键码后保存
         // 后端 rdev 监听器在每次按键时都会读取 config.basic.hotkey，所以保存后立即生效
         const hotkeyInput = $('#setting-hotkey-batch');
@@ -1336,6 +1469,10 @@
                 newConfig.subtitle.subtitle_font_weight = 400;
             }
         }
+
+        // 字幕识别音源（独立于语音输入设备）
+        const subDeviceSel = $('#setting-subtitle-input-device');
+        if (subDeviceSel) newConfig.subtitle.subtitle_input_device = subDeviceSel.value;
 
         // 主题
         const activeThemeBtn = $('.theme-selector .seg-btn.active');
@@ -1679,12 +1816,33 @@
             }
         });
 
+        // 预览文本点击切换 最终/临时(interim) 状态，方便预览 interim 样式
+        const previewText = $('#subtitle-preview-text');
+        if (previewText) {
+            previewText.addEventListener('click', () => {
+                state.previewInterim = !state.previewInterim;
+                updateSubtitlePreview();
+            });
+            previewText.title = '点击切换 最终/临时 状态预览';
+        }
+
         // 开关：加粗 / 斜体
         ['subtitle-bold', 'subtitle-italic'].forEach(id => {
             const sw = $(`#${id}`);
             if (sw) {
                 sw.addEventListener('click', () => {
                     sw.dataset.on = sw.dataset.on === 'true' ? 'false' : 'true';
+                    // bold 开关与 font_weight 同步：后端无单独 bold 字段，通过 font_weight>=700 体现
+                    if (id === 'subtitle-bold') {
+                        const weightSelect = $('#subtitle-font-weight');
+                        if (weightSelect) {
+                            if (sw.dataset.on === 'true') {
+                                weightSelect.value = '700';
+                            } else if (parseInt(weightSelect.value) >= 700) {
+                                weightSelect.value = '400';
+                            }
+                        }
+                    }
                     updateSubtitlePreview();
                 });
             }
@@ -2480,6 +2638,7 @@
         initThemeSwitcher();
         initLlmPostToggle();
         initSettingsDirtyTracking();
+        initAudioQualityInteractions();
 
         // 禁用 WebView 默认右键菜单（刷新、检查、另存为等），
         // 历史记录项的 contextmenu 监听器已自行处理 preventDefault，不受影响。
@@ -2548,6 +2707,7 @@
 
         if (invoke) {
             loadSettings();
+            loadInputDevices();
             updateSubtitlePreview();
         } else {
             console.log('Running in browser mode - Tauri API not available');

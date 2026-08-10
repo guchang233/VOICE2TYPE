@@ -49,9 +49,15 @@
             text-align: center;
             max-width: 100%;
             word-wrap: break-word;
+            word-break: break-word;
             border: 1px solid transparent;
             text-shadow: 0 1px 4px rgba(0,0,0,0.5);
-            transition: opacity 0.15s ease;
+            transition: opacity 0.15s ease, color 0.15s ease;
+            /* 行数限制：配合 -webkit-line-clamp 生效 */
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            -webkit-line-clamp: 3;
         }
         #subtitle-text.interim {
             opacity: 0.7;
@@ -110,6 +116,8 @@
             el.fontStyle = cfg.italic === true ? 'italic' : 'normal';
             if (cfg.fontColor) {
                 el.color = cfg.fontColor;
+                // 保存正常颜色，供 interim 切换时还原
+                subtitleText.dataset.normalColor = cfg.fontColor;
             }
             if (cfg.textAlign) {
                 el.textAlign = cfg.textAlign;
@@ -151,16 +159,23 @@
             if (cfg.interimColor) {
                 subtitleText.dataset.interimColor = cfg.interimColor;
             }
+            // 行数限制
+            if (typeof cfg.maxLines === 'number' && cfg.maxLines > 0) {
+                subtitleText.style.webkitLineClamp = String(cfg.maxLines);
+            }
         }
 
         function updateInterimStyle(isFinal) {
             const interimOpacity = parseFloat(subtitleText.dataset.interimOpacity || '0.7');
             const interimColor = subtitleText.dataset.interimColor || '#ffffff';
+            const normalColor = subtitleText.dataset.normalColor || '#ffffff';
             if (isFinal) {
                 // 还原为正常颜色与不透明度（由 fontColor 配置控制）
                 subtitleText.style.opacity = '1';
+                subtitleText.style.color = normalColor;
             } else {
                 subtitleText.style.opacity = String(interimOpacity);
+                subtitleText.style.color = interimColor;
             }
         }
 
