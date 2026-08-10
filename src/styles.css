@@ -384,7 +384,7 @@ html, body {
 }
 
 .traffic-btn:hover svg {
-    opacity: 1;
+    opacity: 0.3;
 }
 
 .app-title {
@@ -1116,7 +1116,7 @@ html, body {
 .subtitle-cards {
     padding: 0;
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
     gap: 12px;
 }
 
@@ -1146,6 +1146,40 @@ html, body {
     display: flex;
     align-items: center;
     gap: 8px;
+    cursor: pointer;
+    user-select: none;
+    transition: color 0.2s ease;
+}
+
+.subtitle-card-title:hover {
+    color: var(--text-secondary);
+}
+
+.subtitle-card-title::after {
+    content: '';
+    margin-left: auto;
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    background: currentColor;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E") center/contain no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E") center/contain no-repeat;
+    opacity: 0.5;
+    transition: transform 0.2s ease;
+}
+
+.subtitle-card.collapsed .subtitle-card-title::after {
+    transform: rotate(-90deg);
+}
+
+.subtitle-card.collapsed .subtitle-card-title {
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom-color: transparent;
+}
+
+.subtitle-card.collapsed > :not(.subtitle-card-title) {
+    display: none;
 }
 
 .subtitle-card-title::before {
@@ -1443,6 +1477,10 @@ html, body {
 }
 
 .btn-indicator {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
     width: 8px;
     height: 8px;
     border-radius: 50%;
@@ -1871,31 +1909,6 @@ html, body {
     background: var(--accent-cyan);
 }
 
-/* ===== 主分组：更强的视觉权重（语音识别模型 / API密钥 / 模型管理） ===== */
-.settings-section--primary {
-    border-left: 3px solid var(--accent);
-    background:
-        linear-gradient(180deg, var(--accent-soft) 0%, transparent 35%),
-        linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-secondary) 100%);
-    padding-left: 16px;
-}
-
-.settings-section--primary h3 {
-    font-size: 12px;
-    color: var(--text-secondary);
-    letter-spacing: 0.6px;
-}
-
-.settings-section--primary h3::before {
-    height: 13px;
-    background: var(--accent);
-    border-radius: 2px;
-}
-
-.settings-section--primary:hover {
-    border-left-color: var(--accent-hover);
-}
-
 /* ===== 可折叠设置分组 ===== */
 .section-header {
     display: flex;
@@ -1941,16 +1954,10 @@ html, body {
     display: flex;
     flex-direction: column;
     gap: 10px;
-    overflow: hidden;
-    transition: max-height 0.3s ease, opacity 0.2s ease, margin-top 0.3s ease;
-    max-height: 3000px;
-    opacity: 1;
 }
 
 .settings-section.collapsed .section-body {
-    max-height: 0;
-    opacity: 0;
-    margin-top: -10px;
+    display: none;
 }
 
 /* 主题选择器 */

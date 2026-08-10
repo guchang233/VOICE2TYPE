@@ -17,7 +17,9 @@
             lines: 3
         },
         unlisteners: [],
-        isMouseDown: false
+        isMouseDown: false,
+        settingsDirty: false,
+        populatingSettings: false
     };
 
     let invoke = null;
@@ -172,7 +174,20 @@
         }
     }
 
-    function switchView(viewName) {
+    async function switchView(viewName) {
+        // 离开设置页/字幕页时检查未保存的更改
+        const leavingSettingsView =
+            (state.currentView === 'settings' && viewName !== 'settings') ||
+            (state.currentView === 'subtitle' && viewName !== 'subtitle');
+        if (leavingSettingsView && state.settingsDirty) {
+            const result = await showUnsavedChangesDialog();
+            if (result === 'cancel') return;
+            if (result === 'save') {
+                await saveSettings();
+            }
+            state.settingsDirty = false;
+        }
+
         const views = $$('.view');
         views.forEach(v => v.classList.remove('active'));
 
@@ -784,6 +799,43 @@
         }
     }
 
+    /// 显示未保存更改确认对话框，返回 'save' | 'discard' | 'cancel'
+    function showUnsavedChangesDialog() {
+        return new Promise((resolve) => {
+            const overlay = document.createElement('div');
+            overlay.className = 'modal-overlay';
+            overlay.style.display = 'flex';
+            overlay.innerHTML = `
+                <div class="modal-content confirm-modal">
+                    <div class="modal-header">
+                        <h2>未保存的更改</h2>
+                    </div>
+                    <div class="modal-body">
+                        <p class="confirm-message">设置已修改但尚未保存，是否保存更改？</p>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="secondary-btn" data-action="cancel">取消</button>
+                        <button class="secondary-btn" data-action="discard">不保存</button>
+                        <button class="solid-btn" data-action="save">保存</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+            const close = (result) => { overlay.remove(); resolve(result); };
+            overlay.querySelector('[data-action="save"]').addEventListener('click', () => close('save'));
+            overlay.querySelector('[data-action="discard"]').addEventListener('click', () => close('discard'));
+            overlay.querySelector('[data-action="cancel"]').addEventListener('click', () => close('cancel'));
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) close('cancel'); });
+            const onKey = (e) => {
+                if (e.key === 'Escape') {
+                    document.removeEventListener('keydown', onKey);
+                    close('cancel');
+                }
+            };
+            document.addEventListener('keydown', onKey);
+        });
+    }
+
     /// 显示本地模型使用教程模态框
     function showHelpModal() {
         const modal = $('#help-modal');
@@ -864,6 +916,13 @@
     }
 
     function populateSettings(config) {
+        state.populatingSettings = true;
+        _doPopulateSettings(config);
+        state.populatingSettings = false;
+        state.settingsDirty = false;
+    }
+
+    function _doPopulateSettings(config) {
         if (config.model_selection) {
             const batchSel = $('#setting-batch-model');
             const streamSel = $('#setting-stream-model');
@@ -1066,6 +1125,18 @@
             });
         });
 
+        // 字幕设置卡片折叠
+        const cardTitles = $$('.subtitle-card-title');
+        cardTitles.forEach(title => {
+            if (title.dataset.bound) return;
+            title.dataset.bound = '1';
+            title.addEventListener('click', () => {
+                const card = title.closest('.subtitle-card');
+                if (!card) return;
+                card.classList.toggle('collapsed');
+            });
+        });
+
         // 恢复折叠状态
         try {
             const store = JSON.parse(localStorage.getItem('v2t-collapsed-sections') || '{}');
@@ -1090,6 +1161,23 @@
         if (!enable || enable.dataset.bound) return;
         enable.dataset.bound = '1';
         enable.addEventListener('change', updateLlmPostConfigVisibility);
+    }
+
+    /// 设置页脏状态跟踪：用户改动任何设置控件时标记为未保存
+    function initSettingsDirtyTracking() {
+        const handler = () => {
+            if (!state.populatingSettings) {
+                state.settingsDirty = true;
+            }
+        };
+        // 设置页与字幕页都包含可保存的设置控件
+        ['#view-settings', '#view-subtitle'].forEach(viewId => {
+            const view = $(viewId);
+            if (view) {
+                view.addEventListener('change', handler);
+                view.addEventListener('input', handler);
+            }
+        });
     }
 
     /// 初始化主题切换器
@@ -1267,12 +1355,14 @@
         if (!invoke) {
             console.log('Would save config:', newConfig);
             state.config = newConfig;
+            state.settingsDirty = false;
             return;
         }
 
         try {
             await invoke('save_config', { newConfig: newConfig });
             state.config = newConfig;
+            state.settingsDirty = false;
             updateModelBadge();
             updateMicHint();
             // 如果字幕窗口正在显示，热推送新配置让样式立即生效
@@ -1410,6 +1500,15 @@
 
         if (closeBtn) {
             closeBtn.addEventListener('click', async () => {
+                // 关闭窗口时若有未保存设置则提示
+                if ((state.currentView === 'settings' || state.currentView === 'subtitle') && state.settingsDirty) {
+                    const result = await showUnsavedChangesDialog();
+                    if (result === 'cancel') return;
+                    if (result === 'save') {
+                        await saveSettings();
+                    }
+                    state.settingsDirty = false;
+                }
                 if (getCurrentWindow) {
                     try {
                         await getCurrentWindow().close();
@@ -1440,10 +1539,10 @@
 
     function initNavigation() {
         $$('.nav-item').forEach(item => {
-            item.addEventListener('click', () => {
+            item.addEventListener('click', async () => {
                 const view = item.dataset.view;
                 if (view) {
-                    switchView(view);
+                    await switchView(view);
                 }
             });
         });
@@ -1614,6 +1713,7 @@
                     if (newConfig) {
                         await invoke('save_config', { newConfig: newConfig });
                         state.config = newConfig;
+                        state.settingsDirty = false;
                     }
                     await invoke('push_subtitle_config');
                     setStatus('ready', '字幕配置已应用');
@@ -2379,6 +2479,7 @@
         initCollapsibleSections();
         initThemeSwitcher();
         initLlmPostToggle();
+        initSettingsDirtyTracking();
 
         // 禁用 WebView 默认右键菜单（刷新、检查、另存为等），
         // 历史记录项的 contextmenu 监听器已自行处理 preventDefault，不受影响。

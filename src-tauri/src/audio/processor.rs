@@ -1,6 +1,4 @@
-use anyhow::{Context, Result};
-use hound::{SampleFormat, WavSpec, WavWriter};
-use std::io::Cursor;
+use anyhow::Result;
 
 const TARGET_SAMPLE_RATE: u32 = 16_000;
 
@@ -33,26 +31,42 @@ pub fn resample_and_convert(input: &[f32], input_rate: u32) -> (Vec<i16>, u32) {
     (output, TARGET_SAMPLE_RATE)
 }
 
+/// 将 i16 PCM 样本编码为 WAV 字节流（16-bit / mono / 小端）。
+///
+/// 手动构建 WAV 头 + 原始字节，避免 `hound` 逐样本 `write_sample` 的函数调用开销。
+/// 对于 10 秒 16kHz 音频，从 16 万次函数调用降为一次批量写入。
 pub fn encode_wav_memory(samples: &[i16], sample_rate: u32) -> Result<Vec<u8>> {
-    let spec = WavSpec {
-        channels: 1,
-        sample_rate,
-        bits_per_sample: 16,
-        sample_format: SampleFormat::Int,
-    };
+    let data_size = samples.len() * 2; // 每样本 2 字节
+    let total_size = 44 + data_size; // 44 字节头 + 数据
 
-    // 44 字节 WAV 头 + 16-bit 单声道样本
-    let mut cursor = Cursor::new(Vec::with_capacity(44 + samples.len() * 2));
-    let mut writer = WavWriter::new(&mut cursor, spec).context("Failed to create WAV writer")?;
+    // 预分配完整缓冲区，一次写入
+    let mut buf = Vec::with_capacity(total_size);
 
+    // RIFF 头（12 字节）
+    buf.extend_from_slice(b"RIFF");
+    buf.extend_from_slice(&(total_size as u32 - 8).to_le_bytes()); // chunk size
+    buf.extend_from_slice(b"WAVE");
+
+    // fmt 子块（24 字节）
+    buf.extend_from_slice(b"fmt ");
+    buf.extend_from_slice(&16u32.to_le_bytes()); // subchunk1 size
+    buf.extend_from_slice(&1u16.to_le_bytes()); // audio format = PCM
+    buf.extend_from_slice(&1u16.to_le_bytes()); // num channels = mono
+    buf.extend_from_slice(&sample_rate.to_le_bytes());
+    buf.extend_from_slice(&(sample_rate * 2).to_le_bytes()); // byte rate = sample_rate * channels * bits/8
+    buf.extend_from_slice(&2u16.to_le_bytes()); // block align = channels * bits/8
+    buf.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
+
+    // data 子块头（8 字节）
+    buf.extend_from_slice(b"data");
+    buf.extend_from_slice(&(data_size as u32).to_le_bytes());
+
+    // 批量写入样本字节（小端 i16）
     for &sample in samples {
-        writer
-            .write_sample(sample)
-            .context("Failed to write WAV sample")?;
+        buf.extend_from_slice(&sample.to_le_bytes());
     }
 
-    writer.finalize().context("Failed to finalize WAV writer")?;
-    Ok(cursor.into_inner())
+    Ok(buf)
 }
 
 fn float_to_i16(input: &[f32]) -> Vec<i16> {

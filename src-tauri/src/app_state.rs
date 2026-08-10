@@ -334,36 +334,21 @@ impl AppState {
             }
         };
 
-        let samples = {
+        let (samples, input_rate) = {
             let mut recorder = self.recorder.lock().await;
             if !recorder.is_recording() {
                 return Err("Not recording".to_string());
             }
-            recorder.stop().map_err(|e| e.to_string())?
+            let rate = recorder.sample_rate();
+            let samples = recorder.stop().map_err(|e| e.to_string())?;
+            (samples, rate)
         };
 
         self.emit_status(AppStatus::Processing).await;
         Self::set_indicator_state(&self.app_handle, crate::indicator::IndicatorState::Processing).await;
 
-        let input_rate = {
-            let recorder = self.recorder.lock().await;
-            recorder.sample_rate()
-        };
-
-        let result = tokio::task::spawn_blocking(move || -> Result<(Vec<i16>, u32), String> {
-            Ok(processor::resample_and_convert(&samples, input_rate))
-        })
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?;
-
-        let (samples_i16, output_rate) = match result {
-            Ok(v) => v,
-            Err(e) => {
-                self.emit_status(AppStatus::Error(e.clone())).await;
-                Self::set_indicator_state(&self.app_handle, crate::indicator::IndicatorState::Error).await;
-                return Err(e);
-            }
-        };
+        // 重采样是轻量 CPU 操作（<20ms），直接同步调用，避免 spawn_blocking 调度开销
+        let (samples_i16, output_rate) = processor::resample_and_convert(&samples, input_rate);
 
         if samples_i16.is_empty() {
             self.emit_status(AppStatus::Idle).await;
