@@ -15,3 +15,4 @@ pub mod vad;
 
 pub use formatter::{Formatter, TextFormatter};
 pub use processor::{Context, LocalCorrector, PostProcessor};
+pub use vad::{VadAggressiveness, VadConfig, VadDecision, VadEngine, WebRtcVad};

@@ -27,6 +27,7 @@ tokio = { version = "1.36", features = ["rt-multi-thread", "sync", "time", "macr
 anyhow = "1.0"
 async-trait = "0.1"
 ringbuf = "0.4"
+webrtc-vad = "0.4"
 reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls-native-roots", "blocking", "stream"] }
 sha2 = "0.10"
 cpal = "0.15"
