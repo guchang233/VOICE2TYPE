@@ -1131,7 +1131,7 @@ fn tts_format_ext(format: &str) -> &str {
 /// 文本转语音（生成）：合成音频并写入临时文件，返回文件路径。
 /// 前端可用 `convertFileSrc` 将该路径转为可在 <audio> 中播放的 URL。
 ///
-/// 每次合成都写入唯一文件名（带时间戳），避免浏览器/asset 协议因 URL
+/// 每次合成都写入唯一文件名（UUID），避免浏览器/asset 协议因 URL
 /// 未变而缓存旧音频，导致再次生成时播放器仍播放上一条。
 #[tauri::command]
 pub async fn tts_synthesize(
@@ -1146,44 +1146,54 @@ pub async fn tts_synthesize(
     // 写入配置目录下的 tts/ 目录
     let mut dir = config.config_dir();
     dir.push("tts");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("创建 TTS 目录失败: {}", e))?;
+    tokio::fs::create_dir_all(&dir).await.map_err(|e| format!("创建 TTS 目录失败: {}", e))?;
 
     let ext = tts_format_ext(&tts_cfg.format);
 
-    // 清理旧的生成文件（preview_*.<ext>），避免磁盘堆积
-    if let Ok(entries) = std::fs::read_dir(&dir) {
-        let suffix = format!(".{}", ext);
-        for entry in entries.flatten() {
+    // 清理旧的生成文件（所有 preview_* 前缀，不论扩展名），避免磁盘堆积
+    if let Ok(mut entries) = tokio::fs::read_dir(&dir).await {
+        while let Ok(Some(entry)) = entries.next_entry().await {
             if let Some(name) = entry.file_name().to_str() {
-                if name.starts_with("preview_") && name.ends_with(&suffix) {
-                    let _ = std::fs::remove_file(entry.path());
+                if name.starts_with("preview_") {
+                    let _ = tokio::fs::remove_file(entry.path()).await;
                 }
             }
         }
     }
 
-    // 使用纳秒级时间戳生成唯一文件名，确保 URL 改变，强制 <audio> 重新加载
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let path = dir.join(format!("preview_{}.{}", ts, ext));
-    std::fs::write(&path, &bytes).map_err(|e| format!("写入生成文件失败: {}", e))?;
+    // 使用 UUID 生成唯一文件名，确保 URL 改变，强制 <audio> 重新加载
+    let id = uuid::Uuid::new_v4();
+    let path = dir.join(format!("preview_{}.{}", id, ext));
+    tokio::fs::write(&path, &bytes).await.map_err(|e| format!("写入生成文件失败: {}", e))?;
 
     Ok(path.to_string_lossy().to_string())
 }
 
-/// 文本转语音（导出/下载）：将已合成的试听文件复制到用户选择的路径。
+/// 文本转语音（导出/下载）：将已合成的生成文件复制到用户选择的路径。
 /// 返回保存路径；用户取消则返回 None。
-/// 采用「复制试听文件」而非重新合成，保证下载内容与试听完全一致。
+/// 采用「复制生成文件」而非重新合成，保证下载内容与生成完全一致。
 #[tauri::command]
 pub async fn tts_export(
     app: tauri::AppHandle,
+    config: tauri::State<'_, Arc<ConfigManager>>,
     src_path: String,
     file_name: String,
 ) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
     use tokio::sync::oneshot;
+
+    // 安全校验：src_path 必须位于 TTS 目录内，防止路径遍历
+    let mut tts_dir = config.config_dir();
+    tts_dir.push("tts");
+    let canonical_src = std::path::Path::new(&src_path)
+        .canonicalize()
+        .map_err(|e| format!("源文件不存在或无法访问: {}", e))?;
+    let canonical_dir = tts_dir
+        .canonicalize()
+        .map_err(|e| format!("TTS 目录无法访问: {}", e))?;
+    if !canonical_src.starts_with(&canonical_dir) {
+        return Err("源文件不在 TTS 目录内".to_string());
+    }
 
     // 从源文件扩展名推断保存格式
     let ext = std::path::Path::new(&src_path)
@@ -1217,8 +1227,8 @@ pub async fn tts_export(
         None => return Ok(None),
     };
 
-    // 复制试听文件到目标路径
-    std::fs::copy(&src_path, &dest).map_err(|e| format!("保存文件失败: {}", e))?;
+    // 复制生成文件到目标路径
+    tokio::fs::copy(&src_path, &dest).await.map_err(|e| format!("保存文件失败: {}", e))?;
 
     Ok(Some(dest))
 }

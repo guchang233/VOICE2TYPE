@@ -29,7 +29,8 @@
             lastText: '',
             savingTimer: null,
             voiceSearchTimer: null,
-            loaded: false
+            loaded: false,
+            synthesizing: false
         }
     };
 
@@ -930,18 +931,21 @@
                 `;
             }
 
+            const safeTitle = escapeHtml(title);
+            const safeMessage = escapeHtml(message).replace(/\n/g, '<br>');
+            const safeConfirmText = escapeHtml(confirmText || '确认');
             overlay.innerHTML = `
                 <div class="modal-content confirm-modal">
                     <div class="modal-header">
-                        <h2>${title}</h2>
+                        <h2>${safeTitle}</h2>
                     </div>
                     <div class="modal-body">
-                        <p class="confirm-message">${message.replace(/\n/g, '<br>')}</p>
+                        <p class="confirm-message">${safeMessage}</p>
                     </div>
                     <div class="modal-footer">
                         ${selectHtml}
                         <button class="secondary-btn" data-action="cancel">取消</button>
-                        <button class="solid-btn" data-action="confirm">${confirmText || '确认'}</button>
+                        <button class="solid-btn" data-action="confirm">${safeConfirmText}</button>
                     </div>
                 </div>
             `;
@@ -1643,6 +1647,16 @@
         return div.innerHTML;
     }
 
+    /// 转义 HTML 属性值（额外转义引号，防止属性注入型 XSS）
+    function escapeAttr(text) {
+        return String(text == null ? '' : text)
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
     function initWindowControls() {
         const closeBtn = $('#btn-close');
         const minimizeBtn = $('#btn-minimize');
@@ -2300,12 +2314,6 @@
         return `${log.time} [${log.level.toUpperCase()}]${source} ${log.message}`;
     }
 
-    function escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
-
     function initLogs() {
         const clearBtn = $('#btn-clear-logs');
         if (clearBtn) {
@@ -2765,6 +2773,8 @@
     /// 生成语音
     async function synthesizeTts() {
         if (!invoke) return;
+        if (state.tts.synthesizing) return; // 防止重入
+
         const text = ($('#tts-text') || {}).value || '';
         if (!text.trim()) {
             setTtsStatus('error', '请输入文本');
@@ -2777,6 +2787,12 @@
             return;
         }
 
+        // 设置重入标志并禁用按钮（在弹窗前，防止弹窗期间再次点击触发并发请求）
+        state.tts.synthesizing = true;
+        const btn = $('#btn-tts-synthesize');
+        const dlBtn = $('#btn-tts-download');
+        if (btn) btn.disabled = true;
+
         // 若文本有改动且已有生成记录，弹窗确认是否重新生成
         const hasExistingAudio = !!state.tts.lastAudioPath;
         const textChanged = hasExistingAudio && state.tts.lastText !== text;
@@ -2786,20 +2802,21 @@
                 '文本已修改，是否使用新文本重新生成语音？',
                 '重新生成'
             );
-            if (!confirmed) return;
+            if (!confirmed) {
+                state.tts.synthesizing = false;
+                if (btn) btn.disabled = false;
+                return;
+            }
         }
 
         saveTtsConfigDebounced();
 
-        const btn = $('#btn-tts-synthesize');
-        const dlBtn = $('#btn-tts-download');
         const audio = $('#tts-audio');
         const wrap = $('#tts-player-wrap');
         const empty = $('#tts-empty-hint');
         // 保存旧音频路径，失败时可用于恢复
         const prevPath = state.tts.lastAudioPath;
 
-        if (btn) btn.disabled = true;
         // 生成期间：暂停旧音频、隐藏播放器和下载按钮，下方音频区域消失直至生成完成
         if (audio) {
             audio.pause();
@@ -2840,6 +2857,7 @@
                 if (empty) empty.style.display = '';
             }
         } finally {
+            state.tts.synthesizing = false;
             if (btn) btn.disabled = false;
         }
     }
@@ -2929,10 +2947,10 @@
             const title = escapeHtml(v.title || '未命名');
             const desc = escapeHtml((v.languages && v.languages.length) ? v.languages.join(', ') : (v.description || ''));
             const author = v.author ? escapeHtml(v.author.nickname || '') : (v.isPersonal ? '自建' : '');
-            const cover = v.cover_image ? `style="background-image:url('${escapeHtml(v.cover_image)}')"` : '';
+            const cover = v.cover_image ? `style="background-image:url('${escapeAttr(v.cover_image)}')"` : '';
             const tags = (v.tags || []).slice(0, 3).map(tg => `<span class="vv-tag">${escapeHtml(tg)}</span>`).join('');
             const sel = id === currentRef ? ' selected' : '';
-            return `<div class="tts-voice-item${sel}" data-id="${escapeHtml(id)}" data-title="${escapeHtml(v.title || '')}">
+            return `<div class="tts-voice-item${sel}" data-id="${escapeAttr(id)}" data-title="${escapeAttr(v.title || '')}">
                 <div class="vv-avatar" ${cover}></div>
                 <div class="vv-body">
                     <div class="vv-title">${title}</div>

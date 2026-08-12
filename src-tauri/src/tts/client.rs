@@ -79,7 +79,7 @@ fn get_system_proxy() -> Option<String> {
             let server_name: Vec<u16> = "ProxyServer\0".encode_utf16().collect();
             let mut buf = [0u8; 1024];
             let mut buf_len: u32 = buf.len() as u32;
-            let _ = RegQueryValueExW(
+            let status = RegQueryValueExW(
                 hkey,
                 PCWSTR(server_name.as_ptr()),
                 None,
@@ -88,31 +88,44 @@ fn get_system_proxy() -> Option<String> {
                 Some(&mut buf_len),
             );
             let _ = RegCloseKey(hkey);
+            if status.is_err() {
+                return None;
+            }
+            // 安全限制：API 可能将 buf_len 改写为大于 buf 的值（ERROR_MORE_DATA）
+            let safe_len = (buf_len as usize).min(buf.len()) / 2;
             let server = String::from_utf16_lossy(std::slice::from_raw_parts(
                 buf.as_ptr() as *const u16,
-                buf_len as usize / 2,
+                safe_len,
             ))
             .trim_end_matches('\0')
             .to_string();
             if server.is_empty() {
                 return None;
             }
-            // ProxyServer 可能是 "http=127.0.0.1:8080;https=127.0.0.1:8080" 格式
+            // ProxyServer 可能是 "http=127.0.0.1:8080;https=127.0.0.1:8080;socks=127.0.0.1:1080" 格式
             if server.contains('=') {
                 for part in server.split(';') {
-                    if part.starts_with("https=") || part.starts_with("http=") {
-                        let addr = part.split('=').nth(1).unwrap_or("");
-                        if !addr.is_empty() {
-                            return Some(if addr.starts_with("http") {
-                                addr.to_string()
-                            } else {
-                                format!("http://{}", addr)
-                            });
-                        }
+                    let (scheme, addr) = if let Some(a) = part.strip_prefix("https=") {
+                        ("https", a)
+                    } else if let Some(a) = part.strip_prefix("http=") {
+                        ("http", a)
+                    } else if let Some(a) = part.strip_prefix("socks=") {
+                        ("socks5", a)
+                    } else {
+                        continue;
+                    };
+                    if !addr.is_empty() {
+                        return Some(if addr.contains("://") {
+                            addr.to_string()
+                        } else {
+                            format!("{}://{}", scheme, addr)
+                        });
                     }
                 }
+                // 所有部分均未匹配已知协议，不使用代理
+                return None;
             }
-            return Some(if server.starts_with("http") {
+            return Some(if server.contains("://") {
                 server
             } else {
                 format!("http://{}", server)
@@ -125,13 +138,24 @@ fn get_system_proxy() -> Option<String> {
     }
 }
 
+/// 移除代理 URL 中的凭据（user:pass@）部分，用于日志记录。
+fn sanitize_proxy_url(url: &str) -> String {
+    if let Some(idx) = url.find("://") {
+        let rest = &url[idx + 3..];
+        if let Some(at_idx) = rest.find('@') {
+            return format!("{}{}", &url[..idx + 3], &rest[at_idx + 1..]);
+        }
+    }
+    url.to_string()
+}
+
 /// TTS 专用 HTTP 客户端：音频合成可能较慢，超时放宽到 5 分钟。
 /// 自动检测并使用 Windows 系统代理。
 pub static TTS_HTTP_CLIENT: Lazy<Client> = Lazy::new(|| {
     let mut builder = Client::builder()
         .timeout(std::time::Duration::from_secs(300));
     if let Some(proxy_url) = get_system_proxy() {
-        log::info!("[tts] 检测到系统代理: {}", proxy_url);
+        log::info!("[tts] 检测到系统代理: {}", sanitize_proxy_url(&proxy_url));
         if let Ok(proxy) = reqwest::Proxy::all(&proxy_url) {
             builder = builder.proxy(proxy);
         }
