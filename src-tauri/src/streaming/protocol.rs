@@ -128,6 +128,10 @@ pub fn encode_audio_chunk(pcm: &[u8], sequence: i32, is_last: bool) -> Result<Ve
 pub struct AsrResponse {
     pub text: String,
     pub is_final: bool,
+    /// 已确定的文本（utterances 中 definite=true 的部分），不会再变化
+    pub definite_text: String,
+    /// 临时文本（utterances 中 definite=false 的部分），可能随后被修正
+    pub indefinite_text: String,
 }
 
 pub fn decode_server_message(data: &[u8]) -> Result<Option<AsrResponse>> {
@@ -196,29 +200,68 @@ pub fn decode_server_message(data: &[u8]) -> Result<Option<AsrResponse>> {
             bail!("ASR response code {}: {}", code, msg);
         }
     }
-    let text = extract_result_text(&v);
+    let (definite_text, indefinite_text) = extract_result_segments(&v);
+
+    // text 为完整文本（已确定 + 临时），保持向后兼容
+    let text = if indefinite_text.is_empty() {
+        definite_text.clone()
+    } else if definite_text.is_empty() {
+        indefinite_text.clone()
+    } else {
+        format!("{} {}", definite_text, indefinite_text)
+    };
 
     let is_final = flags == FLAG_NEG_WITH_SEQUENCE || flags == FLAG_LAST_PACKET;
 
-    Ok(Some(AsrResponse { text, is_final }))
+    Ok(Some(AsrResponse {
+        text,
+        is_final,
+        definite_text,
+        indefinite_text,
+    }))
 }
 
-fn extract_result_text(v: &Value) -> String {
+/// 从豆包返回的 utterances 数组中分离已确定和临时文本。
+/// 每个 utterance 含 `definite` 字段：true=已确定，false=临时（可能变化）。
+/// 返回 (已确定文本, 临时文本)。
+fn extract_result_segments(v: &Value) -> (String, String) {
     if let Some(utterances) = v.pointer("/result/utterances").and_then(|u| u.as_array()) {
         if !utterances.is_empty() {
-            let joined: String = utterances
-                .iter()
-                .filter_map(|u| u.get("text").and_then(|t| t.as_str()))
-                .collect();
-            if !joined.is_empty() {
-                return joined;
+            let mut definite = String::new();
+            let mut indefinite = String::new();
+            for u in utterances {
+                let text = u.get("text").and_then(|t| t.as_str()).unwrap_or("");
+                if text.is_empty() {
+                    continue;
+                }
+                let is_definite = u
+                    .get("definite")
+                    .and_then(|d| d.as_bool())
+                    .unwrap_or(false);
+                if is_definite {
+                    if !definite.is_empty() {
+                        definite.push(' ');
+                    }
+                    definite.push_str(text);
+                } else {
+                    if !indefinite.is_empty() {
+                        indefinite.push(' ');
+                    }
+                    indefinite.push_str(text);
+                }
+            }
+            if !definite.is_empty() || !indefinite.is_empty() {
+                return (definite, indefinite);
             }
         }
     }
-    v.pointer("/result/text")
+    // 回退：没有 utterances 或全部为空，用 result/text，全部当作已确定
+    let text = v
+        .pointer("/result/text")
         .and_then(|t| t.as_str())
         .unwrap_or("")
-        .to_string()
+        .to_string();
+    (text, String::new())
 }
 
 fn read_u32_be(data: &[u8], offset: usize) -> Result<u32> {

@@ -20,7 +20,17 @@
         unlisteners: [],
         isMouseDown: false,
         settingsDirty: false,
-        populatingSettings: false
+        populatingSettings: false,
+        tts: {
+            voicePage: 1,
+            voicePageSize: 20,
+            voiceTotal: 0,
+            lastAudioPath: null,
+            lastText: '',
+            savingTimer: null,
+            voiceSearchTimer: null,
+            loaded: false
+        }
     };
 
     let invoke = null;
@@ -213,6 +223,8 @@
             loadSettings();
             loadInputDevices();
             // 模型和引擎检测改为手动触发
+        } else if (viewName === 'tts') {
+            loadTtsView();
         }
 
         // 视图切换后刷新分段控件指示器（新视图变为可见后才能正确测量尺寸）
@@ -2615,6 +2627,447 @@
         });
     }
 
+    // ====== 语音合成（TTS / Fish Audio）======
+
+    /// 将本地文件路径转为可在 <audio>/<img> 中加载的 URL（Tauri asset 协议）
+    function toAssetUrl(path) {
+        try {
+            const t = window.__TAURI__;
+            const conv = t && t.core && t.core.convertFileSrc;
+            if (conv) return conv(path);
+        } catch (e) {}
+        // 兜底：手动构造 asset 协议 URL（Windows: http://asset.localhost/...）
+        return 'http://asset.localhost/' + encodeURIComponent(path);
+    }
+
+    /// 加载 TTS 视图：确保配置就绪并填充 UI
+    async function loadTtsView() {
+        if (!invoke) return;
+        if (!state.config) {
+            try {
+                state.config = await invoke('get_config');
+            } catch (e) {
+                console.error('Failed to load config for TTS:', e);
+                return;
+            }
+        }
+        populateTtsUi(state.config.tts || {});
+        if (!state.tts.loaded) {
+            state.tts.loaded = true;
+        }
+    }
+
+    /// 将 TTS 配置填充到 UI 控件
+    function populateTtsUi(tts) {
+        const set = (id, val) => { const el = $('#' + id); if (el && val !== undefined && val !== null) el.value = val; };
+        const setChk = (id, val) => { const el = $('#' + id); if (el) el.checked = !!val; };
+
+        set('tts-api-key', tts.fish_api_key);
+        set('tts-model', tts.model || 's2.1-pro-free');
+        set('tts-format', tts.format || 'mp3');
+        set('tts-mp3-bitrate', String(tts.mp3_bitrate || 128));
+        set('tts-latency', tts.latency || 'normal');
+        set('tts-speed', tts.speed ?? 1);
+        set('tts-volume', tts.volume ?? 0);
+        set('tts-temperature', tts.temperature ?? 0.7);
+        set('tts-top-p', tts.top_p ?? 0.7);
+        set('tts-chunk-length', tts.chunk_length || 200);
+        setChk('tts-normalize', tts.normalize !== false);
+
+        // 回显选中的音色
+        const titleEl = $('#tts-voice-title');
+        const subEl = $('#tts-voice-sub');
+        const clearBtn = $('#btn-tts-clear-voice');
+        if (tts.reference_id) {
+            if (titleEl) titleEl.textContent = tts.reference_title || '已选音色';
+            if (subEl) subEl.textContent = tts.reference_id;
+            if (clearBtn) clearBtn.style.display = '';
+        } else {
+            if (titleEl) titleEl.textContent = '默认音色';
+            if (subEl) subEl.textContent = '使用模型默认音色';
+            if (clearBtn) clearBtn.style.display = 'none';
+        }
+
+        updateTtsSliderLabels();
+        updateTtsModelBadge();
+        updateTtsBitrateVisibility();
+    }
+
+    function updateTtsModelBadge() {
+        const el = $('#tts-model-badge');
+        const sel = $('#tts-model');
+        if (el && sel) el.textContent = sel.value;
+    }
+
+    function updateTtsBitrateVisibility() {
+        const fmt = $('#tts-format');
+        const row = $('#tts-bitrate-row');
+        if (row && fmt) row.style.display = fmt.value === 'mp3' ? '' : 'none';
+    }
+
+    function updateTtsSliderLabels() {
+        const speed = $('#tts-speed');
+        const vol = $('#tts-volume');
+        const temp = $('#tts-temperature');
+        const topp = $('#tts-top-p');
+        const chunk = $('#tts-chunk-length');
+        if (speed) $('#tts-speed-val').textContent = parseFloat(speed.value).toFixed(2) + 'x';
+        if (vol) $('#tts-volume-val').textContent = (vol.value >= 0 ? '+' : '') + vol.value + ' dB';
+        if (temp) $('#tts-temp-val').textContent = parseFloat(temp.value).toFixed(2);
+        if (topp) $('#tts-topp-val').textContent = parseFloat(topp.value).toFixed(2);
+        if (chunk) $('#tts-chunk-val').textContent = chunk.value;
+    }
+
+    /// 从 UI 收集 TTS 配置并写入 state.config.tts
+    function collectTtsConfig() {
+        if (!state.config) state.config = {};
+        if (!state.config.tts) state.config.tts = {};
+        const t = state.config.tts;
+        const get = (id) => { const el = $('#' + id); return el ? el.value : undefined; };
+        const getNum = (id, dflt) => { const el = $('#' + id); return el ? parseFloat(el.value) : dflt; };
+        const getChk = (id) => { const el = $('#' + id); return el ? el.checked : false; };
+
+        t.fish_api_key = get('tts-api-key') ?? t.fish_api_key ?? '';
+        t.model = get('tts-model') || 's2.1-pro-free';
+        t.format = get('tts-format') || 'mp3';
+        t.mp3_bitrate = parseInt(get('tts-mp3-bitrate') || '128', 10);
+        t.latency = get('tts-latency') || 'normal';
+        t.speed = getNum('tts-speed', 1);
+        t.volume = getNum('tts-volume', 0);
+        t.temperature = getNum('tts-temperature', 0.7);
+        t.top_p = getNum('tts-top-p', 0.7);
+        t.chunk_length = parseInt(get('tts-chunk-length') || '200', 10);
+        t.normalize = getChk('tts-normalize');
+        // sample_rate 保持已有值（UI 不暴露）
+        return t;
+    }
+
+    /// 防抖保存 TTS 配置
+    function saveTtsConfigDebounced() {
+        if (!invoke || !state.config) return;
+        if (state.tts.savingTimer) clearTimeout(state.tts.savingTimer);
+        state.tts.savingTimer = setTimeout(async () => {
+            try {
+                await invoke('save_config', { newConfig: state.config });
+            } catch (e) {
+                console.warn('Failed to save TTS config:', e);
+            }
+        }, 500);
+    }
+
+    function setTtsStatus(cls, text) {
+        const el = $('#tts-status');
+        if (!el) return;
+        el.className = 'tts-status' + (cls ? ' ' + cls : '');
+        el.textContent = text;
+    }
+
+    /// 生成语音
+    async function synthesizeTts() {
+        if (!invoke) return;
+        const text = ($('#tts-text') || {}).value || '';
+        if (!text.trim()) {
+            setTtsStatus('error', '请输入文本');
+            setTimeout(() => setTtsStatus('', '就绪'), 2000);
+            return;
+        }
+        const tts = collectTtsConfig();
+        if (!tts.fish_api_key) {
+            setTtsStatus('error', '请先填写 API Key');
+            return;
+        }
+
+        // 若文本有改动且已有生成记录，弹窗确认是否重新生成
+        const hasExistingAudio = !!state.tts.lastAudioPath;
+        const textChanged = hasExistingAudio && state.tts.lastText !== text;
+        if (textChanged) {
+            const { confirmed } = await showConfirmDialog(
+                '重新生成确认',
+                '文本已修改，是否使用新文本重新生成语音？',
+                '重新生成'
+            );
+            if (!confirmed) return;
+        }
+
+        saveTtsConfigDebounced();
+
+        const btn = $('#btn-tts-synthesize');
+        const dlBtn = $('#btn-tts-download');
+        const audio = $('#tts-audio');
+        const wrap = $('#tts-player-wrap');
+        const empty = $('#tts-empty-hint');
+        // 保存旧音频路径，失败时可用于恢复
+        const prevPath = state.tts.lastAudioPath;
+
+        if (btn) btn.disabled = true;
+        // 生成期间：暂停旧音频、隐藏播放器和下载按钮，下方音频区域消失直至生成完成
+        if (audio) {
+            audio.pause();
+            audio.removeAttribute('src');
+            audio.load();
+        }
+        if (wrap) wrap.style.display = 'none';
+        if (dlBtn) dlBtn.disabled = true;
+        if (empty) empty.style.display = 'none';
+        setTtsStatus('busy', '生成中...');
+
+        try {
+            const path = await invoke('tts_synthesize', { text });
+            state.tts.lastAudioPath = path;
+            state.tts.lastText = text;
+
+            // 生成完成：显示新音频（不自动播放，由用户手动点击播放）
+            if (audio) {
+                audio.src = toAssetUrl(path);
+                audio.load();
+            }
+            if (wrap) wrap.style.display = '';
+            if (empty) empty.style.display = 'none';
+            if (dlBtn) dlBtn.disabled = false;
+            setTtsStatus('ok', '生成成功');
+        } catch (e) {
+            console.error('TTS synthesize failed:', e);
+            setTtsStatus('error', '生成失败：' + (e || '未知错误'));
+            // 失败时恢复旧音频（若有），否则显示空提示
+            if (prevPath) {
+                if (audio) {
+                    audio.src = toAssetUrl(prevPath);
+                    audio.load();
+                }
+                if (wrap) wrap.style.display = '';
+                if (dlBtn) dlBtn.disabled = false;
+            } else {
+                if (empty) empty.style.display = '';
+            }
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    /// 下载（保存为文件）
+    async function downloadTts() {
+        if (!invoke || !state.tts.lastAudioPath) return;
+        const dlBtn = $('#btn-tts-download');
+        if (dlBtn) dlBtn.disabled = true;
+        setTtsStatus('busy', '保存中...');
+        try {
+            const name = (state.tts.lastText || 'tts_output').slice(0, 20).replace(/[\\/:*?"<>|\n\r]/g, '').trim() || 'tts_output';
+            const result = await invoke('tts_export', { srcPath: state.tts.lastAudioPath, fileName: name });
+            if (result) {
+                setTtsStatus('ok', '已保存');
+            } else {
+                setTtsStatus('', '就绪');
+            }
+        } catch (e) {
+            console.error('TTS export failed:', e);
+            setTtsStatus('error', '保存失败：' + (e || '未知错误'));
+        } finally {
+            if (dlBtn) dlBtn.disabled = false;
+        }
+    }
+
+    // ---- 音色库浏览器 ----
+
+    function openVoiceLib() {
+        const modal = $('#tts-voice-modal');
+        if (!modal) return;
+        modal.style.display = 'flex';
+        state.tts.voicePage = 1;
+        loadVoices();
+    }
+
+    function closeVoiceLib() {
+        const modal = $('#tts-voice-modal');
+        if (modal) modal.style.display = 'none';
+    }
+
+    async function loadVoices() {
+        if (!invoke) return;
+        const tts = collectTtsConfig();
+        if (!tts.fish_api_key) {
+            setTtsStatus('error', '请先填写 API Key');
+            return;
+        }
+        const grid = $('#tts-voice-grid');
+        if (grid) grid.innerHTML = '<div class="tts-voice-loading">加载中...</div>';
+
+        const title = ($('#tts-voice-search-input') || {}).value || '';
+        const language = ($('#tts-voice-lang-filter') || {}).value || '';
+        const sortBy = ($('#tts-voice-sort') || {}).value || 'score';
+        const selfOnly = ($('#tts-voice-self') || {}).checked || false;
+
+        try {
+            const res = await invoke('tts_list_voices', {
+                pageSize: state.tts.voicePageSize,
+                pageNumber: state.tts.voicePage,
+                title: title || null,
+                language: language || null,
+                sortBy: sortBy || null,
+                selfOnly: selfOnly || null
+            });
+            const items = (res && res.items) || [];
+            state.tts.voiceTotal = (res && res.total) ? res.total : items.length;
+            renderVoices(items);
+            updateVoicePager();
+        } catch (e) {
+            console.error('Failed to load voices:', e);
+            if (grid) grid.innerHTML = '<div class="tts-voice-loading">加载失败：' + escapeHtml(String(e)) + '</div>';
+        }
+    }
+
+    function renderVoices(items) {
+        const grid = $('#tts-voice-grid');
+        if (!grid) return;
+        if (!items.length) {
+            grid.innerHTML = '<div class="tts-voice-loading">未找到音色</div>';
+            return;
+        }
+        const currentRef = (state.config && state.config.tts && state.config.tts.reference_id) || '';
+        grid.innerHTML = items.map(v => {
+            // 兼容新旧 API 响应：voiceId (新) / _id (旧)
+            const id = v.voiceId || v._id || '';
+            const title = escapeHtml(v.title || '未命名');
+            const desc = escapeHtml((v.languages && v.languages.length) ? v.languages.join(', ') : (v.description || ''));
+            const author = v.author ? escapeHtml(v.author.nickname || '') : (v.isPersonal ? '自建' : '');
+            const cover = v.cover_image ? `style="background-image:url('${escapeHtml(v.cover_image)}')"` : '';
+            const tags = (v.tags || []).slice(0, 3).map(tg => `<span class="vv-tag">${escapeHtml(tg)}</span>`).join('');
+            const sel = id === currentRef ? ' selected' : '';
+            return `<div class="tts-voice-item${sel}" data-id="${escapeHtml(id)}" data-title="${escapeHtml(v.title || '')}">
+                <div class="vv-avatar" ${cover}></div>
+                <div class="vv-body">
+                    <div class="vv-title">${title}</div>
+                    <div class="vv-desc">${desc}${author ? ' · ' + author : ''}</div>
+                    <div class="vv-tags">${tags}</div>
+                </div>
+            </div>`;
+        }).join('');
+
+        grid.querySelectorAll('.tts-voice-item').forEach(item => {
+            item.addEventListener('click', () => {
+                selectVoice(item.dataset.id, item.dataset.title);
+                closeVoiceLib();
+            });
+        });
+    }
+
+    function selectVoice(id, title) {
+        if (!state.config) state.config = {};
+        if (!state.config.tts) state.config.tts = {};
+        state.config.tts.reference_id = id || '';
+        state.config.tts.reference_title = title || '';
+        populateTtsUi(state.config.tts);
+        saveTtsConfigDebounced();
+        setTtsStatus('ok', '已选择音色');
+        setTimeout(() => setTtsStatus('', '就绪'), 1500);
+    }
+
+    function clearVoice() {
+        if (!state.config) state.config = {};
+        if (!state.config.tts) state.config.tts = {};
+        state.config.tts.reference_id = '';
+        state.config.tts.reference_title = '';
+        populateTtsUi(state.config.tts);
+        saveTtsConfigDebounced();
+    }
+
+    function updateVoicePager() {
+        const info = $('#tts-voice-page-info');
+        const prev = $('#btn-tts-voice-prev');
+        const next = $('#btn-tts-voice-next');
+        const pageSize = state.tts.voicePageSize;
+        const totalPages = Math.max(1, Math.ceil(state.tts.voiceTotal / pageSize));
+        if (info) info.textContent = `${state.tts.voicePage} / ${totalPages}（共 ${state.tts.voiceTotal}）`;
+        if (prev) prev.disabled = state.tts.voicePage <= 1;
+        if (next) next.disabled = state.tts.voicePage >= totalPages;
+    }
+
+    /// 初始化 TTS 视图事件
+    function initTts() {
+        const text = $('#tts-text');
+        if (text) {
+            text.addEventListener('input', () => {
+                const cc = $('#tts-char-count');
+                if (cc) cc.textContent = text.value.length + ' 字';
+            });
+        }
+
+        // 滑块/选择器：实时更新标签 + 防抖保存
+        const liveIds = ['tts-speed', 'tts-volume', 'tts-temperature', 'tts-top-p', 'tts-chunk-length'];
+        liveIds.forEach(id => {
+            const el = $('#' + id);
+            if (el) el.addEventListener('input', () => { updateTtsSliderLabels(); collectTtsConfig(); saveTtsConfigDebounced(); });
+        });
+        const changeIds = ['tts-model', 'tts-format', 'tts-mp3-bitrate', 'tts-latency', 'tts-normalize', 'tts-api-key'];
+        changeIds.forEach(id => {
+            const el = $('#' + id);
+            if (!el) return;
+            const evt = el.type === 'checkbox' ? 'change' : 'change';
+            el.addEventListener(evt, () => {
+                collectTtsConfig();
+                saveTtsConfigDebounced();
+                updateTtsModelBadge();
+                updateTtsBitrateVisibility();
+            });
+        });
+
+        const synthBtn = $('#btn-tts-synthesize');
+        if (synthBtn) synthBtn.addEventListener('click', synthesizeTts);
+        const dlBtn = $('#btn-tts-download');
+        if (dlBtn) dlBtn.addEventListener('click', downloadTts);
+
+        // 音色库
+        const libBtn = $('#btn-tts-voice-lib');
+        if (libBtn) libBtn.addEventListener('click', openVoiceLib);
+        const closeBtn = $('#btn-tts-voice-close');
+        if (closeBtn) closeBtn.addEventListener('click', closeVoiceLib);
+        const clearBtn = $('#btn-tts-clear-voice');
+        if (clearBtn) clearBtn.addEventListener('click', clearVoice);
+
+        // 点击模态背景关闭
+        const modal = $('#tts-voice-modal');
+        if (modal) {
+            modal.addEventListener('click', (e) => { if (e.target === modal) closeVoiceLib(); });
+        }
+
+        // 搜索 / 筛选（防抖）
+        const searchInput = $('#tts-voice-search-input');
+        if (searchInput) {
+            searchInput.addEventListener('input', () => {
+                if (state.tts.voiceSearchTimer) clearTimeout(state.tts.voiceSearchTimer);
+                state.tts.voiceSearchTimer = setTimeout(() => {
+                    state.tts.voicePage = 1;
+                    loadVoices();
+                }, 400);
+            });
+        }
+        ['tts-voice-lang-filter', 'tts-voice-sort', 'tts-voice-self'].forEach(id => {
+            const el = $('#' + id);
+            if (el) el.addEventListener('change', () => { state.tts.voicePage = 1; loadVoices(); });
+        });
+
+        // 分页
+        const prevBtn = $('#btn-tts-voice-prev');
+        if (prevBtn) prevBtn.addEventListener('click', () => {
+            if (state.tts.voicePage > 1) { state.tts.voicePage--; loadVoices(); }
+        });
+        const nextBtn = $('#btn-tts-voice-next');
+        if (nextBtn) nextBtn.addEventListener('click', () => {
+            state.tts.voicePage++;
+            loadVoices();
+        });
+
+        // API Key 链接
+        const apiLink = $('#tts-api-link');
+        if (apiLink) {
+            apiLink.addEventListener('click', async (e) => {
+                e.preventDefault();
+                if (window.__TAURI__ && window.__TAURI__.shell && window.__TAURI__.shell.open) {
+                    await window.__TAURI__.shell.open('https://fish.audio/app/api-keys');
+                }
+            });
+        }
+    }
+
     function init() {
         // 早期应用主题（从 localStorage 缓存），避免主题闪烁
         try {
@@ -2639,6 +3092,7 @@
         initLlmPostToggle();
         initSettingsDirtyTracking();
         initAudioQualityInteractions();
+        initTts();
 
         // 禁用 WebView 默认右键菜单（刷新、检查、另存为等），
         // 历史记录项的 contextmenu 监听器已自行处理 preventDefault，不受影响。

@@ -15,6 +15,7 @@ mod recorder;
 mod session;
 mod streaming;
 mod subtitle;
+mod tts;
 mod update;
 mod utils;
 mod whisper_local;
@@ -106,6 +107,10 @@ fn main() {
             commands::push_subtitle_config,
             commands::get_subtitle_window_status,
             commands::set_subtitle_obs_mode,
+            commands::tts_synthesize,
+            commands::tts_export,
+            commands::tts_list_voices,
+            commands::tts_get_voice,
         ])
         .setup(move |app| {
             let app_handle = app.handle();

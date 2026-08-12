@@ -4,6 +4,7 @@ use tauri::{Emitter, Manager};
 use crate::app_state::AppState;
 use crate::config::{AppConfig, ConfigManager};
 use crate::history;
+use crate::tts::client::{FishTtsClient, VoiceListParams};
 
 /// 全局下载取消标志：用户点击「取消」后置为 true，下载循环检测到后中断
 static CANCEL_DOWNLOAD: AtomicBool = AtomicBool::new(false);
@@ -1113,4 +1114,152 @@ pub async fn set_subtitle_obs_mode(
         }
     }
     Ok(())
+}
+
+// ===================== Fish Audio TTS（文本转语音）=====================
+
+/// 根据输出格式返回文件扩展名
+fn tts_format_ext(format: &str) -> &str {
+    match format {
+        "wav" => "wav",
+        "pcm" => "pcm",
+        "opus" => "opus",
+        _ => "mp3",
+    }
+}
+
+/// 文本转语音（生成）：合成音频并写入临时文件，返回文件路径。
+/// 前端可用 `convertFileSrc` 将该路径转为可在 <audio> 中播放的 URL。
+///
+/// 每次合成都写入唯一文件名（带时间戳），避免浏览器/asset 协议因 URL
+/// 未变而缓存旧音频，导致再次生成时播放器仍播放上一条。
+#[tauri::command]
+pub async fn tts_synthesize(
+    config: tauri::State<'_, Arc<ConfigManager>>,
+    text: String,
+) -> Result<String, String> {
+    let tts_cfg = config.tts_config();
+    let client = FishTtsClient::new();
+
+    let bytes = client.synthesize(&text, &tts_cfg).await.map_err(|e| e.to_string())?;
+
+    // 写入配置目录下的 tts/ 目录
+    let mut dir = config.config_dir();
+    dir.push("tts");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建 TTS 目录失败: {}", e))?;
+
+    let ext = tts_format_ext(&tts_cfg.format);
+
+    // 清理旧的生成文件（preview_*.<ext>），避免磁盘堆积
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        let suffix = format!(".{}", ext);
+        for entry in entries.flatten() {
+            if let Some(name) = entry.file_name().to_str() {
+                if name.starts_with("preview_") && name.ends_with(&suffix) {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
+    }
+
+    // 使用纳秒级时间戳生成唯一文件名，确保 URL 改变，强制 <audio> 重新加载
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let path = dir.join(format!("preview_{}.{}", ts, ext));
+    std::fs::write(&path, &bytes).map_err(|e| format!("写入生成文件失败: {}", e))?;
+
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// 文本转语音（导出/下载）：将已合成的试听文件复制到用户选择的路径。
+/// 返回保存路径；用户取消则返回 None。
+/// 采用「复制试听文件」而非重新合成，保证下载内容与试听完全一致。
+#[tauri::command]
+pub async fn tts_export(
+    app: tauri::AppHandle,
+    src_path: String,
+    file_name: String,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    use tokio::sync::oneshot;
+
+    // 从源文件扩展名推断保存格式
+    let ext = std::path::Path::new(&src_path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("mp3")
+        .to_string();
+
+    let default_name = if file_name.is_empty() {
+        format!("tts_output.{}", ext)
+    } else if std::path::Path::new(&file_name).extension().is_some() {
+        file_name
+    } else {
+        format!("{}.{}", file_name, ext)
+    };
+
+    // 弹出保存对话框（非阻塞回调 + oneshot channel）
+    let (tx, rx) = oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title("保存语音文件")
+        .add_filter("音频", &[ext.as_str()])
+        .set_file_name(&default_name)
+        .save_file(move |path| {
+            let _ = tx.send(path);
+        });
+
+    let chosen = rx.await.map_err(|e| format!("对话框通道错误: {}", e))?;
+    let dest = match chosen {
+        Some(p) => p.to_string(),
+        None => return Ok(None),
+    };
+
+    // 复制试听文件到目标路径
+    std::fs::copy(&src_path, &dest).map_err(|e| format!("保存文件失败: {}", e))?;
+
+    Ok(Some(dest))
+}
+
+/// 查询 Fish Audio 官方音色库（GET /model），返回原始 JSON。
+#[tauri::command]
+pub async fn tts_list_voices(
+    config: tauri::State<'_, Arc<ConfigManager>>,
+    page_size: Option<u32>,
+    page_number: Option<u32>,
+    title: Option<String>,
+    language: Option<String>,
+    sort_by: Option<String>,
+    self_only: Option<bool>,
+) -> Result<serde_json::Value, String> {
+    let tts_cfg = config.tts_config();
+    let client = FishTtsClient::new();
+    let params = VoiceListParams {
+        page_size: page_size.unwrap_or(20),
+        page_number: page_number.unwrap_or(1),
+        title: title.unwrap_or_default(),
+        language: language.unwrap_or_default(),
+        sort_by: sort_by.unwrap_or_else(|| "score".to_string()),
+        self_only: self_only.unwrap_or(false),
+    };
+    client
+        .list_voices(&tts_cfg.fish_api_key, &params)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 获取单个音色详情（GET /model/{id}）。
+#[tauri::command]
+pub async fn tts_get_voice(
+    config: tauri::State<'_, Arc<ConfigManager>>,
+    voice_id: String,
+) -> Result<serde_json::Value, String> {
+    let tts_cfg = config.tts_config();
+    let client = FishTtsClient::new();
+    client
+        .get_voice(&tts_cfg.fish_api_key, &voice_id)
+        .await
+        .map_err(|e| e.to_string())
 }

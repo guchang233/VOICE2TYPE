@@ -3408,9 +3408,570 @@ textarea.text-input:focus {
     .output-text.processing,
     .status-dot.recording,
     .status-dot.processing,
-    .pulse-dot,
-    .nav-indicator,
-    .seg-indicator {
+        .pulse-dot,
+        .nav-indicator,
+        .seg-indicator {
         animation: none !important;
+    }
+}
+
+/* ===== 语音合成（TTS）视图 ===== */
+#view-tts .tts-layout {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 16px;
+    padding: 4px 4px 8px;
+    overflow: hidden;
+    min-height: 0;
+}
+
+#view-tts .tts-main {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 0;
+}
+
+#view-tts .tts-textarea-wrap {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    overflow: hidden;
+    min-height: 0;
+    transition: border-color var(--transition);
+}
+
+#view-tts .tts-textarea-wrap:focus-within {
+    border-color: var(--accent-blue);
+}
+
+#view-tts .tts-textarea {
+    flex: 1;
+    width: 100%;
+    background: transparent;
+    border: none;
+    outline: none;
+    resize: none;
+    padding: 16px 18px;
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    font-size: 14px;
+    line-height: 1.7;
+    min-height: 120px;
+}
+
+#view-tts .tts-textarea::placeholder {
+    color: var(--text-tertiary);
+}
+
+#view-tts .tts-text-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 16px;
+    border-top: 1px solid var(--border-color);
+    font-size: 11px;
+    color: var(--text-tertiary);
+    background: var(--bg-tertiary);
+}
+
+#view-tts .tts-hint {
+    color: var(--text-tertiary-strong);
+}
+
+#view-tts .tts-actions {
+    display: flex;
+    gap: 10px;
+}
+
+#view-tts .tts-actions .solid-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 9px 18px;
+    font-size: 13px;
+}
+
+#view-tts .tts-actions .solid-btn#btn-tts-synthesize {
+    background: var(--accent-blue);
+    color: var(--text-on-accent);
+    border-color: var(--accent-blue);
+}
+
+#view-tts .tts-actions .solid-btn#btn-tts-synthesize:hover {
+    background: var(--accent-blue-hover);
+    border-color: var(--accent-blue-hover);
+}
+
+#view-tts .tts-actions .solid-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+#view-tts .tts-player-wrap {
+    padding: 12px 14px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+}
+
+#view-tts .tts-empty-hint {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 24px;
+    color: var(--text-tertiary);
+    font-size: 12px;
+    text-align: center;
+}
+
+#view-tts .tts-status {
+    font-size: 12px;
+    color: var(--text-secondary);
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+}
+
+#view-tts .tts-status.busy {
+    color: var(--accent-cyan);
+    border-color: var(--accent-cyan);
+}
+
+#view-tts .tts-status.error {
+    color: var(--accent-red);
+    border-color: var(--accent-red);
+}
+
+#view-tts .tts-status.ok {
+    color: var(--accent-green);
+    border-color: var(--accent-green);
+}
+
+/* 参数面板 */
+#view-tts .tts-params {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+    padding-right: 2px;
+}
+
+#view-tts .tts-section {
+    padding: 12px 14px 14px;
+    gap: 8px;
+}
+
+#view-tts .tts-section .section-header h3 {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+}
+
+/* 通用表单行 */
+#view-tts .field-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+#view-tts .slider-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+#view-tts .slider-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+#view-tts .slider-label em {
+    font-style: normal;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+}
+
+#view-tts .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+#view-tts .tts-select,
+#view-tts .tts-input {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 6px 8px;
+    font-size: 12px;
+    font-family: var(--font-body);
+    outline: none;
+    transition: border-color var(--transition);
+    min-width: 0;
+}
+
+#view-tts .tts-select:focus,
+#view-tts .tts-input:focus {
+    border-color: var(--accent-blue);
+}
+
+#view-tts .tts-input {
+    width: 100%;
+    padding: 8px 10px;
+}
+
+#view-tts .field-row .tts-select {
+    max-width: 180px;
+}
+
+/* range 滑块美化 */
+#view-tts input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
+    background: var(--border-color);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+}
+
+#view-tts input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    background: var(--accent-blue);
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid var(--bg-secondary);
+    transition: background var(--transition);
+}
+
+#view-tts input[type="range"]::-webkit-slider-thumb:hover {
+    background: var(--accent-blue-hover);
+}
+
+#view-tts input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent-blue);
+    cursor: pointer;
+}
+
+#view-tts .tts-tip {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    line-height: 1.5;
+    margin: 2px 0 0;
+}
+
+#view-tts .tts-tip a {
+    color: var(--accent-cyan);
+    text-decoration: none;
+}
+
+#view-tts .tts-tip a:hover {
+    text-decoration: underline;
+}
+
+/* 幽灵按钮 */
+#view-tts .ghost-btn {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 5px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: var(--transition);
+    white-space: nowrap;
+}
+
+#view-tts .ghost-btn:hover:not(:disabled) {
+    background: var(--bg-hover);
+    border-color: var(--border-strong);
+    color: var(--text-primary);
+}
+
+#view-tts .ghost-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+#view-tts .icon-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    border-radius: var(--radius-sm);
+    transition: var(--transition);
+}
+
+#view-tts .icon-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+}
+
+/* 音色卡片 */
+#view-tts .tts-voice-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+}
+
+#view-tts .tts-voice-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+#view-tts .tts-voice-avatar {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+    flex-shrink: 0;
+    background-size: cover;
+    background-position: center;
+}
+
+#view-tts .tts-voice-meta {
+    min-width: 0;
+}
+
+#view-tts .tts-voice-title {
+    font-size: 13px;
+    color: var(--text-primary);
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#view-tts .tts-voice-sub {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#view-tts .tts-clear-voice {
+    margin-top: 4px;
+    align-self: flex-start;
+}
+
+/* 音色库模态 */
+#view-tts .tts-voice-modal {
+    position: fixed;
+    inset: 0;
+    background: var(--bg-overlay);
+    z-index: 1100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+
+#view-tts .tts-voice-modal-content {
+    width: 100%;
+    max-width: 760px;
+    max-height: 80vh;
+    background: var(--bg-modal);
+    border: 1px solid var(--border-strong);
+    border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+#view-tts .tts-voice-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+#view-tts .tts-voice-modal-header h3 {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+#view-tts .tts-voice-search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-color);
+    flex-wrap: wrap;
+}
+
+#view-tts .tts-voice-search input[type="text"] {
+    flex: 1;
+    min-width: 140px;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 7px 10px;
+    font-size: 12px;
+    outline: none;
+}
+
+#view-tts .tts-voice-search input[type="text"]:focus {
+    border-color: var(--accent-blue);
+}
+
+#view-tts .tts-self-toggle {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+#view-tts .tts-voice-grid {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px 16px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+    gap: 10px;
+    align-content: start;
+}
+
+#view-tts .tts-voice-loading {
+    grid-column: 1 / -1;
+    text-align: center;
+    color: var(--text-tertiary);
+    font-size: 13px;
+    padding: 40px 0;
+}
+
+#view-tts .tts-voice-item {
+    display: flex;
+    gap: 10px;
+    padding: 10px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+#view-tts .tts-voice-item:hover {
+    border-color: var(--accent-blue);
+    background: var(--bg-hover);
+}
+
+#view-tts .tts-voice-item.selected {
+    border-color: var(--accent-blue);
+    background: var(--accent-soft);
+}
+
+#view-tts .tts-voice-item .vv-avatar {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+    background-size: cover;
+    background-position: center;
+}
+
+#view-tts .tts-voice-item .vv-body {
+    min-width: 0;
+    flex: 1;
+}
+
+#view-tts .tts-voice-item .vv-title {
+    font-size: 13px;
+    color: var(--text-primary);
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#view-tts .tts-voice-item .vv-desc {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 2px;
+}
+
+#view-tts .tts-voice-item .vv-tags {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-top: 6px;
+}
+
+#view-tts .tts-voice-item .vv-tag {
+    font-size: 10px;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    padding: 1px 5px;
+}
+
+#view-tts .tts-voice-pager {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border-color);
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+@media (max-width: 900px) {
+    #view-tts .tts-layout {
+        grid-template-columns: 1fr;
+        overflow-y: auto;
+    }
+    #view-tts .tts-params {
+        overflow-y: visible;
     }
 }

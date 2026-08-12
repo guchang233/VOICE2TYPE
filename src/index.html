@@ -1936,6 +1936,10 @@
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
                     <span class="nav-label">实时字幕</span>
                 </div>
+                <div class="nav-item" data-view="tts">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>
+                    <span class="nav-label">语音合成</span>
+                </div>
                 <div class="nav-item" data-view="history">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
                     <span class="nav-label">历史记录</span>
@@ -2229,6 +2233,187 @@
 
                         <div class="subtitle-toggle-section">
                             <p class="subtitle-tip">点击右上角「开启实时字幕」按钮开始 / 停止</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="view" id="view-tts">
+                    <div class="view-header">
+                        <h2>语音合成</h2>
+                        <div class="view-header-actions">
+                            <span class="tts-status" id="tts-status">就绪</span>
+                        </div>
+                    </div>
+                    <div class="tts-layout">
+                        <div class="tts-main">
+                            <div class="tts-textarea-wrap">
+                                <textarea id="tts-text" class="tts-textarea" placeholder="输入要合成语音的文本，支持中英日等多语言..."></textarea>
+                                <div class="tts-text-meta">
+                                    <span id="tts-char-count">0 字</span>
+                                    <span class="tts-hint">Fish Audio · <span id="tts-model-badge">s2.1-pro-free</span></span>
+                                </div>
+                            </div>
+                            <div class="tts-actions">
+                                <button class="solid-btn" id="btn-tts-synthesize">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4"></path><path d="M12 18v4"></path><path d="M4.93 4.93l2.83 2.83"></path><path d="M16.24 16.24l2.83 2.83"></path><path d="M2 12h4"></path><path d="M18 12h4"></path><path d="M4.93 19.07l2.83-2.83"></path><path d="M16.24 7.76l2.83-2.83"></path></svg>
+                                    生成
+                                </button>
+                                <button class="solid-btn" id="btn-tts-download" disabled>
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                    下载
+                                </button>
+                            </div>
+                            <div class="tts-player-wrap" id="tts-player-wrap" style="display:none">
+                                <audio id="tts-audio" controls style="width:100%"></audio>
+                            </div>
+                            <div class="tts-empty-hint" id="tts-empty-hint">
+                                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.3"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>
+                                <p>输入文本后点击「生成」合成语音</p>
+                            </div>
+                        </div>
+
+                        <div class="tts-params">
+                            <div class="settings-section tts-section">
+                                <div class="section-header">
+                                    <h3>音色</h3>
+                                    <svg class="section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                </div>
+                                <div class="section-body">
+                                    <div class="tts-voice-card" id="tts-voice-card">
+                                        <div class="tts-voice-info">
+                                            <div class="tts-voice-avatar" id="tts-voice-avatar"></div>
+                                            <div class="tts-voice-meta">
+                                                <div class="tts-voice-title" id="tts-voice-title">默认音色</div>
+                                                <div class="tts-voice-sub" id="tts-voice-sub">使用模型默认音色</div>
+                                            </div>
+                                        </div>
+                                        <button class="ghost-btn" id="btn-tts-voice-lib">音色库</button>
+                                    </div>
+                                    <button class="ghost-btn tts-clear-voice" id="btn-tts-clear-voice" style="display:none">清除选择</button>
+                                </div>
+                            </div>
+
+                            <div class="settings-section tts-section">
+                                <div class="section-header">
+                                    <h3>模型与格式</h3>
+                                    <svg class="section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                </div>
+                                <div class="section-body">
+                                    <label class="field-row">
+                                        <span>模型</span>
+                                        <select id="tts-model" class="tts-select">
+                                            <option value="s2.1-pro-free">S2.1 Pro Free（免费）</option>
+                                            <option value="s2.1-pro">S2.1 Pro</option>
+                                            <option value="s2-pro">S2 Pro</option>
+                                            <option value="s1">S1（情感）</option>
+                                        </select>
+                                    </label>
+                                    <label class="field-row">
+                                        <span>音频格式</span>
+                                        <select id="tts-format" class="tts-select">
+                                            <option value="mp3">MP3</option>
+                                            <option value="wav">WAV</option>
+                                            <option value="opus">Opus</option>
+                                            <option value="pcm">PCM</option>
+                                        </select>
+                                    </label>
+                                    <label class="field-row" id="tts-bitrate-row">
+                                        <span>MP3 码率</span>
+                                        <select id="tts-mp3-bitrate" class="tts-select">
+                                            <option value="64">64 kbps</option>
+                                            <option value="128">128 kbps</option>
+                                            <option value="192">192 kbps</option>
+                                        </select>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="settings-section tts-section">
+                                <div class="section-header">
+                                    <h3>韵律与生成</h3>
+                                    <svg class="section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                </div>
+                                <div class="section-body">
+                                    <div class="slider-row">
+                                        <span class="slider-label">语速 <em id="tts-speed-val">1.00x</em></span>
+                                        <input type="range" id="tts-speed" min="0.5" max="2" step="0.05" value="1">
+                                    </div>
+                                    <div class="slider-row">
+                                        <span class="slider-label">音量 <em id="tts-volume-val">0 dB</em></span>
+                                        <input type="range" id="tts-volume" min="-20" max="20" step="1" value="0">
+                                    </div>
+                                    <label class="field-row">
+                                        <span>延迟模式</span>
+                                        <select id="tts-latency" class="tts-select">
+                                            <option value="normal">Normal（最佳质量）</option>
+                                            <option value="balanced">Balanced（均衡）</option>
+                                            <option value="low">Low（最低延迟）</option>
+                                        </select>
+                                    </label>
+                                    <div class="slider-row">
+                                        <span class="slider-label">温度 <em id="tts-temp-val">0.70</em></span>
+                                        <input type="range" id="tts-temperature" min="0" max="1" step="0.05" value="0.7">
+                                    </div>
+                                    <div class="slider-row">
+                                        <span class="slider-label">Top P <em id="tts-topp-val">0.70</em></span>
+                                        <input type="range" id="tts-top-p" min="0" max="1" step="0.05" value="0.7">
+                                    </div>
+                                    <div class="slider-row">
+                                        <span class="slider-label">分段长度 <em id="tts-chunk-val">200</em></span>
+                                        <input type="range" id="tts-chunk-length" min="100" max="300" step="10" value="200">
+                                    </div>
+                                    <label class="toggle-row">
+                                        <span>文本归一化（数字/日期）</span>
+                                        <input type="checkbox" id="tts-normalize" checked>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="settings-section tts-section">
+                                <div class="section-header">
+                                    <h3>API Key</h3>
+                                    <svg class="section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                </div>
+                                <div class="section-body">
+                                    <input type="password" id="tts-api-key" class="tts-input" placeholder="Fish Audio API Key" autocomplete="off">
+                                    <p class="tts-tip">在 <a href="#" id="tts-api-link">fish.audio/app/api-keys</a> 获取密钥。免费层使用 s2.1-pro-free 模型。</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="tts-voice-modal" id="tts-voice-modal" style="display:none">
+                        <div class="tts-voice-modal-content">
+                            <div class="tts-voice-modal-header">
+                                <h3>官方音色库</h3>
+                                <button class="icon-btn" id="btn-tts-voice-close" title="关闭">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                                </button>
+                            </div>
+                            <div class="tts-voice-search">
+                                <input type="text" id="tts-voice-search-input" placeholder="搜索音色名称...">
+                                <select id="tts-voice-lang-filter" class="tts-select">
+                                    <option value="">全部语言</option>
+                                    <option value="zh">中文</option>
+                                    <option value="en">English</option>
+                                    <option value="ja">日本語</option>
+                                    <option value="ko">한국어</option>
+                                </select>
+                                <select id="tts-voice-sort" class="tts-select">
+                                    <option value="score">综合排序</option>
+                                    <option value="task_count">使用量</option>
+                                    <option value="created_at">最新</option>
+                                </select>
+                                <label class="tts-self-toggle"><input type="checkbox" id="tts-voice-self"> 仅自建</label>
+                            </div>
+                            <div class="tts-voice-grid" id="tts-voice-grid">
+                                <div class="tts-voice-loading">加载中...</div>
+                            </div>
+                            <div class="tts-voice-pager">
+                                <button class="ghost-btn" id="btn-tts-voice-prev" disabled>上一页</button>
+                                <span id="tts-voice-page-info">1 / 1</span>
+                                <button class="ghost-btn" id="btn-tts-voice-next">下一页</button>
+                            </div>
                         </div>
                     </div>
                 </div>

@@ -250,31 +250,25 @@ async fn run_doubao_streaming(
 
     let app_result = app.clone();
     let result_task = tokio::spawn(async move {
-        let mut final_text = String::new();
         while let Some(msg) = result_rx.recv().await {
             match msg {
-                Ok(AsrResponse { text, is_final }) => {
-                    let display = if is_final {
-                        let t = text.clone();
-                        final_text = t.clone();
-                        t
-                    } else {
-                        if final_text.is_empty() {
-                            text
-                        } else {
-                            format!("{} {}", final_text, text)
-                        }
-                    };
+                Ok(AsrResponse {
+                    text,
+                    is_final,
+                    definite_text,
+                    indefinite_text,
+                }) => {
+                    // 已确定文本用正常颜色，临时文本用 interim 颜色
+                    // 前端根据 definite/indefinite 分段渲染
                     let _ = app_result.emit(
                         "subtitle-text",
                         serde_json::json!({
-                            "text": display,
-                            "isFinal": is_final
+                            "text": text,
+                            "isFinal": is_final,
+                            "definite": definite_text,
+                            "indefinite": indefinite_text
                         }),
                     );
-                    if is_final {
-                        final_text.clear();
-                    }
                 }
                 Err(e) => {
                     log::error!("[字幕] 识别错误: {}", e);

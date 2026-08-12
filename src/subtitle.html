@@ -65,6 +65,14 @@
         #subtitle-text.empty {
             opacity: 0.5;
         }
+        /* 已确定文本段（definite），使用正常颜色 */
+        #subtitle-text .seg-definite {
+            /* color 和 opacity 由 JS 动态设置（normalColor / 1） */
+        }
+        /* 临时文本段（indefinite），使用 interim 颜色 */
+        #subtitle-text .seg-indefinite {
+            /* color 和 opacity 由 JS 动态设置（interimColor / interimOpacity） */
+        }
     </style>
 </head>
 <body>
@@ -179,13 +187,48 @@
             }
         }
 
+        // HTML 转义，防止文本中的特殊字符破坏 DOM
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
         listen('subtitle-text', (event) => {
-            const { text, isFinal } = event.payload;
-            const displayText = text || '...';
-            subtitleText.textContent = displayText;
-            subtitleText.classList.toggle('interim', !isFinal);
-            subtitleText.classList.toggle('empty', !text || text.trim() === '');
-            updateInterimStyle(isFinal);
+            const { text, isFinal, definite, indefinite } = event.payload;
+            const interimOpacity = parseFloat(subtitleText.dataset.interimOpacity || '0.7');
+            const interimColor = subtitleText.dataset.interimColor || '#ffffff';
+            const normalColor = subtitleText.dataset.normalColor || '#ffffff';
+
+            // 优先使用 definite/indefinite 分段渲染（流式识别场景）
+            // 已确定文本用正常颜色，临时文本用 interim 颜色，混合显示
+            const defText = (definite || '').trim();
+            const indefText = (indefinite || '').trim();
+
+            if (defText || indefText) {
+                let html = '';
+                if (defText) {
+                    html += `<span class="seg-definite" style="color:${normalColor};opacity:1">${escapeHtml(defText)}</span>`;
+                }
+                if (indefText) {
+                    if (defText) html += ' ';
+                    html += `<span class="seg-indefinite" style="color:${interimColor};opacity:${interimOpacity}">${escapeHtml(indefText)}</span>`;
+                }
+                subtitleText.innerHTML = html;
+                // 容器本身不切换 interim class（颜色由内部 span 控制）
+                subtitleText.classList.remove('interim');
+                subtitleText.classList.toggle('empty', false);
+                // 容器透明度恢复为 1（由内部 span 各自控制透明度）
+                subtitleText.style.opacity = '1';
+                subtitleText.style.color = '';
+            } else {
+                // 回退：无 definite/indefinite（状态提示等），用原有逻辑
+                const displayText = text || '...';
+                subtitleText.textContent = displayText;
+                subtitleText.classList.toggle('interim', !isFinal);
+                subtitleText.classList.toggle('empty', !text || text.trim() === '');
+                updateInterimStyle(isFinal);
+            }
         });
 
         listen('subtitle-config', (event) => {

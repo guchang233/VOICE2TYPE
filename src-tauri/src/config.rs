@@ -388,6 +388,68 @@ impl Default for LlmPostProcessConfig {
     }
 }
 
+/// Fish Audio 文本转语音（TTS）配置。
+///
+/// 调用 Fish Audio 的 TTS 接口，将文本转为语音。默认使用免费层 `s2.1-pro-free` 模型，
+/// 支持官方音色库（reference_id）、参数调节（语速/音量/温度等）、试听与下载。
+///
+/// API 文档：https://docs.fish.audio
+/// - TTS: POST https://api.fish.audio/v1/tts （model 通过请求头传递）
+/// - 音色库: GET https://api.fish.audio/model
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TtsConfig {
+    /// Fish Audio API Key（Bearer 鉴权）。在 https://fish.audio/app/api-keys 获取。
+    pub fish_api_key: String,
+    /// TTS 模型，通过请求头 `model` 传递。可选：s2.1-pro-free（免费，默认）/ s2.1-pro / s2-pro / s1
+    pub model: String,
+    /// 选中的音色 ID（reference_id），对应官方音色库或自建音色。留空则使用模型默认音色。
+    pub reference_id: String,
+    /// 选中的音色标题（仅前端展示用，便于回显）
+    pub reference_title: String,
+    /// 输出音频格式：mp3 / wav / pcm / opus
+    pub format: String,
+    /// 语速倍率 0.5–2.0，1.0 = 正常
+    pub speed: f32,
+    /// 音量调整（dB），正值更大，负值更小
+    pub volume: f32,
+    /// 延迟-质量权衡：normal / balanced / low
+    pub latency: String,
+    /// 文本分段大小 100–300
+    pub chunk_length: u32,
+    /// 是否归一化数字/日期/缩写
+    pub normalize: bool,
+    /// 采样多样性 0–1
+    pub temperature: f32,
+    /// nucleus sampling 0–1
+    pub top_p: f32,
+    /// MP3 比特率 64/128/192（仅 format=mp3 生效）
+    pub mp3_bitrate: u32,
+    /// 采样率（Hz），0 = 使用格式默认值
+    pub sample_rate: u32,
+}
+
+impl Default for TtsConfig {
+    fn default() -> Self {
+        Self {
+            fish_api_key: String::new(),
+            model: "s2.1-pro-free".to_string(),
+            reference_id: String::new(),
+            reference_title: String::new(),
+            format: "mp3".to_string(),
+            speed: 1.0,
+            volume: 0.0,
+            latency: "normal".to_string(),
+            chunk_length: 200,
+            normalize: true,
+            temperature: 0.7,
+            top_p: 0.7,
+            mp3_bitrate: 128,
+            sample_rate: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ModelSelectionConfig {
@@ -420,6 +482,7 @@ pub struct AppConfig {
     pub vad: VadConfig,
     pub model_selection: ModelSelectionConfig,
     pub llm_post: LlmPostProcessConfig,
+    pub tts: TtsConfig,
     pub theme: String,
 
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -478,6 +541,7 @@ impl Default for AppConfig {
             vad: VadConfig::default(),
             model_selection: ModelSelectionConfig::default(),
             llm_post: LlmPostProcessConfig::default(),
+            tts: TtsConfig::default(),
             theme: "auto".to_string(),
             model_name: None,
             output_language: None,
@@ -1482,6 +1546,15 @@ impl ConfigManager {
     pub fn set_custom_model_name(&self, name: String) {
         let mut cfg = self.config.lock().unwrap();
         cfg.model.custom_model_name = name;
+    }
+
+    pub fn tts_config(&self) -> TtsConfig {
+        self.config.lock().unwrap().tts.clone()
+    }
+
+    pub fn set_tts_config(&self, tts: TtsConfig) {
+        let mut cfg = self.config.lock().unwrap();
+        cfg.tts = tts;
     }
 
     pub fn log_dir(&self) -> PathBuf {
