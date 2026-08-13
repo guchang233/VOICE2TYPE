@@ -98,6 +98,78 @@ jobs:
           generate_release_notes: true
           files: ${{ steps.binary.outputs.path }}
 
+      - name: Generate CHANGELOG entry
+        shell: bash
+        run: |
+          python << 'PYEOF'
+          import subprocess, re
+          from datetime import datetime
+
+          tag = "${{ steps.tag.outputs.name }}"
+          version = tag.lstrip("v")
+
+          # 获取上一个 tag
+          try:
+              prev_tag = subprocess.check_output(
+                  ["git", "describe", "--tags", "--abbrev=0", tag + "^"],
+                  text=True, stderr=subprocess.DEVNULL
+              ).strip()
+          except Exception:
+              prev_tag = ""
+
+          # 获取 commit 列表
+          if prev_tag:
+              commits = subprocess.check_output(
+                  ["git", "log", f"{prev_tag}..{tag}", "--pretty=format:%s", "--no-merges"],
+                  text=True
+              ).strip().split("\n")
+          else:
+              commits = subprocess.check_output(
+                  ["git", "log", tag, "--pretty=format:%s", "--no-merges"],
+                  text=True
+              ).strip().split("\n")
+
+          # 按 conventional commits 分类
+          categories = {
+              "feat": "新增", "fix": "修复", "perf": "性能",
+              "refactor": "重构", "chore": "变更", "docs": "文档",
+              "style": "样式", "test": "测试", "ci": "CI", "build": "构建",
+          }
+          grouped = {}
+          for commit in commits:
+              if not commit:
+                  continue
+              m = re.match(r"^(\w+)(\(.+?\))?!?:\s*(.+)$", commit)
+              if m:
+                  cat = categories.get(m.group(1).lower(), "其他")
+                  grouped.setdefault(cat, []).append(m.group(3))
+              else:
+                  grouped.setdefault("其他", []).append(commit)
+
+          # 生成 Markdown 条目
+          today = datetime.now().strftime("%Y-%m-%d")
+          lines = [f"## [{version}] - {today}", ""]
+          for cat, descs in grouped.items():
+              lines.append(f"### {cat}")
+              for d in descs:
+                  lines.append(f"- {d}")
+              lines.append("")
+
+          entry = "\n".join(lines)
+
+          # 插入到 CHANGELOG.md（在第一个 "## [" 之前）
+          with open("CHANGELOG.md", "r", encoding="utf-8") as f:
+              content = f.read()
+          parts = content.split("## [", 1)
+          if len(parts) == 2:
+              new_content = parts[0] + entry + "## [" + parts[1]
+          else:
+              new_content = content + "\n" + entry
+          with open("CHANGELOG.md", "w", encoding="utf-8") as f:
+              f.write(new_content)
+          print(f"Updated CHANGELOG.md for {version}")
+          PYEOF
+
       - name: Update update.json for jsDelivr CDN
         shell: bash
         run: |
@@ -132,6 +204,6 @@ jobs:
           # tag 触发时 checkout 处于 detached HEAD，需显式指定推送到 main 分支
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add update.json
-          git commit -m "chore: update update.json for ${VERSION}" || echo "No changes to commit"
+          git add update.json CHANGELOG.md
+          git commit -m "chore: update update.json and CHANGELOG for ${VERSION}" || echo "No changes to commit"
           git push origin HEAD:main
