@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
@@ -67,16 +68,18 @@ pub struct AppState {
     cached_language: Arc<std::sync::Mutex<Option<String>>>,
     pub subtitle: Arc<SubtitleService>,
     streaming_runtime: Arc<Mutex<StreamingRuntime>>,
-    /// 识别处理互斥锁：防止 stop_recording_and_recognize 并发执行。
-    /// 持有 guard 期间（从 stop 到输出完成）拒绝新的识别请求，避免多次 LLM/转写叠加导致卡死。
-    processing_lock: Arc<Mutex<()>>,
+    /// 取消标志：force_cancel 时置 true，识别流程在各关键点检查并提前退出。
+    cancel_flag: Arc<AtomicBool>,
+    /// 是否正在处理（ASR/LLM/输出）：替代原 processing_lock Mutex，
+    /// 允许 force_cancel 强制重置后立即启动新录音。
+    is_processing: Arc<AtomicBool>,
 }
 
 impl AppState {
     pub fn new(config: Arc<ConfigManager>) -> Self {
         let whisper_model_dir = config.whisper_models_dir();
         let whisper_engine = Arc::new(std::sync::Mutex::new(LocalWhisperEngine::new(whisper_model_dir)));
-        let subtitle = Arc::new(SubtitleService::new());
+        let subtitle = Arc::new(SubtitleService::new(config.clone()));
 
         // 读回持久化的 auto 检测语言，避免重启后首调再做语言检测
         let persisted_lang = config.local_whisper_detected_language();
@@ -95,7 +98,8 @@ impl AppState {
             cached_language,
             subtitle,
             streaming_runtime: Arc::new(Mutex::new(StreamingRuntime::new())),
-            processing_lock: Arc::new(Mutex::new(())),
+            cancel_flag: Arc::new(AtomicBool::new(false)),
+            is_processing: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -202,16 +206,60 @@ impl AppState {
         }
     }
 
+    /// 强制中断当前所有操作（录音、流式会话、识别处理），使系统回到可录音状态。
+    /// 调用后 cancel_flag 被置 true，正在执行的 stop_recording_and_recognize 会在下一个检查点退出。
+    pub async fn force_cancel(&self) {
+        // 1. 设置取消标志，通知正在进行的识别流程尽快退出
+        self.cancel_flag.store(true, Ordering::SeqCst);
+
+        // 2. 停止正在进行的录音（整段模式）
+        {
+            let mut recorder = self.recorder.lock().await;
+            if recorder.is_recording() {
+                let _ = recorder.stop();
+                log::info!("[force_cancel] 停止了正在进行的录音");
+            }
+        }
+
+        // 3. 取消流式会话（流式模式）
+        {
+            let mut runtime = self.streaming_runtime.lock().await;
+            let session_opt = runtime.session.take();
+            let _stream = runtime.stream.take();
+            drop(runtime);
+
+            if let Some(mut session) = session_opt {
+                if session.is_running() {
+                    session.cancel(&self.config).await;
+                    log::info!("[force_cancel] 取消了流式会话");
+                }
+            }
+        }
+
+        // 4. 重置处理标志
+        self.is_processing.store(false, Ordering::SeqCst);
+
+        // 5. 通知前端
+        if let Some(handle) = self.app_handle.lock().await.as_ref() {
+            let _ = handle.emit("recording-result", String::new());
+            let _ = handle.emit("force-cancelled", ());
+        }
+
+        self.emit_status(AppStatus::Idle).await;
+        Self::set_indicator_state(&self.app_handle, crate::indicator::IndicatorState::Cancelled).await;
+
+        log::info!("[force_cancel] 已强制中断所有操作");
+    }
+
     pub async fn start_recording(&self) -> Result<(), String> {
         if self.config.is_stream_mode() {
             return self.start_streaming_recording().await;
         }
 
-        // 处理中时拒绝开始新录音，避免转写/LLM 未完成时叠加新请求
-        if self.processing_lock.try_lock().is_err() {
-            log::warn!("[record] 仍在处理上一次识别，忽略录音请求");
-            return Err("Busy processing".to_string());
-        }
+        // 强制中断上一次未完成的操作（录音/处理/流式），确保 F2 任何时候都生效
+        self.force_cancel().await;
+        // 重置取消标志，为新一轮录音/识别做准备
+        self.cancel_flag.store(false, Ordering::SeqCst);
 
         let mut recorder = self.recorder.lock().await;
         if recorder.is_recording() {
@@ -239,6 +287,11 @@ impl AppState {
     /// 启动流式识别会话：先创建会话拿 pcm_buffer，再启动音频采集得到真实采样率，
     /// 最后调用 session.start 建立 WebSocket 并开始 pump。
     pub async fn start_streaming_recording(&self) -> Result<(), String> {
+        // 强制中断上一次未完成的操作，确保 F2 任何时候都生效
+        self.force_cancel().await;
+        // 重置取消标志
+        self.cancel_flag.store(false, Ordering::SeqCst);
+
         // 1. 快速检查是否已在运行（不持有锁跨 await）
         {
             let runtime = self.streaming_runtime.lock().await;
@@ -311,6 +364,7 @@ impl AppState {
             runtime.session.take()
         };
 
+        self.is_processing.store(true, Ordering::SeqCst);
         self.emit_status(AppStatus::Processing).await;
         Self::set_indicator_state(&self.app_handle, crate::indicator::IndicatorState::Processing).await;
 
@@ -319,10 +373,19 @@ impl AppState {
         }
         // session_opt drop here -> session dropped, stream already dropped above
 
+        // 取消检查：流式停止后如果被 force_cancel 中断，不发送结果
+        if self.cancel_flag.load(Ordering::SeqCst) {
+            log::info!("[streaming] 已取消（停止后）");
+            self.is_processing.store(false, Ordering::SeqCst);
+            self.emit_status(AppStatus::Idle).await;
+            return Ok(String::new());
+        }
+
         if let Some(handle) = self.app_handle.lock().await.as_ref() {
             let _ = handle.emit("recording-result", String::new());
         }
 
+        self.is_processing.store(false, Ordering::SeqCst);
         self.emit_status(AppStatus::Idle).await;
         Self::set_indicator_state(&self.app_handle, crate::indicator::IndicatorState::Success).await;
 
@@ -335,20 +398,22 @@ impl AppState {
             return self.stop_streaming_recording().await;
         }
 
-        // 互斥锁：防止前一次识别（含 LLM 调用）未完成时又发起新的识别。
-        // 拿不到锁说明上一次还在处理中，直接拒绝，避免多次转写/LLM 叠加导致卡死。
-        // guard 持有至函数结束（含所有 return 路径），drop 时自动释放。
-        let _guard = match self.processing_lock.try_lock() {
-            Ok(g) => g,
-            Err(_) => {
-                log::warn!("[recognize] 上一次识别仍在处理中，忽略本次请求");
-                return Err("Busy processing".to_string());
-            }
-        };
+        // 用 AtomicBool 替代原 Mutex 互斥锁：如果上一次处理被 force_cancel 重置，
+        // 这里可以直接接管；如果上一次仍在运行，设置 cancel_flag 让其尽快退出。
+        if self.is_processing.swap(true, Ordering::SeqCst) {
+            log::warn!("[recognize] 上一次识别仍在处理中，发送取消信号");
+            self.cancel_flag.store(true, Ordering::SeqCst);
+            // 给旧任务一点时间检查 cancel_flag 并退出
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            self.is_processing.store(true, Ordering::SeqCst);
+        }
+        // 重置 cancel_flag，当前这次识别正常进行
+        self.cancel_flag.store(false, Ordering::SeqCst);
 
         let (samples, input_rate) = {
             let mut recorder = self.recorder.lock().await;
             if !recorder.is_recording() {
+                self.is_processing.store(false, Ordering::SeqCst);
                 return Err("Not recording".to_string());
             }
             let rate = recorder.sample_rate();
@@ -358,6 +423,14 @@ impl AppState {
 
         self.emit_status(AppStatus::Processing).await;
         Self::set_indicator_state(&self.app_handle, crate::indicator::IndicatorState::Processing).await;
+
+        // 取消检查点 1：录音停止后
+        if self.cancel_flag.load(Ordering::SeqCst) {
+            log::info!("[recognize] 已取消（录音停止后）");
+            self.is_processing.store(false, Ordering::SeqCst);
+            self.emit_status(AppStatus::Idle).await;
+            return Ok(String::new());
+        }
 
         // 重采样是轻量 CPU 操作（<20ms），直接同步调用，避免 spawn_blocking 调度开销
         let (samples_i16, output_rate) = processor::resample_and_convert(&samples, input_rate);
@@ -508,14 +581,31 @@ impl AppState {
         let recognition_result = match recognition_result {
             Ok(v) => v,
             Err(e) => {
+                self.is_processing.store(false, Ordering::SeqCst);
                 self.emit_status(AppStatus::Error(e.clone())).await;
                 Self::set_indicator_state(&self.app_handle, crate::indicator::IndicatorState::Error).await;
                 return Err(e);
             }
         };
 
+        // 取消检查点 2：ASR 完成、LLM 处理前
+        if self.cancel_flag.load(Ordering::SeqCst) {
+            log::info!("[recognize] 已取消（ASR 完成后）");
+            self.is_processing.store(false, Ordering::SeqCst);
+            self.emit_status(AppStatus::Idle).await;
+            return Ok(String::new());
+        }
+
         let processed_text =
             crate::pipeline::process_with_config_async(&recognition_result, &self.config).await;
+
+        // 取消检查点 3：LLM 处理后、输出前
+        if self.cancel_flag.load(Ordering::SeqCst) {
+            log::info!("[recognize] 已取消（LLM 处理后）");
+            self.is_processing.store(false, Ordering::SeqCst);
+            self.emit_status(AppStatus::Idle).await;
+            return Ok(String::new());
+        }
 
         if !processed_text.is_empty() {
             crate::history::push(processed_text.clone());
@@ -533,6 +623,7 @@ impl AppState {
             let _ = handle.emit("recording-result", processed_text.clone());
         }
 
+        self.is_processing.store(false, Ordering::SeqCst);
         self.emit_status(AppStatus::Idle).await;
         Self::set_indicator_state(&self.app_handle, crate::indicator::IndicatorState::Success).await;
 

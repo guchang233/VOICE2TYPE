@@ -10,17 +10,12 @@
             height: 100%;
             width: 100%;
             overflow: hidden;
-            /* 窗口已设为 transparent: false + DComp 已禁用，
-               这里用黑色作为窗口底色，让字幕窗口"融入"深色桌面背景，
-               同时保证 OBS 捕捉时不会显示为白色窗口。 */
             background: #000;
             font-family: "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont,
                          "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
             -webkit-user-select: none;
             user-select: none;
         }
-        /* OBS 捕捉兼容模式：保留语义标记（实际视觉与默认一致，因窗口本身已不透明且为黑色）。
-           保留此类用于未来扩展或保持 UI 开关状态与 CSS 联动。 */
         body.obs-mode #subtitle-container {
             -webkit-app-region: no-drag;
             app-region: no-drag;
@@ -34,12 +29,35 @@
             -webkit-app-region: drag;
             app-region: drag;
         }
-        #subtitle-text {
+        /* 卡片容器：承载背景/边框/圆角/模糊，内部为多元素 */
+        #subtitle-box {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
             background: rgba(0, 0, 0, 0.6);
             backdrop-filter: blur(20px);
             -webkit-backdrop-filter: blur(20px);
             border-radius: 12px;
             padding: 12px 24px;
+            border: 1px solid transparent;
+            max-width: 100%;
+            transition: opacity 0.15s ease;
+        }
+        /* 水平布局时元素横向排列 */
+        #subtitle-box.layout-horizontal {
+            flex-direction: row;
+            align-items: center;
+            gap: 16px;
+        }
+        /* 各语义元素通用样式 */
+        .sub-element {
+            word-wrap: break-word;
+            word-break: break-word;
+            transition: opacity 0.15s ease, color 0.15s ease;
+        }
+        .sub-element:empty { display: none; }
+        /* 原文元素 */
+        #sub-original {
             color: #ffffff;
             font-family: "Microsoft YaHei", sans-serif;
             font-size: 32px;
@@ -47,55 +65,99 @@
             line-height: 1.4;
             letter-spacing: 0px;
             text-align: center;
-            max-width: 100%;
-            word-wrap: break-word;
-            word-break: break-word;
-            border: 1px solid transparent;
             text-shadow: 0 1px 4px rgba(0,0,0,0.5);
-            transition: opacity 0.15s ease, color 0.15s ease;
-            /* 行数限制：配合 -webkit-line-clamp 生效 */
             display: -webkit-box;
             -webkit-box-orient: vertical;
             overflow: hidden;
             -webkit-line-clamp: 3;
         }
-        #subtitle-text.interim {
-            opacity: 0.7;
+        /* 译文元素 */
+        #sub-translation {
+            color: #ffffff;
+            font-size: 24px;
+            font-weight: 400;
+            line-height: 1.4;
+            text-align: center;
+            opacity: 0.85;
+            text-shadow: 0 1px 4px rgba(0,0,0,0.5);
         }
-        #subtitle-text.empty {
-            opacity: 0.5;
+        /* 说话人元素 */
+        #sub-speaker {
+            color: #818cf8;
+            font-size: 16px;
+            font-weight: 500;
+            line-height: 1.3;
+        }
+        /* 时间戳元素 */
+        #sub-timestamp {
+            color: #a1a1aa;
+            font-size: 14px;
+            font-weight: 400;
+            line-height: 1.3;
+            font-family: "Cascadia Code", "Consolas", monospace;
         }
         /* 已确定文本段（definite），使用正常颜色 */
-        #subtitle-text .seg-definite {
+        #sub-original .seg-definite {
             /* color 和 opacity 由 JS 动态设置（normalColor / 1） */
         }
         /* 临时文本段（indefinite），使用 interim 颜色 */
-        #subtitle-text .seg-indefinite {
+        #sub-original .seg-indefinite {
             /* color 和 opacity 由 JS 动态设置（interimColor / interimOpacity） */
+        }
+        /* 译文定稿段 */
+        #sub-translation .trans-definite { }
+        /* 译文临时预览段（同声传译中间结果） */
+        #sub-translation .trans-indefinite {
+            /* color/opacity 由 JS 动态设置 */
         }
     </style>
 </head>
 <body>
     <div id="subtitle-container">
-        <div id="subtitle-text" class="empty">等待语音输入...</div>
+        <div id="subtitle-box">
+            <div class="sub-element" id="sub-speaker" style="display:none"></div>
+            <div class="sub-element" id="sub-original">等待语音输入...</div>
+            <div class="sub-element" id="sub-translation" style="display:none"></div>
+            <div class="sub-element" id="sub-timestamp" style="display:none"></div>
+        </div>
     </div>
     <script>
         const { listen } = window.__TAURI__.event;
-        const subtitleText = document.getElementById('subtitle-text');
 
-        // 将 hex 颜色转换为 rgba 字符串（保留 alpha）
+        const subtitleBox = document.getElementById('subtitle-box');
+        const subOriginal = document.getElementById('sub-original');
+        const subTranslation = document.getElementById('sub-translation');
+        const subSpeaker = document.getElementById('sub-speaker');
+        const subTimestamp = document.getElementById('sub-timestamp');
+
+        // ===== 场景身份：窗口 label 决定订阅的场景 =====
+        // 主窗口 label 为 "subtitle"（对应 default 场景）；
+        // 动态窗口 label 为 "subtitle-scene-{sceneId}"
+        let sceneId = 'default';
+        try {
+            window.__TAURI__.window.getCurrentWindow().then((w) => {
+                const label = (w && w.label) || 'subtitle';
+                sceneId = label === 'subtitle' ? 'default' : label.replace(/^subtitle-scene-/, '');
+            }).catch(() => {});
+        } catch (e) {}
+
+        // 配置缓存 + 最近一帧缓存
+        const cfgCache = {};
+        const frameCache = {
+            text: '', isFinal: false, definite: '', indefinite: '',
+            translation: '', translationInterim: '', speaker: ''
+        };
+
         function hexToRgba(hex, alpha) {
-            const h = hex.replace('#', '');
-            const r = parseInt(h.substring(0, 2), 16);
-            const g = parseInt(h.substring(2, 4), 16);
-            const b = parseInt(h.substring(4, 6), 16);
+            const h = (hex || '#000000').replace('#', '');
+            const r = parseInt(h.substring(0, 2), 16) || 0;
+            const g = parseInt(h.substring(2, 4), 16) || 0;
+            const b = parseInt(h.substring(4, 6), 16) || 0;
             return `rgba(${r}, ${g}, ${b}, ${alpha})`;
         }
 
-        // 根据 shadow_strength 生成 text-shadow 字符串（多层叠加增强阴影效果）
         function buildTextShadow(color, strength) {
             if (!strength || strength === 0) return 'none';
-            // 对称投影，模拟轮廓效果
             const offsets = [
                 [0, 1], [0, -1], [1, 0], [-1, 0],
                 [1, 1], [-1, 1], [1, -1], [-1, -1]
@@ -107,103 +169,229 @@
         }
 
         function applyConfig(cfg) {
-            const el = subtitleText.style;
-            if (cfg.fontFamily) {
-                el.fontFamily = `"${cfg.fontFamily}", sans-serif`;
-            }
-            if (cfg.fontSize) {
-                el.fontSize = cfg.fontSize + 'px';
-            }
-            if (cfg.fontWeight) {
-                el.fontWeight = cfg.fontWeight;
-            }
-            // 加粗优先：bold=true 时强制 700
-            if (cfg.bold === true) {
-                el.fontWeight = '700';
-            }
-            el.fontStyle = cfg.italic === true ? 'italic' : 'normal';
-            if (cfg.fontColor) {
-                el.color = cfg.fontColor;
-                // 保存正常颜色，供 interim 切换时还原
-                subtitleText.dataset.normalColor = cfg.fontColor;
-            }
-            if (cfg.textAlign) {
-                el.textAlign = cfg.textAlign;
-            }
-            if (typeof cfg.letterSpacing === 'number') {
-                el.letterSpacing = cfg.letterSpacing + 'px';
-            }
-            if (typeof cfg.lineHeight === 'number') {
-                el.lineHeight = String(cfg.lineHeight);
-            }
-            if (typeof cfg.paddingX === 'number' && typeof cfg.paddingY === 'number') {
-                el.padding = `${cfg.paddingY}px ${cfg.paddingX}px`;
-            }
-            if (typeof cfg.borderRadius === 'number') {
-                el.borderRadius = cfg.borderRadius + 'px';
-            }
-            // 背景：color + opacity
+            Object.assign(cfgCache, cfg);
+
+            // ===== 卡片容器样式（背景/边框/圆角/模糊/内边距） =====
+            const boxEl = subtitleBox.style;
             const bgColor = cfg.bgColor || '#000000';
             const bgOpacity = typeof cfg.bgOpacity === 'number' ? cfg.bgOpacity : 0.6;
-            el.background = hexToRgba(bgColor, bgOpacity);
-            // 模糊
+            boxEl.background = hexToRgba(bgColor, bgOpacity);
             const blur = typeof cfg.blur === 'number' ? cfg.blur : 20;
-            el.backdropFilter = `blur(${blur}px)`;
-            el.webkitBackdropFilter = `blur(${blur}px)`;
-            // 边框
+            boxEl.backdropFilter = `blur(${blur}px)`;
+            boxEl.webkitBackdropFilter = `blur(${blur}px)`;
+            if (typeof cfg.borderRadius === 'number') {
+                boxEl.borderRadius = cfg.borderRadius + 'px';
+            }
             const borderWidth = typeof cfg.borderWidth === 'number' ? cfg.borderWidth : 0;
-            const borderColor = cfg.borderColor || '#ffffff';
-            el.borderWidth = borderWidth + 'px';
-            el.borderStyle = borderWidth > 0 ? 'solid' : 'none';
-            el.borderColor = borderColor;
-            // 阴影
+            boxEl.borderWidth = borderWidth + 'px';
+            boxEl.borderStyle = borderWidth > 0 ? 'solid' : 'none';
+            boxEl.borderColor = cfg.borderColor || '#ffffff';
+            if (typeof cfg.paddingX === 'number' && typeof cfg.paddingY === 'number') {
+                boxEl.padding = `${cfg.paddingY}px ${cfg.paddingX}px`;
+            }
+
+            // ===== 布局方向 =====
+            const layout = cfg.layout || 'vertical';
+            subtitleBox.classList.toggle('layout-horizontal', layout === 'horizontal');
+
+            // ===== 元素可见性 =====
+            const showOriginal = cfg.showOriginal !== false;
+            const showTranslation = cfg.showTranslation === true;
+            const showSpeaker = cfg.showSpeaker === true;
+            const showTimestamp = cfg.showTimestamp === true;
+            subOriginal.style.display = showOriginal ? '' : 'none';
+            subTranslation.style.display = showTranslation ? '' : 'none';
+            subSpeaker.style.display = showSpeaker ? '' : 'none';
+            subTimestamp.style.display = showTimestamp ? '' : 'none';
+
+            // ===== 原文元素样式 =====
+            const oEl = subOriginal.style;
+            if (cfg.fontFamily) oEl.fontFamily = `"${cfg.fontFamily}", sans-serif`;
+            if (cfg.fontSize) oEl.fontSize = cfg.fontSize + 'px';
+            if (cfg.fontWeight) oEl.fontWeight = String(cfg.fontWeight);
+            if (cfg.bold === true) oEl.fontWeight = '700';
+            oEl.fontStyle = cfg.italic === true ? 'italic' : 'normal';
+            if (cfg.fontColor) {
+                oEl.color = cfg.fontColor;
+                subOriginal.dataset.normalColor = cfg.fontColor;
+            }
+            if (cfg.textAlign) oEl.textAlign = cfg.textAlign;
+            if (typeof cfg.letterSpacing === 'number') oEl.letterSpacing = cfg.letterSpacing + 'px';
+            if (typeof cfg.lineHeight === 'number') oEl.lineHeight = String(cfg.lineHeight);
             const shadowColor = cfg.textShadowColor || '#000000';
             const shadowStrength = typeof cfg.textShadowStrength === 'number' ? cfg.textShadowStrength : 4;
-            el.textShadow = buildTextShadow(shadowColor, shadowStrength);
-            // 临时文字样式
-            if (typeof cfg.interimOpacity === 'number') {
-                subtitleText.dataset.interimOpacity = cfg.interimOpacity;
-            }
-            if (cfg.interimColor) {
-                subtitleText.dataset.interimColor = cfg.interimColor;
-            }
-            // 行数限制
+            oEl.textShadow = buildTextShadow(shadowColor, shadowStrength);
             if (typeof cfg.maxLines === 'number' && cfg.maxLines > 0) {
-                subtitleText.style.webkitLineClamp = String(cfg.maxLines);
+                oEl.webkitLineClamp = String(cfg.maxLines);
+            }
+            if (typeof cfg.interimOpacity === 'number') {
+                subOriginal.dataset.interimOpacity = cfg.interimOpacity;
+            }
+            if (cfg.interimColor) subOriginal.dataset.interimColor = cfg.interimColor;
+
+            // ===== 译文元素样式 =====
+            const tEl = subTranslation.style;
+            if (cfg.fontFamily) tEl.fontFamily = `"${cfg.fontFamily}", sans-serif`;
+            if (typeof cfg.translationFontSize === 'number') tEl.fontSize = cfg.translationFontSize + 'px';
+            if (typeof cfg.translationFontWeight === 'number') tEl.fontWeight = String(cfg.translationFontWeight);
+            if (cfg.translationFontColor) tEl.color = cfg.translationFontColor;
+            if (typeof cfg.translationOpacity === 'number') tEl.opacity = String(cfg.translationOpacity);
+            if (cfg.textAlign) tEl.textAlign = cfg.textAlign;
+            tEl.textShadow = buildTextShadow(shadowColor, shadowStrength);
+
+            // ===== 说话人元素样式 =====
+            const sEl = subSpeaker.style;
+            if (cfg.speakerColor) sEl.color = cfg.speakerColor;
+            if (typeof cfg.speakerFontSize === 'number') sEl.fontSize = cfg.speakerFontSize + 'px';
+
+            // ===== 时间戳元素样式 =====
+            const tsEl = subTimestamp.style;
+            if (cfg.timestampColor) tsEl.color = cfg.timestampColor;
+            if (typeof cfg.timestampFontSize === 'number') tsEl.fontSize = cfg.timestampFontSize + 'px';
+
+            // ===== 自定义元素 DOM 同步 =====
+            syncCustomElements(cfg, shadowColor, shadowStrength);
+
+            // ===== 元素顺序重排 =====
+            reorderElements(cfg.elementOrder);
+
+            // 重渲染当前帧（样式变化后内容保持）
+            renderFrame();
+        }
+
+        // 占位符解析：{time} {date} {datetime}
+        function resolvePlaceholders(text) {
+            if (!text) return '';
+            const now = new Date();
+            const h = String(now.getHours()).padStart(2, '0');
+            const m = String(now.getMinutes()).padStart(2, '0');
+            const s = String(now.getSeconds()).padStart(2, '0');
+            const y = now.getFullYear();
+            const mo = String(now.getMonth() + 1).padStart(2, '0');
+            const d = String(now.getDate()).padStart(2, '0');
+            return text
+                .replace(/\{time\}/g, `${h}:${m}:${s}`)
+                .replace(/\{date\}/g, `${y}-${mo}-${d}`)
+                .replace(/\{datetime\}/g, `${y}-${mo}-${d} ${h}:${m}:${s}`);
+        }
+
+        // 同步自定义元素 DOM：新增/更新/移除
+        function syncCustomElements(cfg, shadowColor, shadowStrength) {
+            const customElements = Array.isArray(cfg.customElements) ? cfg.customElements : [];
+            const existing = new Map();
+            subtitleBox.querySelectorAll('[data-custom-id]').forEach(node => {
+                existing.set(node.dataset.customId, node);
+            });
+            const seen = new Set();
+            customElements.forEach(el => {
+                const id = el.id || 'custom_unknown';
+                seen.add(id);
+                let node = existing.get(id);
+                if (!node) {
+                    node = document.createElement('div');
+                    node.className = 'sub-element sub-custom';
+                    node.dataset.customId = id;
+                    node.id = 'sub-custom-' + id;
+                    subtitleBox.appendChild(node);
+                }
+                const elType = el.element_type || 'text';
+                const visible = el.visible !== false;
+                const st = node.style;
+                if (elType === 'divider') {
+                    st.display = visible ? '' : 'none';
+                    st.height = '1px';
+                    st.width = '100%';
+                    st.background = el.color || '#ffffff';
+                    st.opacity = String(typeof el.opacity === 'number' ? el.opacity : 0.3);
+                    st.margin = '4px 0';
+                    st.fontSize = '';
+                    node.textContent = '';
+                    node.dataset.content = '';
+                    node.dataset.prefix = '';
+                } else if (elType === 'spacer') {
+                    st.display = visible ? '' : 'none';
+                    st.height = (typeof el.font_size === 'number' ? el.font_size : 12) + 'px';
+                    st.background = '';
+                    st.opacity = '';
+                    st.margin = '';
+                    node.textContent = '';
+                    node.dataset.content = '';
+                    node.dataset.prefix = '';
+                } else {
+                    st.display = visible ? '' : 'none';
+                    st.height = '';
+                    st.width = '';
+                    st.background = '';
+                    st.margin = '';
+                    st.color = el.color || '#ffffff';
+                    if (typeof el.font_size === 'number') st.fontSize = el.font_size + 'px';
+                    if (typeof el.font_weight === 'number') st.fontWeight = String(el.font_weight);
+                    if (typeof el.opacity === 'number') st.opacity = String(el.opacity);
+                    st.textAlign = el.align || 'center';
+                    st.textShadow = buildTextShadow(shadowColor, shadowStrength);
+                    if (cfg.fontFamily) st.fontFamily = `"${cfg.fontFamily}", sans-serif`;
+                    node.dataset.content = el.content || '';
+                    node.dataset.prefix = el.prefix || '';
+                }
+            });
+            // 移除已删除的自定义元素
+            existing.forEach((node, id) => {
+                if (!seen.has(id)) node.remove();
+            });
+        }
+
+        // 按 elementOrder 重排所有子元素
+        function reorderElements(order) {
+            const idMap = {
+                'speaker': 'sub-speaker',
+                'original': 'sub-original',
+                'translation': 'sub-translation',
+                'timestamp': 'sub-timestamp',
+            };
+            const seq = (Array.isArray(order) && order.length > 0)
+                ? order
+                : ['speaker', 'original', 'translation', 'timestamp'];
+            seq.forEach(key => {
+                let node = null;
+                if (idMap[key]) {
+                    node = document.getElementById(idMap[key]);
+                } else {
+                    node = subtitleBox.querySelector(`[data-custom-id="${CSS.escape(key)}"]`);
+                }
+                if (node) subtitleBox.appendChild(node);
+            });
+        }
+
+        // 格式化时间戳
+        function formatTimestamp(format) {
+            const now = new Date();
+            const h = String(now.getHours()).padStart(2, '0');
+            const m = String(now.getMinutes()).padStart(2, '0');
+            const s = String(now.getSeconds()).padStart(2, '0');
+            switch (format) {
+                case 'MM:SS': return `${m}:${s}`;
+                case 'none': return '';
+                case 'HH:MM:SS':
+                default: return `${h}:${m}:${s}`;
             }
         }
 
-        function updateInterimStyle(isFinal) {
-            const interimOpacity = parseFloat(subtitleText.dataset.interimOpacity || '0.7');
-            const interimColor = subtitleText.dataset.interimColor || '#ffffff';
-            const normalColor = subtitleText.dataset.normalColor || '#ffffff';
-            if (isFinal) {
-                // 还原为正常颜色与不透明度（由 fontColor 配置控制）
-                subtitleText.style.opacity = '1';
-                subtitleText.style.color = normalColor;
-            } else {
-                subtitleText.style.opacity = String(interimOpacity);
-                subtitleText.style.color = interimColor;
-            }
-        }
-
-        // HTML 转义，防止文本中的特殊字符破坏 DOM
+        // HTML 转义
         function escapeHtml(str) {
             const div = document.createElement('div');
             div.textContent = str;
             return div.innerHTML;
         }
 
-        listen('subtitle-text', (event) => {
-            const { text, isFinal, definite, indefinite } = event.payload;
-            const interimOpacity = parseFloat(subtitleText.dataset.interimOpacity || '0.7');
-            const interimColor = subtitleText.dataset.interimColor || '#ffffff';
-            const normalColor = subtitleText.dataset.normalColor || '#ffffff';
+        // ===== 帧渲染 =====
 
-            // 优先使用 definite/indefinite 分段渲染（流式识别场景）
-            // 已确定文本用正常颜色，临时文本用 interim 颜色，混合显示
-            const defText = (definite || '').trim();
-            const indefText = (indefinite || '').trim();
+        function renderOriginal() {
+            const interimOpacity = parseFloat(subOriginal.dataset.interimOpacity || '0.7');
+            const interimColor = subOriginal.dataset.interimColor || '#ffffff';
+            const normalColor = subOriginal.dataset.normalColor || '#ffffff';
+
+            const defText = (frameCache.definite || '').trim();
+            const indefText = (frameCache.indefinite || '').trim();
 
             if (defText || indefText) {
                 let html = '';
@@ -214,33 +402,136 @@
                     if (defText) html += ' ';
                     html += `<span class="seg-indefinite" style="color:${interimColor};opacity:${interimOpacity}">${escapeHtml(indefText)}</span>`;
                 }
-                subtitleText.innerHTML = html;
-                // 容器本身不切换 interim class（颜色由内部 span 控制）
-                subtitleText.classList.remove('interim');
-                subtitleText.classList.toggle('empty', false);
-                // 容器透明度恢复为 1（由内部 span 各自控制透明度）
-                subtitleText.style.opacity = '1';
-                subtitleText.style.color = '';
+                subOriginal.innerHTML = html;
+                subOriginal.style.opacity = '1';
+                subOriginal.style.color = '';
             } else {
-                // 回退：无 definite/indefinite（状态提示等），用原有逻辑
-                const displayText = text || '...';
-                subtitleText.textContent = displayText;
-                subtitleText.classList.toggle('interim', !isFinal);
-                subtitleText.classList.toggle('empty', !text || text.trim() === '');
-                updateInterimStyle(isFinal);
+                const displayText = frameCache.text || '...';
+                subOriginal.textContent = displayText;
+                if (frameCache.isFinal) {
+                    subOriginal.style.opacity = '1';
+                    subOriginal.style.color = normalColor;
+                } else {
+                    subOriginal.style.opacity = String(interimOpacity);
+                    subOriginal.style.color = interimColor;
+                }
             }
+        }
+
+        function renderTranslation() {
+            const prefix = cfgCache.translationPrefix || '';
+            const fin = (frameCache.translation || '').trim();
+            const prov = (frameCache.translationInterim || '').trim();
+
+            // 定稿译文重复包含临时预览内容时，去掉重复展示（防抖译文与定稿重叠）
+            let provText = prov;
+            if (fin && provText && fin.endsWith(provText)) {
+                provText = '';
+            }
+
+            if (fin || provText) {
+                const interimOpacity = parseFloat(subOriginal.dataset.interimOpacity || '0.7');
+                const interimColor = subOriginal.dataset.interimColor || '#ffffff';
+                let html = '';
+                if (fin) {
+                    html += `<span class="trans-definite">${escapeHtml(fin)}</span>`;
+                }
+                if (provText) {
+                    if (fin) html += ' ';
+                    html += `<span class="trans-indefinite" style="color:${interimColor};opacity:${interimOpacity}">${escapeHtml(provText)}</span>`;
+                }
+                subTranslation.innerHTML = (prefix ? escapeHtml(prefix) : '') + html;
+            } else {
+                subTranslation.textContent = '';
+            }
+        }
+
+        function renderSpeaker() {
+            const speaker = (frameCache.speaker || '').trim();
+            if (speaker) {
+                const prefix = cfgCache.speakerPrefix || '';
+                subSpeaker.textContent = prefix + speaker;
+            } else {
+                subSpeaker.textContent = '';
+            }
+        }
+
+        function renderTimestamp() {
+            if (cfgCache.showTimestamp === true) {
+                const fmt = cfgCache.timestampFormat || 'HH:MM:SS';
+                subTimestamp.textContent = formatTimestamp(fmt);
+            }
+        }
+
+        // 自定义元素数据绑定：{text} 原文 / {translation} 译文 / {speaker} 说话人 / {time} {date} {datetime} 时钟
+        function renderCustomElements() {
+            subtitleBox.querySelectorAll('[data-custom-id]').forEach(node => {
+                const content = node.dataset.content || '';
+                const prefix = node.dataset.prefix || '';
+                if (!content) return;
+                let text = content;
+                const hasBindings = /\{text\}|\{translation\}|\{speaker\}/.test(text);
+                if (hasBindings) {
+                    text = text
+                        .replace(/\{text\}/g, frameCache.definite + (frameCache.indefinite ? ' ' + frameCache.indefinite : ''))
+                        .replace(/\{translation\}/g, ((frameCache.translation || '') + ' ' + (frameCache.translationInterim || '')).trim())
+                        .replace(/\{speaker\}/g, frameCache.speaker || '');
+                }
+                text = resolvePlaceholders(text);
+                node.textContent = prefix + text;
+            });
+        }
+
+        function renderFrame() {
+            renderOriginal();
+            renderTranslation();
+            renderSpeaker();
+            renderTimestamp();
+            renderCustomElements();
+        }
+
+        // ===== 事件监听（按 sceneId 过滤） =====
+
+        listen('subtitle-text', (event) => {
+            const p = event.payload || {};
+            if (p.sceneId && p.sceneId !== sceneId) return;
+            frameCache.text = p.text || '';
+            frameCache.isFinal = !!p.isFinal;
+            frameCache.definite = p.definite || '';
+            frameCache.indefinite = p.indefinite || '';
+            frameCache.translation = p.translation || '';
+            frameCache.translationInterim = p.translationInterim || '';
+            frameCache.speaker = p.speaker || '';
+            renderFrame();
         });
 
         listen('subtitle-config', (event) => {
-            const cfg = event.payload;
-            applyConfig(cfg);
+            const p = event.payload || {};
+            if (p.sceneId && p.sceneId !== sceneId) return;
+            applyConfig(p);
         });
 
-        // OBS 捕捉兼容模式：切换 body 透明背景
+        // OBS 捕捉兼容模式（按场景）
         listen('subtitle-obs-mode', (event) => {
-            const { enabled } = event.payload;
-            document.body.classList.toggle('obs-mode', !!enabled);
+            const p = event.payload || {};
+            if (p.sceneId && p.sceneId !== sceneId) return;
+            document.body.classList.toggle('obs-mode', !!p.enabled);
         });
+
+        // 时间戳每秒刷新 + 自定义元素占位符刷新
+        setInterval(() => {
+            if (cfgCache.showTimestamp === true && subTimestamp.style.display !== 'none') {
+                const fmt = cfgCache.timestampFormat || 'HH:MM:SS';
+                subTimestamp.textContent = formatTimestamp(fmt);
+            }
+            // 刷新含时钟占位符的自定义元素
+            let needCustom = false;
+            subtitleBox.querySelectorAll('[data-custom-id]').forEach(node => {
+                const content = node.dataset.content || '';
+                if (content && /\{time\}|\{date\}|\{datetime\}/.test(content)) needCustom = true;
+            });
+            if (needCustom) renderCustomElements();
+        }, 1000);
     </script>
 </body>
 </html>

@@ -8,5 +8,6 @@
 
 pub mod buffer;
 pub mod capture;
+pub mod loopback;
 pub mod processor;
 pub mod resample;

@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
 use crate::app_state::AppState;
-use crate::config::{AppConfig, ConfigManager};
+use crate::config::{AppConfig, ConfigManager, SubtitleSceneConfig};
 use crate::history;
 use crate::tts::client::{FishTtsClient, VoiceListParams};
 
@@ -132,6 +132,12 @@ pub async fn stop_recording(state: tauri::State<'_, Arc<AppState>>) -> Result<St
 #[tauri::command]
 pub async fn cancel_recording(state: tauri::State<'_, Arc<AppState>>) -> Result<(), String> {
     state.cancel_recording().await
+}
+
+#[tauri::command]
+pub async fn force_cancel(state: tauri::State<'_, Arc<AppState>>) -> Result<(), String> {
+    state.force_cancel().await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -1012,10 +1018,18 @@ pub fn get_app_version() -> String {
     crate::update::current_version()
 }
 
-/// 设置字幕窗口置顶
+/// 设置场景字幕窗口置顶
 #[tauri::command]
-pub fn set_subtitle_always_on_top(app_handle: tauri::AppHandle, on_top: bool) -> Result<(), String> {
-    if let Some(window) = app_handle.get_webview_window("subtitle") {
+pub fn set_subtitle_always_on_top(
+    app_handle: tauri::AppHandle,
+    config: tauri::State<'_, Arc<ConfigManager>>,
+    scene_id: String,
+    on_top: bool,
+) -> Result<(), String> {
+    config.set_subtitle_scene_window_flag(&scene_id, "always_on_top", on_top);
+    let _ = config.save();
+    let label = crate::subtitle::scene_window_label(&scene_id);
+    if let Some(window) = app_handle.get_webview_window(&label) {
         window
             .set_always_on_top(on_top)
             .map_err(|e| e.to_string())?;
@@ -1023,10 +1037,18 @@ pub fn set_subtitle_always_on_top(app_handle: tauri::AppHandle, on_top: bool) ->
     Ok(())
 }
 
-/// 设置字幕窗口点击穿透
+/// 设置场景字幕窗口点击穿透
 #[tauri::command]
-pub fn set_subtitle_click_through(app_handle: tauri::AppHandle, click_through: bool) -> Result<(), String> {
-    if let Some(window) = app_handle.get_webview_window("subtitle") {
+pub fn set_subtitle_click_through(
+    app_handle: tauri::AppHandle,
+    config: tauri::State<'_, Arc<ConfigManager>>,
+    scene_id: String,
+    click_through: bool,
+) -> Result<(), String> {
+    config.set_subtitle_scene_window_flag(&scene_id, "click_through", click_through);
+    let _ = config.save();
+    let label = crate::subtitle::scene_window_label(&scene_id);
+    if let Some(window) = app_handle.get_webview_window(&label) {
         window
             .set_ignore_cursor_events(click_through)
             .map_err(|e| e.to_string())?;
@@ -1034,86 +1056,142 @@ pub fn set_subtitle_click_through(app_handle: tauri::AppHandle, click_through: b
     Ok(())
 }
 
-/// 显示/隐藏字幕窗口
+/// 显示/隐藏指定场景的字幕窗口
 #[tauri::command]
-pub fn show_subtitle_window(app_handle: tauri::AppHandle, show: bool) -> Result<(), String> {
-    if let Some(window) = app_handle.get_webview_window("subtitle") {
-        if show {
-            window.show().map_err(|e| e.to_string())?;
-            window.set_focus().map_err(|e| e.to_string())?;
-        } else {
-            window.hide().map_err(|e| e.to_string())?;
+pub async fn show_subtitle_window(
+    app_handle: tauri::AppHandle,
+    config: tauri::State<'_, Arc<ConfigManager>>,
+    scene_id: String,
+    show: bool,
+) -> Result<(), String> {
+    let label = crate::subtitle::scene_window_label(&scene_id);
+    if !show {
+        if let Some(window) = app_handle.get_webview_window(&label) {
+            let _ = window.hide();
         }
+        return Ok(());
+    }
+    // 显示：确保窗口存在（动态场景按需创建）并应用场景配置
+    let scenes = config.get_subtitle_scenes();
+    let scene = scenes
+        .iter()
+        .find(|s| s.id == scene_id)
+        .cloned()
+        .ok_or("字幕场景不存在")?;
+    // 显示窗口视为重新启用该场景（窗口被关闭时场景会被停用）
+    config.set_subtitle_scene_enabled(&scene_id, true);
+    let _ = config.save();
+    if let Some(window) =
+        crate::subtitle::ensure_scene_window(&app_handle, &scene, config.inner()).await
+    {
+        crate::subtitle::apply_scene_window_props(&window, &scene);
+        crate::subtitle::push_scene_config(&app_handle, &scene);
+        let _ = window.show();
+        let _ = window.set_focus();
     }
     Ok(())
 }
 
-/// 主动推送当前字幕样式配置到字幕窗口（用于实时字幕设置变更后即时应用）
+/// 主动推送所有字幕场景的样式配置（用于设置变更后即时应用）
 #[tauri::command]
 pub fn push_subtitle_config(
     app_handle: tauri::AppHandle,
     config: tauri::State<'_, Arc<ConfigManager>>,
 ) -> Result<(), String> {
-    use tauri::Emitter;
-    let cfg = config.get_config();
-    let sub_cfg = &cfg.subtitle;
-
-    let _ = app_handle.emit("subtitle-config", serde_json::json!({
-        "fontFamily": sub_cfg.subtitle_font_family,
-        "fontSize": sub_cfg.subtitle_font_size,
-        "fontWeight": sub_cfg.subtitle_font_weight,
-        "bold": sub_cfg.subtitle_font_weight >= 700,
-        "italic": sub_cfg.subtitle_italic,
-        "fontColor": sub_cfg.subtitle_font_color,
-        "textAlign": sub_cfg.subtitle_text_align,
-        "letterSpacing": sub_cfg.subtitle_letter_spacing,
-        "lineHeight": sub_cfg.subtitle_line_height,
-        "textShadowColor": sub_cfg.subtitle_text_shadow_color,
-        "textShadowStrength": sub_cfg.subtitle_text_shadow_strength,
-        "bgColor": sub_cfg.subtitle_bg_color,
-        "bgOpacity": sub_cfg.subtitle_bg_opacity,
-        "blur": sub_cfg.subtitle_blur,
-        "borderRadius": sub_cfg.subtitle_border_radius,
-        "borderColor": sub_cfg.subtitle_border_color,
-        "borderWidth": sub_cfg.subtitle_border_width,
-        "paddingX": sub_cfg.subtitle_padding_x,
-        "paddingY": sub_cfg.subtitle_padding_y,
-        "maxLines": sub_cfg.subtitle_max_lines,
-        "interimColor": sub_cfg.subtitle_interim_color,
-        "interimOpacity": sub_cfg.subtitle_interim_opacity,
-    }));
+    let scenes = config.get_subtitle_scenes();
+    for scene in &scenes {
+        crate::subtitle::push_scene_config(&app_handle, scene);
+    }
     Ok(())
 }
 
-/// 查询字幕窗口当前状态
+/// 查询指定场景字幕窗口当前状态
 #[tauri::command]
-pub fn get_subtitle_window_status(app_handle: tauri::AppHandle) -> serde_json::Value {
+pub fn get_subtitle_window_status(
+    app_handle: tauri::AppHandle,
+    scene_id: String,
+) -> serde_json::Value {
     use tauri::Manager;
+    let label = crate::subtitle::scene_window_label(&scene_id);
     let visible = app_handle
-        .get_webview_window("subtitle")
+        .get_webview_window(&label)
         .map(|w| w.is_visible().unwrap_or(false))
         .unwrap_or(false);
     serde_json::json!({ "visible": visible })
 }
 
-/// 设置字幕窗口 OBS 捕捉兼容模式
-/// 由于已通过 WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--disable-direct-composition 全局禁用 DComp，
-/// OBS 默认即可捕捉窗口内容。此命令现在仅用于：
-/// 1. 切换字幕窗口 body 背景渲染模式（CSS）
-/// 2. 在 OBS 模式下确保窗口置顶以便录屏
+/// 设置场景字幕窗口 OBS 捕捉兼容模式
 #[tauri::command]
 pub async fn set_subtitle_obs_mode(
     app_handle: tauri::AppHandle,
+    config: tauri::State<'_, Arc<ConfigManager>>,
+    scene_id: String,
     obs_mode: bool,
 ) -> Result<(), String> {
     use tauri::{Emitter, Manager};
-    if let Some(window) = app_handle.get_webview_window("subtitle") {
-        let _ = app_handle.emit("subtitle-obs-mode", serde_json::json!({ "enabled": obs_mode }));
+    config.set_subtitle_scene_window_flag(&scene_id, "obs_mode", obs_mode);
+    let _ = config.save();
+    let _ = app_handle.emit(
+        "subtitle-obs-mode",
+        serde_json::json!({ "sceneId": scene_id, "enabled": obs_mode }),
+    );
+    let label = crate::subtitle::scene_window_label(&scene_id);
+    if let Some(window) = app_handle.get_webview_window(&label) {
         if obs_mode {
             let _ = window.set_always_on_top(true);
         }
     }
     Ok(())
+}
+
+// ===================== 字幕场景管理 =====================
+
+/// 列出所有字幕场景
+#[tauri::command]
+pub fn list_subtitle_scenes(
+    config: tauri::State<'_, Arc<ConfigManager>>,
+) -> Vec<SubtitleSceneConfig> {
+    config.get_subtitle_scenes()
+}
+
+/// 新增字幕场景（复制默认场景样式），返回新场景 ID
+#[tauri::command]
+pub fn add_subtitle_scene(
+    config: tauri::State<'_, Arc<ConfigManager>>,
+) -> Result<String, String> {
+    let id = config.add_subtitle_scene()?;
+    config.save().map_err(|e| e.to_string())?;
+    Ok(id)
+}
+
+/// 复制指定场景，返回新场景 ID
+#[tauri::command]
+pub fn duplicate_subtitle_scene(
+    config: tauri::State<'_, Arc<ConfigManager>>,
+    scene_id: String,
+) -> Result<String, String> {
+    let id = config.duplicate_subtitle_scene(&scene_id)?;
+    config.save().map_err(|e| e.to_string())?;
+    Ok(id)
+}
+
+/// 删除字幕场景（默认场景不可删除；动态窗口会被销毁）
+#[tauri::command]
+pub async fn remove_subtitle_scene(
+    app_handle: tauri::AppHandle,
+    config: tauri::State<'_, Arc<ConfigManager>>,
+    scene_id: String,
+) -> Result<(), String> {
+    if scene_id == crate::subtitle::DEFAULT_SCENE_ID {
+        return Err("默认场景不可删除".to_string());
+    }
+    let label = crate::subtitle::scene_window_label(&scene_id);
+    if let Some(window) = app_handle.get_webview_window(&label) {
+        let _ = window.hide();
+        let _ = window.destroy();
+    }
+    config.remove_subtitle_scene(&scene_id)?;
+    config.save().map_err(|e| e.to_string())
 }
 
 // ===================== Fish Audio TTS（文本转语音）=====================

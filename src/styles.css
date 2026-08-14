@@ -1132,11 +1132,192 @@ html, body {
     cursor: pointer;
 }
 
+/* ===== 预览区多元素 box（与真实窗口 #subtitle-box 结构一致） ===== */
+.subtitle-preview-box {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-width: 100%;
+    word-wrap: break-word;
+    word-break: break-word;
+}
+.sub-preview-element {
+    word-wrap: break-word;
+    word-break: break-word;
+    transition: opacity 0.15s ease, color 0.15s ease;
+}
+.sub-preview-element:empty { display: none; }
+
 .subtitle-cards {
     padding: 0;
     display: grid;
     grid-template-columns: 1fr;
     gap: 12px;
+}
+
+/* ===== 自定义元素管理 ===== */
+.custom-element-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+.custom-element-empty {
+    padding: 16px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-tertiary);
+    border: 1px dashed var(--border-color);
+    border-radius: var(--radius-sm);
+}
+.custom-element-item {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.ce-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.ce-type-badge {
+    font-size: 11px;
+    color: var(--text-secondary);
+    background: var(--bg-hover);
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    white-space: nowrap;
+    font-weight: 500;
+}
+.ce-label-input {
+    flex: 1;
+    min-width: 0;
+}
+.ce-visible-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    white-space: nowrap;
+}
+.ce-visible-toggle input {
+    cursor: pointer;
+    accent-color: var(--accent);
+}
+.ce-move-btns {
+    display: flex;
+    gap: 4px;
+}
+.ce-move-btns .icon-btn,
+.ce-delete {
+    width: 24px;
+    height: 24px;
+    font-size: 10px;
+}
+.ce-delete:hover {
+    color: #ef4444;
+    border-color: #ef4444;
+}
+.ce-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.ce-style-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.ce-style-row .slider {
+    width: 80px;
+}
+.ce-style-row .color-input {
+    width: 32px;
+    height: 28px;
+    padding: 0;
+}
+.ce-style-row select.text-input {
+    width: auto;
+    min-width: 60px;
+}
+.ce-prefix-input {
+    width: 80px !important;
+}
+.custom-element-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.custom-element-actions .secondary-btn {
+    padding: 6px 12px;
+    font-size: 12px;
+}
+
+/* ===== 元素排序列表 ===== */
+.element-order-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.element-order-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    cursor: grab;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+.element-order-item:hover {
+    border-color: var(--border-strong);
+}
+.element-order-item.is-custom {
+    border-style: dashed;
+}
+.element-order-item.dragging {
+    opacity: 0.4;
+    cursor: grabbing;
+}
+.element-order-item.drop-above {
+    border-top: 2px solid var(--accent);
+}
+.element-order-item.drop-below {
+    border-bottom: 2px solid var(--accent);
+}
+.eo-drag-handle {
+    cursor: grab;
+    color: var(--text-tertiary);
+    font-size: 14px;
+    user-select: none;
+    line-height: 1;
+}
+.eo-label {
+    flex: 1;
+    font-size: 13px;
+    color: var(--text-primary);
+}
+.eo-move-btns {
+    display: flex;
+    gap: 4px;
+}
+.eo-move-btns .icon-btn {
+    width: 24px;
+    height: 24px;
+    font-size: 10px;
+}
+
+/* 预设模板 segmented control */
+#subtitle-preset .seg-btn {
+    font-size: 12px;
 }
 
 .subtitle-card {
@@ -1145,6 +1326,61 @@ html, body {
     border-radius: 10px;
     padding: 14px 18px 16px;
     transition: border-color 0.2s ease;
+}
+
+/* ===== 字幕场景栏（多窗口管理） ===== */
+.subtitle-scene-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 10px 14px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: var(--bg-secondary);
+    margin-bottom: 12px;
+}
+
+.subtitle-scene-picker {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 300px;
+}
+
+.scene-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.scene-select {
+    flex: 0 1 220px;
+}
+
+.scene-name-input {
+    flex: 0 1 200px;
+}
+
+.subtitle-scene-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.scene-btn-danger {
+    color: var(--accent-red);
+    border-color: var(--accent-red);
+}
+
+.scene-btn-danger:hover {
+    background: var(--accent-red);
+    color: #fff;
+}
+
+.scene-btn-danger:disabled {
+    opacity: 0.4;
+    pointer-events: none;
 }
 
 .subtitle-card:hover {

@@ -299,7 +299,486 @@ pub struct SubtitleConfig {
     /// 与 basic.input_device 独立，允许字幕使用不同音源（如立体声混音）
     #[serde(default)]
     pub subtitle_input_device: String,
+    /// 字幕识别音源类型："microphone"（麦克风输入设备）| "system"（系统扬声器回放）
+    /// 选择 "system" 时使用 WASAPI loopback 捕获电脑正在播放的声音
+    #[serde(default = "default_audio_source")]
+    pub subtitle_audio_source: String,
+    // ===== 元素级显示控制（高度自定义） =====
+    /// 显示原文元素
+    #[serde(default = "default_true")]
+    pub subtitle_show_original: bool,
+    /// 显示译文元素（需配合翻译引擎）
+    #[serde(default)]
+    pub subtitle_show_translation: bool,
+    /// 显示说话人标签元素
+    #[serde(default)]
+    pub subtitle_show_speaker: bool,
+    /// 显示时间戳元素
+    #[serde(default)]
+    pub subtitle_show_timestamp: bool,
+    /// 布局方向："vertical"（垂直堆叠）| "horizontal"（水平排列）
+    #[serde(default = "default_layout")]
+    pub subtitle_layout: String,
+    // ===== 译文独立样式 =====
+    #[serde(default = "default_translation_font_size")]
+    pub subtitle_translation_font_size: u32,
+    #[serde(default = "default_white_color")]
+    pub subtitle_translation_font_color: String,
+    #[serde(default = "default_font_weight_400")]
+    pub subtitle_translation_font_weight: u32,
+    #[serde(default = "default_translation_opacity")]
+    pub subtitle_translation_opacity: f32,
+    /// 译文前缀文本，如 "译: "
+    #[serde(default)]
+    pub subtitle_translation_prefix: String,
+    // ===== 说话人样式 =====
+    #[serde(default = "default_speaker_color")]
+    pub subtitle_speaker_color: String,
+    #[serde(default = "default_speaker_font_size")]
+    pub subtitle_speaker_font_size: u32,
+    /// 说话人前缀，如 "说话人: "
+    #[serde(default)]
+    pub subtitle_speaker_prefix: String,
+    // ===== 时间戳样式 =====
+    #[serde(default = "default_timestamp_color")]
+    pub subtitle_timestamp_color: String,
+    #[serde(default = "default_timestamp_font_size")]
+    pub subtitle_timestamp_font_size: u32,
+    /// 时间戳格式："HH:MM:SS" | "MM:SS" | "none"
+    #[serde(default = "default_timestamp_format")]
+    pub subtitle_timestamp_format: String,
+    // ===== 翻译配置（预留接口，后续阶段接入引擎） =====
+    /// 是否启用翻译
+    #[serde(default)]
+    pub subtitle_translation_enabled: bool,
+    /// 翻译目标语言代码：zh / en / ja / ko / fr / de / ...
+    #[serde(default = "default_translation_target_lang")]
+    pub subtitle_translation_target_lang: String,
+    /// 翻译引擎："none" | "llm" | "aliyun" | "deepl"
+    #[serde(default = "default_translation_engine")]
+    pub subtitle_translation_engine: String,
+    // ===== 自定义元素系统（高度自定义） =====
+    /// 自定义元素列表（用户可添加任意数量的文本/分隔元素）
+    #[serde(default)]
+    pub subtitle_custom_elements: Vec<SubtitleCustomElement>,
+    /// 元素显示顺序：固定元素 ID 为 "original"/"translation"/"speaker"/"timestamp"，
+    /// 自定义元素使用其 id。未列出的可见元素追加在末尾。
+    #[serde(default = "default_element_order")]
+    pub subtitle_element_order: Vec<String>,
+    /// 当前预设模板："clean" | "bilingual" | "meeting" | "live" | "custom"
+    #[serde(default = "default_preset")]
+    pub subtitle_preset: String,
+    /// 多场景字幕窗口列表。至少包含 id="default" 的主场景，
+    /// 其余场景运行时动态创建独立字幕窗口（每窗口独立样式/位置/置顶/穿透）。
+    #[serde(default)]
+    pub subtitle_scenes: Vec<SubtitleSceneConfig>,
+    /// 同声传译 LLM（OpenAI 兼容 chat/completions）共享接口配置。
+    /// API Key 留空时回退使用「LLM 智能校对」的配置。
+    #[serde(default)]
+    pub subtitle_translation_llm_api_url: String,
+    #[serde(default)]
+    pub subtitle_translation_llm_api_key: String,
+    #[serde(default)]
+    pub subtitle_translation_llm_model: String,
 }
+
+/// 字幕自定义元素（用户可添加的文本/分隔元素）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SubtitleCustomElement {
+    /// 唯一 ID
+    pub id: String,
+    /// 元素类型："text" | "divider" | "spacer"
+    #[serde(default = "default_element_type")]
+    pub element_type: String,
+    /// 显示名称（用于设置面板）
+    pub label: String,
+    /// 文本内容（text 类型），支持占位符 {time} {date}
+    pub content: String,
+    /// 是否可见
+    #[serde(default = "default_true")]
+    pub visible: bool,
+    /// 颜色
+    #[serde(default = "default_white_color")]
+    pub color: String,
+    /// 字号 px
+    #[serde(default = "default_custom_font_size")]
+    pub font_size: u32,
+    /// 字重 100-900
+    #[serde(default = "default_font_weight_400")]
+    pub font_weight: u32,
+    /// 透明度 0-1
+    #[serde(default = "default_custom_opacity")]
+    pub opacity: f32,
+    /// 前缀文本
+    #[serde(default)]
+    pub prefix: String,
+    /// 对齐："left" | "center" | "right"
+    #[serde(default = "default_align_center")]
+    pub align: String,
+}
+
+impl Default for SubtitleCustomElement {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            element_type: "text".to_string(),
+            label: "自定义文本".to_string(),
+            content: String::new(),
+            visible: true,
+            color: "#ffffff".to_string(),
+            font_size: 18,
+            font_weight: 400,
+            opacity: 0.9,
+            prefix: String::new(),
+            align: "center".to_string(),
+        }
+    }
+}
+
+/// 字幕场景的窗口控制配置（位置/尺寸/置顶/穿透/OBS 模式）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SubtitleSceneWindowConfig {
+    /// 窗口位置 x（-1 = 未设置，使用系统默认位置）
+    pub x: i32,
+    /// 窗口位置 y（-1 = 未设置，使用系统默认位置）
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub always_on_top: bool,
+    pub click_through: bool,
+    pub obs_mode: bool,
+}
+
+impl Default for SubtitleSceneWindowConfig {
+    fn default() -> Self {
+        Self {
+            x: -1,
+            y: -1,
+            width: 1200,
+            height: 120,
+            always_on_top: true,
+            click_through: false,
+            obs_mode: false,
+        }
+    }
+}
+
+/// 字幕场景的完整样式（与 SubtitleConfig 中的扁平样式字段一一对应）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SubtitleStyle {
+    pub font_family: String,
+    pub font_size: u32,
+    pub font_color: String,
+    pub font_weight: u32,
+    pub italic: bool,
+    pub text_align: String,
+    pub letter_spacing: f32,
+    pub line_height: f32,
+    pub text_shadow_color: String,
+    pub text_shadow_strength: u32,
+    pub bg_color: String,
+    pub bg_opacity: f32,
+    pub blur: u32,
+    pub border_radius: u32,
+    pub border_color: String,
+    pub border_width: u32,
+    pub padding_x: u32,
+    pub padding_y: u32,
+    pub max_lines: u32,
+    pub interim_color: String,
+    pub interim_opacity: f32,
+    pub show_original: bool,
+    pub show_translation: bool,
+    pub show_speaker: bool,
+    pub show_timestamp: bool,
+    pub layout: String,
+    pub translation_font_size: u32,
+    pub translation_font_color: String,
+    pub translation_font_weight: u32,
+    pub translation_opacity: f32,
+    pub translation_prefix: String,
+    pub speaker_color: String,
+    pub speaker_font_size: u32,
+    pub speaker_prefix: String,
+    pub timestamp_color: String,
+    pub timestamp_font_size: u32,
+    pub timestamp_format: String,
+    pub custom_elements: Vec<SubtitleCustomElement>,
+    pub element_order: Vec<String>,
+    pub preset: String,
+}
+
+impl Default for SubtitleStyle {
+    fn default() -> Self {
+        let base = SubtitleConfig::default();
+        Self {
+            font_family: base.subtitle_font_family,
+            font_size: base.subtitle_font_size,
+            font_color: base.subtitle_font_color,
+            font_weight: base.subtitle_font_weight,
+            italic: base.subtitle_italic,
+            text_align: base.subtitle_text_align,
+            letter_spacing: base.subtitle_letter_spacing,
+            line_height: base.subtitle_line_height,
+            text_shadow_color: base.subtitle_text_shadow_color,
+            text_shadow_strength: base.subtitle_text_shadow_strength,
+            bg_color: base.subtitle_bg_color,
+            bg_opacity: base.subtitle_bg_opacity,
+            blur: base.subtitle_blur,
+            border_radius: base.subtitle_border_radius,
+            border_color: base.subtitle_border_color,
+            border_width: base.subtitle_border_width,
+            padding_x: base.subtitle_padding_x,
+            padding_y: base.subtitle_padding_y,
+            max_lines: base.subtitle_max_lines,
+            interim_color: base.subtitle_interim_color,
+            interim_opacity: base.subtitle_interim_opacity,
+            show_original: base.subtitle_show_original,
+            show_translation: base.subtitle_show_translation,
+            show_speaker: base.subtitle_show_speaker,
+            show_timestamp: base.subtitle_show_timestamp,
+            layout: base.subtitle_layout,
+            translation_font_size: base.subtitle_translation_font_size,
+            translation_font_color: base.subtitle_translation_font_color,
+            translation_font_weight: base.subtitle_translation_font_weight,
+            translation_opacity: base.subtitle_translation_opacity,
+            translation_prefix: base.subtitle_translation_prefix,
+            speaker_color: base.subtitle_speaker_color,
+            speaker_font_size: base.subtitle_speaker_font_size,
+            speaker_prefix: base.subtitle_speaker_prefix,
+            timestamp_color: base.subtitle_timestamp_color,
+            timestamp_font_size: base.subtitle_timestamp_font_size,
+            timestamp_format: base.subtitle_timestamp_format,
+            custom_elements: Vec::new(),
+            element_order: default_element_order(),
+            preset: "clean".to_string(),
+        }
+    }
+}
+
+/// 同声传译配置（每场景独立：引擎/目标语言/是否翻译中间结果）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SubtitleTranslationConfig {
+    /// 翻译引擎："none"（关闭） | "llm"（OpenAI 兼容 LLM）
+    pub engine: String,
+    /// 目标语言（自然语言描述：中文/英文/日文/韩文/法文/德文/西班牙文/俄文）
+    pub target_lang: String,
+    /// 是否实时翻译临时（中间）识别结果，实现"同声"预览效果
+    pub interim: bool,
+}
+
+impl Default for SubtitleTranslationConfig {
+    fn default() -> Self {
+        Self {
+            engine: "none".to_string(),
+            target_lang: "英文".to_string(),
+            interim: true,
+        }
+    }
+}
+
+/// 一个字幕场景 = 一个独立的自定义字幕窗口
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SubtitleSceneConfig {
+    /// 唯一 ID："default" 为主场景（静态 subtitle 窗口），其余为动态窗口
+    pub id: String,
+    /// 场景名称（设置页展示）
+    pub name: String,
+    /// 是否启用（禁用则不创建窗口、不接收字幕）
+    pub enabled: bool,
+    pub window: SubtitleSceneWindowConfig,
+    pub style: SubtitleStyle,
+    pub translation: SubtitleTranslationConfig,
+}
+
+impl Default for SubtitleSceneConfig {
+    fn default() -> Self {
+        Self {
+            id: "default".to_string(),
+            name: "默认字幕".to_string(),
+            enabled: true,
+            window: SubtitleSceneWindowConfig::default(),
+            style: SubtitleStyle::default(),
+            translation: SubtitleTranslationConfig::default(),
+        }
+    }
+}
+
+impl SubtitleSceneConfig {
+    /// 从旧的扁平字段构建默认场景（老配置迁移用）
+    pub fn from_legacy(sub: &SubtitleConfig) -> Self {
+        Self {
+            id: "default".to_string(),
+            name: "默认字幕".to_string(),
+            enabled: true,
+            window: SubtitleSceneWindowConfig {
+                x: sub.subtitle_window_x,
+                y: sub.subtitle_window_y,
+                width: sub.subtitle_window_width,
+                height: sub.subtitle_window_height,
+                always_on_top: true,
+                click_through: false,
+                obs_mode: false,
+            },
+            style: SubtitleStyle {
+                font_family: sub.subtitle_font_family.clone(),
+                font_size: sub.subtitle_font_size,
+                font_color: sub.subtitle_font_color.clone(),
+                font_weight: sub.subtitle_font_weight,
+                italic: sub.subtitle_italic,
+                text_align: sub.subtitle_text_align.clone(),
+                letter_spacing: sub.subtitle_letter_spacing,
+                line_height: sub.subtitle_line_height,
+                text_shadow_color: sub.subtitle_text_shadow_color.clone(),
+                text_shadow_strength: sub.subtitle_text_shadow_strength,
+                bg_color: sub.subtitle_bg_color.clone(),
+                bg_opacity: sub.subtitle_bg_opacity,
+                blur: sub.subtitle_blur,
+                border_radius: sub.subtitle_border_radius,
+                border_color: sub.subtitle_border_color.clone(),
+                border_width: sub.subtitle_border_width,
+                padding_x: sub.subtitle_padding_x,
+                padding_y: sub.subtitle_padding_y,
+                max_lines: sub.subtitle_max_lines,
+                interim_color: sub.subtitle_interim_color.clone(),
+                interim_opacity: sub.subtitle_interim_opacity,
+                show_original: sub.subtitle_show_original,
+                show_translation: sub.subtitle_show_translation,
+                show_speaker: sub.subtitle_show_speaker,
+                show_timestamp: sub.subtitle_show_timestamp,
+                layout: sub.subtitle_layout.clone(),
+                translation_font_size: sub.subtitle_translation_font_size,
+                translation_font_color: sub.subtitle_translation_font_color.clone(),
+                translation_font_weight: sub.subtitle_translation_font_weight,
+                translation_opacity: sub.subtitle_translation_opacity,
+                translation_prefix: sub.subtitle_translation_prefix.clone(),
+                speaker_color: sub.subtitle_speaker_color.clone(),
+                speaker_font_size: sub.subtitle_speaker_font_size,
+                speaker_prefix: sub.subtitle_speaker_prefix.clone(),
+                timestamp_color: sub.subtitle_timestamp_color.clone(),
+                timestamp_font_size: sub.subtitle_timestamp_font_size,
+                timestamp_format: sub.subtitle_timestamp_format.clone(),
+                custom_elements: sub.subtitle_custom_elements.clone(),
+                element_order: sub.subtitle_element_order.clone(),
+                preset: sub.subtitle_preset.clone(),
+            },
+            translation: SubtitleTranslationConfig {
+                engine: sub.subtitle_translation_engine.clone(),
+                target_lang: sub.subtitle_translation_target_lang.clone(),
+                interim: true,
+            },
+        }
+    }
+
+    /// 校验并归一化场景配置（非法值回退默认）
+    pub fn normalize(&mut self) {
+        if self.id.trim().is_empty() {
+            self.id = "default".to_string();
+        }
+        if self.name.trim().is_empty() {
+            self.name = "字幕场景".to_string();
+        }
+        if self.window.width == 0 {
+            self.window.width = 1200;
+        }
+        if self.window.height == 0 {
+            self.window.height = 120;
+        }
+        self.window.width = self.window.width.clamp(200, 3840);
+        self.window.height = self.window.height.clamp(40, 2160);
+
+        let s = &mut self.style;
+        s.bg_opacity = s.bg_opacity.clamp(0.0, 1.0);
+        s.interim_opacity = s.interim_opacity.clamp(0.0, 1.0);
+        s.font_weight = (s.font_weight.clamp(100, 900) / 100) * 100;
+        s.text_shadow_strength = s.text_shadow_strength.min(10);
+        s.letter_spacing = s.letter_spacing.clamp(-5.0, 20.0);
+        s.line_height = s.line_height.clamp(0.8, 3.0);
+        s.text_align = match s.text_align.as_str() {
+            "left" | "center" | "right" => s.text_align.clone(),
+            _ => "center".to_string(),
+        };
+        s.layout = match s.layout.as_str() {
+            "vertical" | "horizontal" => s.layout.clone(),
+            _ => "vertical".to_string(),
+        };
+        s.translation_opacity = s.translation_opacity.clamp(0.0, 1.0);
+        s.translation_font_weight = (s.translation_font_weight.clamp(100, 900) / 100) * 100;
+        s.translation_font_size = s.translation_font_size.clamp(8, 96);
+        s.speaker_font_size = s.speaker_font_size.clamp(8, 48);
+        s.timestamp_font_size = s.timestamp_font_size.clamp(8, 48);
+        s.timestamp_format = match s.timestamp_format.as_str() {
+            "HH:MM:SS" | "MM:SS" | "none" => s.timestamp_format.clone(),
+            _ => "HH:MM:SS".to_string(),
+        };
+        s.preset = match s.preset.as_str() {
+            "clean" | "bilingual" | "meeting" | "live" | "custom" => s.preset.clone(),
+            _ => "clean".to_string(),
+        };
+        for fixed in &["speaker", "original", "translation", "timestamp"] {
+            if !s.element_order.iter().any(|e| e == fixed) {
+                s.element_order.push((*fixed).to_string());
+            }
+        }
+        for (i, el) in s.custom_elements.iter_mut().enumerate() {
+            el.element_type = match el.element_type.as_str() {
+                "text" | "divider" | "spacer" => el.element_type.clone(),
+                _ => "text".to_string(),
+            };
+            el.align = match el.align.as_str() {
+                "left" | "center" | "right" => el.align.clone(),
+                _ => "center".to_string(),
+            };
+            el.font_weight = (el.font_weight.clamp(100, 900) / 100) * 100;
+            el.font_size = el.font_size.clamp(8, 96);
+            el.opacity = el.opacity.clamp(0.0, 1.0);
+            if el.id.is_empty() {
+                el.id = format!("custom_{}", i);
+            }
+        }
+
+        let t = &mut self.translation;
+        t.engine = match t.engine.as_str() {
+            "none" | "llm" => t.engine.clone(),
+            _ => "none".to_string(),
+        };
+        if t.target_lang.trim().is_empty() {
+            t.target_lang = "英文".to_string();
+        }
+    }
+}
+
+fn default_true() -> bool { true }
+fn default_audio_source() -> String { "microphone".to_string() }
+fn default_layout() -> String { "vertical".to_string() }fn default_translation_font_size() -> u32 { 24 }
+fn default_white_color() -> String { "#ffffff".to_string() }
+fn default_font_weight_400() -> u32 { 400 }
+fn default_translation_opacity() -> f32 { 0.85 }
+fn default_speaker_color() -> String { "#818cf8".to_string() }
+fn default_speaker_font_size() -> u32 { 16 }
+fn default_timestamp_color() -> String { "#a1a1aa".to_string() }
+fn default_timestamp_font_size() -> u32 { 14 }
+fn default_timestamp_format() -> String { "HH:MM:SS".to_string() }
+fn default_translation_target_lang() -> String { "en".to_string() }
+fn default_translation_engine() -> String { "none".to_string() }
+fn default_element_order() -> Vec<String> {
+    vec![
+        "speaker".to_string(),
+        "original".to_string(),
+        "translation".to_string(),
+        "timestamp".to_string(),
+    ]
+}
+fn default_preset() -> String { "clean".to_string() }
+fn default_custom_font_size() -> u32 { 18 }
+fn default_custom_opacity() -> f32 { 0.9 }
+fn default_align_center() -> String { "center".to_string() }
+fn default_element_type() -> String { "text".to_string() }
 
 impl Default for SubtitleConfig {
     fn default() -> Self {
@@ -331,6 +810,40 @@ impl Default for SubtitleConfig {
             subtitle_interim_color: "#ffffff".to_string(),
             subtitle_interim_opacity: 0.7,
             subtitle_input_device: String::new(),
+            subtitle_audio_source: "microphone".to_string(),
+            // 元素级显示控制
+            subtitle_show_original: true,
+            subtitle_show_translation: false,
+            subtitle_show_speaker: false,
+            subtitle_show_timestamp: false,
+            subtitle_layout: "vertical".to_string(),
+            // 译文样式
+            subtitle_translation_font_size: 24,
+            subtitle_translation_font_color: "#ffffff".to_string(),
+            subtitle_translation_font_weight: 400,
+            subtitle_translation_opacity: 0.85,
+            subtitle_translation_prefix: String::new(),
+            // 说话人样式
+            subtitle_speaker_color: "#818cf8".to_string(),
+            subtitle_speaker_font_size: 16,
+            subtitle_speaker_prefix: String::new(),
+            // 时间戳样式
+            subtitle_timestamp_color: "#a1a1aa".to_string(),
+            subtitle_timestamp_font_size: 14,
+            subtitle_timestamp_format: "HH:MM:SS".to_string(),
+            // 翻译配置
+            subtitle_translation_enabled: false,
+            subtitle_translation_target_lang: "en".to_string(),
+            subtitle_translation_engine: "none".to_string(),
+            // 自定义元素系统
+            subtitle_custom_elements: Vec::new(),
+            subtitle_element_order: default_element_order(),
+            subtitle_preset: "clean".to_string(),
+            // 多场景与同声传译
+            subtitle_scenes: Vec::new(),
+            subtitle_translation_llm_api_url: String::new(),
+            subtitle_translation_llm_api_key: String::new(),
+            subtitle_translation_llm_model: String::new(),
         }
     }
 }
@@ -645,6 +1158,58 @@ impl AppConfig {
             "left" | "center" | "right" => self.subtitle.subtitle_text_align.clone(),
             _ => "center".to_string(),
         };
+        // 元素级显示控制校验
+        self.subtitle.subtitle_layout = match self.subtitle.subtitle_layout.as_str() {
+            "vertical" | "horizontal" => self.subtitle.subtitle_layout.clone(),
+            _ => "vertical".to_string(),
+        };
+        self.subtitle.subtitle_translation_opacity = self.subtitle.subtitle_translation_opacity.clamp(0.0, 1.0);
+        self.subtitle.subtitle_translation_font_weight = self.subtitle.subtitle_translation_font_weight.clamp(100, 900);
+        self.subtitle.subtitle_translation_font_weight = (self.subtitle.subtitle_translation_font_weight / 100) * 100;
+        self.subtitle.subtitle_translation_font_size = self.subtitle.subtitle_translation_font_size.clamp(8, 96);
+        self.subtitle.subtitle_speaker_font_size = self.subtitle.subtitle_speaker_font_size.clamp(8, 48);
+        self.subtitle.subtitle_timestamp_font_size = self.subtitle.subtitle_timestamp_font_size.clamp(8, 48);
+        self.subtitle.subtitle_timestamp_format = match self.subtitle.subtitle_timestamp_format.as_str() {
+            "HH:MM:SS" | "MM:SS" | "none" => self.subtitle.subtitle_timestamp_format.clone(),
+            _ => "HH:MM:SS".to_string(),
+        };
+        self.subtitle.subtitle_translation_engine = match self.subtitle.subtitle_translation_engine.as_str() {
+            "none" | "llm" | "aliyun" | "deepl" => self.subtitle.subtitle_translation_engine.clone(),
+            _ => "none".to_string(),
+        };
+        // 自定义元素系统校验
+        self.subtitle.subtitle_preset = match self.subtitle.subtitle_preset.as_str() {
+            "clean" | "bilingual" | "meeting" | "live" | "custom" => self.subtitle.subtitle_preset.clone(),
+            _ => "clean".to_string(),
+        };
+        // 字幕识别音源类型校验
+        self.subtitle.subtitle_audio_source = match self.subtitle.subtitle_audio_source.as_str() {
+            "microphone" | "system" => self.subtitle.subtitle_audio_source.clone(),
+            _ => "microphone".to_string(),
+        };
+        // 确保元素顺序包含所有固定元素
+        for fixed in &["speaker", "original", "translation", "timestamp"] {
+            if !self.subtitle.subtitle_element_order.iter().any(|e| e == fixed) {
+                self.subtitle.subtitle_element_order.push((*fixed).to_string());
+            }
+        }
+        // 校验自定义元素
+        for (i, el) in self.subtitle.subtitle_custom_elements.iter_mut().enumerate() {
+            el.element_type = match el.element_type.as_str() {
+                "text" | "divider" | "spacer" => el.element_type.clone(),
+                _ => "text".to_string(),
+            };
+            el.align = match el.align.as_str() {
+                "left" | "center" | "right" => el.align.clone(),
+                _ => "center".to_string(),
+            };
+            el.font_weight = (el.font_weight.clamp(100, 900) / 100) * 100;
+            el.font_size = el.font_size.clamp(8, 96);
+            el.opacity = el.opacity.clamp(0.0, 1.0);
+            if el.id.is_empty() {
+                el.id = format!("custom_{}", i);
+            }
+        }
         self.vad.vad_sensitivity = self.vad.vad_sensitivity.clamp(0.0, 1.0);
         // 音频采集偏好归一化（Profile 非法值一律回 standard）
         self.basic.audio_profile = match self.basic.audio_profile.as_str() {
@@ -677,6 +1242,63 @@ impl AppConfig {
             }
             _ => CHANNELS_AUTO.to_string(),
         };
+        // 多场景字幕窗口：迁移旧扁平配置并归一化
+        self.normalize_subtitle_scenes();
+    }
+
+    /// 保证字幕场景列表有效：
+    /// 1. 为空时从旧扁平字段迁移出 "default" 场景
+    /// 2. 保证存在 "default" 场景
+    /// 3. 逐个归一化场景字段
+    /// 4. 限制场景数量上限
+    fn normalize_subtitle_scenes(&mut self) {
+        if self.subtitle.subtitle_scenes.is_empty() {
+            let legacy = SubtitleSceneConfig::from_legacy(&self.subtitle);
+            self.subtitle.subtitle_scenes.push(legacy);
+        }
+        if !self
+            .subtitle
+            .subtitle_scenes
+            .iter()
+            .any(|s| s.id == "default")
+        {
+            let mut default_scene = SubtitleSceneConfig::from_legacy(&self.subtitle);
+            default_scene.id = "default".to_string();
+            self.subtitle.subtitle_scenes.insert(0, default_scene);
+        }
+        // 场景 ID 去重（保留首个）
+        let mut seen: Vec<String> = Vec::new();
+        self.subtitle.subtitle_scenes.retain(|s| {
+            if seen.contains(&s.id) {
+                false
+            } else {
+                seen.push(s.id.clone());
+                true
+            }
+        });
+        for scene in self.subtitle.subtitle_scenes.iter_mut() {
+            scene.normalize();
+        }
+        if self.subtitle.subtitle_scenes.len() > 8 {
+            self.subtitle.subtitle_scenes.truncate(8);
+        }
+        // 兜底：默认场景不可被禁用（用户至少保留一个可用场景）
+        let enabled_count = self
+            .subtitle
+            .subtitle_scenes
+            .iter()
+            .filter(|s| s.enabled)
+            .count();
+        if enabled_count == 0 {
+            if let Some(scene) = self
+                .subtitle
+                .subtitle_scenes
+                .iter_mut()
+                .find(|s| s.id == "default")
+            {
+                scene.enabled = true;
+            }
+        }
     }
 
     fn normalize_streaming_post_process_mode(mode: &str) -> String {
@@ -852,6 +1474,7 @@ impl ConfigManager {
         let mut cfg = self.config.lock().unwrap();
         *cfg = new_config;
         cfg.basic.model_name = cfg.model_selection.batch_model.clone();
+        cfg.normalize_subtitle_scenes();
     }
 
     fn effective_model_name(&self) -> String {
@@ -1215,6 +1838,161 @@ impl ConfigManager {
         self.config.lock().unwrap().subtitle.subtitle_input_device = name;
     }
 
+    pub fn subtitle_audio_source(&self) -> String {
+        self.config.lock().unwrap().subtitle.subtitle_audio_source.clone()
+    }
+
+    // ===== 多场景字幕窗口 =====
+
+    pub fn get_subtitle_scenes(&self) -> Vec<SubtitleSceneConfig> {
+        self.config.lock().unwrap().subtitle.subtitle_scenes.clone()
+    }
+
+    /// 新增字幕场景（默认复制 default 场景样式），返回新场景 ID
+    pub fn add_subtitle_scene(&self) -> Result<String, String> {
+        let mut cfg = self.config.lock().unwrap();
+        let base = cfg
+            .subtitle
+            .subtitle_scenes
+            .iter()
+            .find(|s| s.id == "default")
+            .cloned()
+            .unwrap_or_else(|| SubtitleSceneConfig::from_legacy(&cfg.subtitle));
+        let id = format!("sc_{}", uuid::Uuid::new_v4().simple());
+        let name = format!("字幕窗口 {}", cfg.subtitle.subtitle_scenes.len() + 1);
+        let mut scene = base;
+        scene.id = id.clone();
+        scene.name = name;
+        scene.enabled = true;
+        cfg.subtitle.subtitle_scenes.push(scene);
+        cfg.normalize_subtitle_scenes();
+        Ok(id)
+    }
+
+    /// 复制指定场景为新场景，返回新场景 ID
+    pub fn duplicate_subtitle_scene(&self, scene_id: &str) -> Result<String, String> {
+        let mut cfg = self.config.lock().unwrap();
+        let base = cfg
+            .subtitle
+            .subtitle_scenes
+            .iter()
+            .find(|s| s.id == scene_id)
+            .cloned()
+            .ok_or_else(|| "要复制的场景不存在".to_string())?;
+        let id = format!("sc_{}", uuid::Uuid::new_v4().simple());
+        let mut scene = base;
+        scene.id = id.clone();
+        scene.name = format!("{} 副本", scene.name);
+        scene.enabled = true;
+        cfg.subtitle.subtitle_scenes.push(scene);
+        cfg.normalize_subtitle_scenes();
+        Ok(id)
+    }
+
+    /// 删除场景（default 不可删除）
+    pub fn remove_subtitle_scene(&self, scene_id: &str) -> Result<(), String> {
+        if scene_id == "default" {
+            return Err("默认场景不可删除".to_string());
+        }
+        let mut cfg = self.config.lock().unwrap();
+        let before = cfg.subtitle.subtitle_scenes.len();
+        cfg.subtitle
+            .subtitle_scenes
+            .retain(|s| s.id != scene_id);
+        if cfg.subtitle.subtitle_scenes.len() == before {
+            return Err("场景不存在".to_string());
+        }
+        cfg.normalize_subtitle_scenes();
+        Ok(())
+    }
+
+    /// 窗口拖动/缩放后持久化几何信息（按场景）
+    pub fn update_subtitle_scene_window(
+        &self,
+        scene_id: &str,
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+    ) {
+        let mut cfg = self.config.lock().unwrap();
+        if let Some(scene) = cfg
+            .subtitle
+            .subtitle_scenes
+            .iter_mut()
+            .find(|s| s.id == scene_id)
+        {
+            scene.window.x = x;
+            scene.window.y = y;
+            scene.window.width = width.max(200).min(3840);
+            scene.window.height = height.max(40).min(2160);
+        }
+    }
+
+    /// 窗口关闭时停用场景
+    pub fn set_subtitle_scene_enabled(&self, scene_id: &str, enabled: bool) {
+        let mut cfg = self.config.lock().unwrap();
+        if let Some(scene) = cfg
+            .subtitle
+            .subtitle_scenes
+            .iter_mut()
+            .find(|s| s.id == scene_id)
+        {
+            scene.enabled = enabled;
+        }
+    }
+
+    pub fn set_subtitle_scene_window_flag(
+        &self,
+        scene_id: &str,
+        flag: &str,
+        value: bool,
+    ) {
+        let mut cfg = self.config.lock().unwrap();
+        if let Some(scene) = cfg
+            .subtitle
+            .subtitle_scenes
+            .iter_mut()
+            .find(|s| s.id == scene_id)
+        {
+            match flag {
+                "always_on_top" => scene.window.always_on_top = value,
+                "click_through" => scene.window.click_through = value,
+                "obs_mode" => scene.window.obs_mode = value,
+                _ => {}
+            }
+        }
+    }
+
+    // ===== 同声传译 LLM 配置 =====
+
+    pub fn subtitle_translation_llm_api_url(&self) -> String {
+        self.config
+            .lock()
+            .unwrap()
+            .subtitle
+            .subtitle_translation_llm_api_url
+            .clone()
+    }
+
+    pub fn subtitle_translation_llm_api_key(&self) -> String {
+        self.config
+            .lock()
+            .unwrap()
+            .subtitle
+            .subtitle_translation_llm_api_key
+            .clone()
+    }
+
+    pub fn subtitle_translation_llm_model(&self) -> String {
+        self.config
+            .lock()
+            .unwrap()
+            .subtitle
+            .subtitle_translation_llm_model
+            .clone()
+    }
+
     pub fn output_mode(&self) -> String {
         self.config.lock().unwrap().basic.output_mode.clone()
     }
@@ -1566,5 +2344,64 @@ impl ConfigManager {
 
     pub fn log_file_path(&self) -> PathBuf {
         self.log_dir().join("app.log")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 验证旧版扁平配置 → 多场景结构的迁移与持久化
+    #[test]
+    fn subtitle_scene_migration_and_persist() {
+        let dir = std::env::temp_dir().join(format!("v2t_mig_test_{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // 模拟旧版配置：无 subtitle_scenes，只有扁平字段
+        let legacy = serde_json::json!({
+            "subtitle": {
+                "subtitle_font_size": 40,
+                "subtitle_show_translation": true,
+                "subtitle_translation_engine": "none",
+                "subtitle_translation_target_lang": "en",
+                "subtitle_window_x": 100,
+                "subtitle_window_y": 200,
+                "subtitle_custom_elements": [{"id":"c1","element_type":"text","content":"hello"}]
+            }
+        });
+        std::fs::write(dir.join("settings.json"), legacy.to_string()).unwrap();
+
+        let mgr = ConfigManager::new_with_base_dir(Some(dir.clone()));
+        let cfg = mgr.get_config();
+        assert_eq!(cfg.subtitle.subtitle_scenes.len(), 1, "应迁移出一个 default 场景");
+        let scene = &cfg.subtitle.subtitle_scenes[0];
+        assert_eq!(scene.id, "default");
+        assert_eq!(scene.style.font_size, 40);
+        assert_eq!(scene.style.show_translation, true);
+        assert_eq!(scene.window.x, 100);
+        assert_eq!(scene.window.y, 200);
+        assert_eq!(scene.style.custom_elements.len(), 1);
+
+        // 保存后重新加载仍然有效
+        mgr.save().unwrap();
+        let mgr2 = ConfigManager::new_with_base_dir(Some(dir.clone()));
+        assert_eq!(mgr2.get_config().subtitle.subtitle_scenes.len(), 1);
+
+        // 场景增删
+        let new_id = mgr2.add_subtitle_scene().unwrap();
+        assert_eq!(mgr2.get_config().subtitle.subtitle_scenes.len(), 2);
+        let dup_id = mgr2.duplicate_subtitle_scene(&new_id).unwrap();
+        assert_eq!(mgr2.get_config().subtitle.subtitle_scenes.len(), 3);
+        mgr2.remove_subtitle_scene(&dup_id).unwrap();
+        assert_eq!(mgr2.get_config().subtitle.subtitle_scenes.len(), 2);
+        assert!(mgr2.remove_subtitle_scene("default").is_err(), "默认场景不可删除");
+
+        // set_config 也会触发场景归一化（前端保存路径）
+        let mut cfg3 = mgr2.get_config();
+        cfg3.subtitle.subtitle_scenes.clear();
+        mgr2.set_config(cfg3);
+        assert_eq!(mgr2.get_config().subtitle.subtitle_scenes.len(), 1);
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

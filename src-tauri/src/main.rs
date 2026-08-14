@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![recursion_limit = "256"]
 
 mod api;
 mod app_state;
@@ -15,6 +16,7 @@ mod recorder;
 mod session;
 mod streaming;
 mod subtitle;
+mod translate;
 mod tts;
 mod update;
 mod utils;
@@ -80,6 +82,7 @@ fn main() {
             commands::start_recording,
             commands::stop_recording,
             commands::cancel_recording,
+            commands::force_cancel,
             commands::get_history,
             commands::remove_history,
             commands::clear_history,
@@ -107,6 +110,10 @@ fn main() {
             commands::push_subtitle_config,
             commands::get_subtitle_window_status,
             commands::set_subtitle_obs_mode,
+            commands::list_subtitle_scenes,
+            commands::add_subtitle_scene,
+            commands::duplicate_subtitle_scene,
+            commands::remove_subtitle_scene,
             commands::tts_synthesize,
             commands::tts_export,
             commands::tts_list_voices,
@@ -154,7 +161,9 @@ fn main() {
             let config_dir = config_manager.config_dir();
             history::init(config_dir);
 
-            let _ = config_manager.save();
+            if let Err(e) = config_manager.save() {
+                log::error!("启动时保存配置失败: {}", e);
+            }
 
             let indicator = StatusIndicator::new(
                 config_manager.indicator_fade_duration(),
@@ -173,22 +182,9 @@ fn main() {
                 });
             }
 
-            if let Some(window) = app.get_webview_window("subtitle") {
-                let window_clone = window.clone();
-                let state_for_subtitle = app_state.clone();
-                window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        api.prevent_close();
-                        let _ = window_clone.hide();
-                        let state = state_for_subtitle.clone();
-                        tauri::async_runtime::spawn(async move {
-                            if state.is_subtitle_running() {
-                                let _ = state.stop_subtitle().await;
-                            }
-                        });
-                    }
-                });
-            }
+            // 主场景字幕窗口事件：关闭 → 停用场景；移动/缩放 → 保存位置尺寸
+            // （动态场景窗口在创建时由 subtitle 模块自行挂接同样的事件）
+            app_state.subtitle.init_default_scene_window(app_handle);
 
             let show_item = MenuItem::with_id(app.handle(), "show", "显示主窗口", true, None::<&str>)?;
             let quit_item = PredefinedMenuItem::quit(app.handle(), Some("退出"))?;
