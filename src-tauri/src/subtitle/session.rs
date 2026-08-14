@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 
@@ -18,10 +18,19 @@ use crate::audio::processor::resample_and_convert;
 use crate::config::{ConfigManager, STREAM_MODEL_DOUBAO};
 use crate::streaming::{start_capture_with_prefs, AsrResponse, StreamingAsrClient};
 use crate::subtitle::transcript::Transcript;
-use crate::subtitle::translate::{resolve_engine, split_complete_sentences, TranslationPipeline};
+use crate::subtitle::translate::{
+    resolve_engine, split_by_width, split_complete_sentences, TranslationPipeline,
+    LINE_WIDTH_CHARS,
+};
+use crate::subtitle::window::scene_window_label;
 
 const CHUNK_MS: u64 = 200;
 const HISTORY_LIMIT: usize = 8;
+/// 帧刷新节拍：合并发射间隔（毫秒）。所有帧状态变化只置脏标记，
+/// 由合并发射器按此节拍统一上屏，防止高频事件击穿 WebView 消息队列。
+const FRAME_FLUSH_MS: u64 = 80;
+/// PCM 缓冲安全上限：超过约 5 秒样本（按 48kHz 单声道）则丢弃最旧，防止消费阻塞导致内存暴涨
+const MAX_PCM_BUFFER_SAMPLES: usize = 5 * 48_000;
 /// 说话人分轮：两次发声间隔超过该阈值视为新轮次
 const SPEAKER_TURN_GAP_MS: u64 = 2500;
 /// B 源（双源模式麦克风）固定说话人标签
@@ -64,7 +73,7 @@ impl LineTracker {
         }
     }
 
-    /// 喂入 definite 文本，返回本帧新定稿的完整句段
+    /// 喂入 definite 文本，返回本帧新定稿的行（标点断句 + 行宽强制切行）
     fn feed(&mut self, definite: &str) -> Vec<String> {
         let mut finalized = Vec::new();
         let chars: Vec<char> = definite.chars().collect();
@@ -86,6 +95,19 @@ impl LineTracker {
             finalized.push(s);
         }
         self.consumed_chars += new_part.chars().count() - tail.chars().count();
+
+        // 长行按行宽强制切行：大量文本自动换行，新行从底部出现、顶部行滚出
+        if tail.chars().count() >= LINE_WIDTH_CHARS {
+            let (lines, new_tail) = split_by_width(&tail, LINE_WIDTH_CHARS);
+            for line in lines {
+                if self.history.len() >= HISTORY_LIMIT {
+                    self.history.pop_front();
+                }
+                self.history.push_back(line.clone());
+                finalized.push(line);
+            }
+            self.consumed_chars += tail.chars().count() - new_tail.chars().count();
+        }
         finalized
     }
 
@@ -229,6 +251,11 @@ async fn start_source(
                 if buf.is_empty() {
                     continue;
                 }
+                // 安全上限：消费不及时则丢弃最旧样本，防止内存无限增长
+                if buf.len() > MAX_PCM_BUFFER_SAMPLES {
+                    let excess = buf.len() - MAX_PCM_BUFFER_SAMPLES;
+                    buf.drain(..excess);
+                }
                 std::mem::take(&mut *buf)
             };
             if chunk_f32.is_empty() {
@@ -291,7 +318,7 @@ impl SourceRunner {
 
 pub type PipelineMap = HashMap<String, Option<Arc<TranslationPipeline>>>;
 
-/// 向所有场景广播一帧字幕（每个场景各发一条，窗口按 sceneId 过滤）
+/// 向各场景字幕窗口广播一帧（窗口定向发送，避免主窗口反复接收无用数据）
 #[allow(clippy::too_many_arguments)]
 fn emit_frame(
     app: &AppHandle,
@@ -305,7 +332,15 @@ fn emit_frame(
     translation_current: &str,
 ) {
     for scene_id in scene_ids {
-        let _ = app.emit(
+        let Some(window) = app.get_webview_window(&scene_window_label(scene_id)) else {
+            continue;
+        };
+        // 隐藏窗口的 WebView 会被系统节流，持续投递事件会导致消息队列溢出（0x80070718）。
+        // 隐藏窗口跳过，重新显示后由下一次刷新补上最新状态。
+        if !window.is_visible().unwrap_or(false) {
+            continue;
+        }
+        let _ = window.emit(
             "subtitle-text",
             serde_json::json!({
                 "sceneId": scene_id,
@@ -402,8 +437,8 @@ pub async fn run_session(
         dual,
     }));
 
-    // ===== 每场景翻译流水线（仅 A 源）+ 脏信号通道 =====
-    let (dirty_tx, mut dirty_rx) = mpsc::unbounded_channel::<()>();
+    // ===== 每场景翻译流水线（仅 A 源）+ 合并发射脏标记 =====
+    let dirty_flag: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
     let cfg_snapshot = config.get_config();
     let translation_cache: Arc<Mutex<HashMap<String, String>>> =
         Arc::new(Mutex::new(HashMap::new()));
@@ -422,14 +457,15 @@ pub async fn run_session(
                     scene.translation.target_lang.clone(),
                     scene.translation.interim,
                     translation_cache.clone(),
-                    dirty_tx.clone(),
+                    dirty_flag.clone(),
                 ))
             });
             pps.insert(scene.id.clone(), pl);
         }
     }
 
-    // 脏信号渲染循环：译文落地即重发帧 + 同步转录译文
+    // 合并发射器：按固定节拍发射最新帧状态（ASR 帧与译文落地都只置脏标记）。
+    // 这是防止 PostMessage 队列溢出（0x80070718）导致卡死/内存暴涨的核心防线。
     {
         let app_d = app.clone();
         let scene_ids_d = scene_ids.clone();
@@ -437,16 +473,25 @@ pub async fn run_session(
         let pps_d = pipelines.clone();
         let transcript_d = transcript.clone();
         let running_d = running.clone();
+        let dirty_d = dirty_flag.clone();
         tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_millis(FRAME_FLUSH_MS));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 tokio::select! {
-                    _ = dirty_rx.recv() => {
-                        sync_transcript_translations(&transcript_d, &pps_d).await;
-                        emit_all(&app_d, &scene_ids_d, &asr_d, &pps_d).await;
+                    _ = interval.tick() => {
+                        if dirty_d.swap(false, Ordering::Relaxed) {
+                            sync_transcript_translations(&app_d, &transcript_d, &pps_d).await;
+                            emit_all(&app_d, &scene_ids_d, &asr_d, &pps_d).await;
+                        }
                     }
                     _ = tokio::time::sleep(Duration::from_secs(1)) => {
-                        // 会话结束后退出循环，释放引用，避免任务泄漏
                         if !running_d.load(Ordering::Relaxed) {
+                            // 退出前补发最后一次状态
+                            if dirty_d.swap(false, Ordering::Relaxed) {
+                                sync_transcript_translations(&app_d, &transcript_d, &pps_d).await;
+                                emit_all(&app_d, &scene_ids_d, &asr_d, &pps_d).await;
+                            }
                             break;
                         }
                     }
@@ -460,7 +505,7 @@ pub async fn run_session(
         let mut st = asr_state.lock().await;
         st.text = "正在连接语音服务...".to_string();
     }
-    emit_all(&app, &scene_ids, &asr_state, &pipelines).await;
+    dirty_flag.store(true, Ordering::Relaxed);
 
     // ===== 启动音源 =====
     let mut runner_a = start_source(&config, &a_source, &device_name, &running).await?;
@@ -478,7 +523,7 @@ pub async fn run_session(
             "实时字幕已就绪，请开始说话".to_string()
         };
     }
-    emit_all(&app, &scene_ids, &asr_state, &pipelines).await;
+    dirty_flag.store(true, Ordering::Relaxed);
 
     // ===== 消费循环 =====
     let mut tracker_a = LineTracker::new();
@@ -487,8 +532,8 @@ pub async fn run_session(
     let app_work = app.clone();
     let asr_work = asr_state.clone();
     let pps_work = pipelines.clone();
-    let scene_ids_work = scene_ids.clone();
     let transcript_work = transcript.clone();
+    let dirty_work = dirty_flag.clone();
 
     loop {
         tokio::select! {
@@ -500,7 +545,7 @@ pub async fn run_session(
                 match msg_a {
                     Some(Ok(resp)) => {
                         handle_frame("A", resp, &app_work, &asr_work, &pps_work, &transcript_work, &mut tracker_a, &mut tracker_b, &mut speaker_a).await;
-                        emit_all(&app_work, &scene_ids_work, &asr_work, &pps_work).await;
+                        dirty_work.store(true, Ordering::Relaxed);
                     }
                     Some(Err(e)) => log::error!("[字幕] A 源识别错误: {}", e),
                     None => {}
@@ -515,7 +560,7 @@ pub async fn run_session(
                 match msg_b {
                     Some(Ok(resp)) => {
                         handle_frame("B", resp, &app_work, &asr_work, &pps_work, &transcript_work, &mut tracker_a, &mut tracker_b, &mut speaker_a).await;
-                        emit_all(&app_work, &scene_ids_work, &asr_work, &pps_work).await;
+                        dirty_work.store(true, Ordering::Relaxed);
                     }
                     Some(Err(e)) => log::error!("[字幕] B 源识别错误: {}", e),
                     None => {}
@@ -536,8 +581,9 @@ pub async fn run_session(
     Ok(())
 }
 
-/// 用主场景（default）翻译历史同步转录译文
+/// 用主场景（default）翻译历史同步转录译文，并把变更增量推送给主窗口
 async fn sync_transcript_translations(
+    app: &AppHandle,
     transcript: &Arc<StdMutex<Transcript>>,
     pipelines: &Arc<Mutex<PipelineMap>>,
 ) {
@@ -548,8 +594,18 @@ async fn sync_transcript_translations(
             None => Vec::new(),
         }
     };
-    if let Ok(mut tr) = transcript.lock() {
-        tr.sync_translations(&history);
+    let changed = {
+        if let Ok(mut tr) = transcript.lock() {
+            tr.sync_translations(&history)
+        } else {
+            Vec::new()
+        }
+    };
+    if !changed.is_empty() {
+        let _ = app.emit(
+            "subtitle-transcript-updated",
+            serde_json::json!({ "type": "update", "updates": changed }),
+        );
     }
 }
 
@@ -593,23 +649,23 @@ async fn handle_frame(
         finalized
     };
 
-    // 转录记录（定稿句段）
+    // 转录记录（定稿句段）：只推送新增句段（增量），避免全量重发
     if !finalized.is_empty() {
         let speaker = if source == "A" {
             speaker_a.label().to_string()
         } else {
             SOURCE_B_SPEAKER.to_string()
         };
-        let segments = {
+        let appended: Vec<_> = {
             let mut tr = transcript.lock().unwrap();
-            for s in &finalized {
-                tr.push(source, &speaker, s);
-            }
-            tr.segments().to_vec()
+            finalized
+                .iter()
+                .map(|s| tr.push(source, &speaker, s))
+                .collect()
         };
         let _ = app.emit(
             "subtitle-transcript-updated",
-            serde_json::json!({ "segments": segments }),
+            serde_json::json!({ "type": "append", "segments": appended }),
         );
     }
 

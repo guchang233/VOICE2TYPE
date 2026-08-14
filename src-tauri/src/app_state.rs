@@ -190,13 +190,7 @@ impl AppState {
     }
 
     pub async fn toggle_subtitle(&self) -> Result<bool, String> {
-        if self.subtitle.is_running() {
-            self.subtitle.stop().await?;
-            Ok(false)
-        } else {
-            self.subtitle.start(self.config.clone()).await?;
-            Ok(true)
-        }
+        self.subtitle.toggle(self.config.clone()).await
     }
 
     async fn emit_status(&self, status: AppStatus) {

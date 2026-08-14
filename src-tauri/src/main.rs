@@ -25,7 +25,7 @@ mod win_utils;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use once_cell::sync::OnceCell;
-use tauri::{Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 
@@ -38,25 +38,35 @@ pub static INDICATOR: OnceCell<StatusIndicator> = OnceCell::new();
 pub static CONFIG_GLOBAL: OnceCell<Arc<ConfigManager>> = OnceCell::new();
 pub static LOG_MENU_NEEDS_UNCHECK: AtomicBool = AtomicBool::new(false);
 
+/// 当前注册的字幕全局快捷键加速器（变更时用于反注册旧快捷键）
+static SUBTITLE_SHORTCUT: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
 pub fn request_uncheck_log_menu() {
     LOG_MENU_NEEDS_UNCHECK.store(true, std::sync::atomic::Ordering::SeqCst);
 }
 
 fn main() {
-    // 必须在任何 WebView2 初始化之前设置环境变量
-    // 禁用 DirectComposition 后，WebView2 回退到 GDI 合成，OBS 等录屏软件的
-    // Window Capture (BitBlt) 才能正常捕捉窗口内容（否则会捕捉到纯黑画面）。
-    // 副作用：Tauri 透明窗口效果失效，因此 tauri.conf.json 中窗口 transparent 必须为 false。
-    if std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").is_err() {
-        std::env::set_var(
-            "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-            "--disable-direct-composition",
-        );
-    }
-
     logger::init_logger();
 
     let config_manager = Arc::new(ConfigManager::new());
+
+    // 必须在任何 WebView2 初始化之前，根据 OBS 兼容模式决定合成方式：
+    // - OBS 模式开：禁用 DirectComposition + GPU 合成，回退 GDI，使 OBS 窗口采集(BitBlt)
+    //   既能捕捉到画面、又能持续刷新（否则画面会静止）；
+    // - OBS 模式关：保持 DComp，字幕窗口透明可用（背景真正透明而非黑底）。
+    let obs_mode = config_manager
+        .get_config()
+        .subtitle
+        .subtitle_scenes
+        .iter()
+        .any(|s| s.window.obs_mode);
+    if obs_mode && std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").is_err() {
+        std::env::set_var(
+            "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+            "--disable-direct-composition --disable-gpu-compositing",
+        );
+    }
+
     let _ = CONFIG_GLOBAL.set(config_manager.clone());
     let app_state = Arc::new(AppState::new(config_manager.clone()));
 
@@ -116,6 +126,7 @@ fn main() {
             commands::get_subtitle_transcript,
             commands::clear_subtitle_transcript,
             commands::export_subtitle_transcript,
+            commands::apply_subtitle_hotkey,
             commands::tts_synthesize,
             commands::tts_export,
             commands::tts_list_voices,
@@ -188,6 +199,15 @@ fn main() {
             // （动态场景窗口在创建时由 subtitle 模块自行挂接同样的事件）
             app_state.subtitle.init_default_scene_window(app_handle);
 
+            // 注册字幕开关全局快捷键（吞键，避免触发浏览器快捷键；串行化切换避免竞态）
+            if let Err(e) = register_subtitle_shortcut(
+                app_handle,
+                app_state.clone(),
+                config_manager.subtitle_hotkey(),
+            ) {
+                log::warn!("注册字幕开关热键失败: {}", e);
+            }
+
             let show_item = MenuItem::with_id(app.handle(), "show", "显示主窗口", true, None::<&str>)?;
             let quit_item = PredefinedMenuItem::quit(app.handle(), Some("退出"))?;
             let separator = PredefinedMenuItem::separator(app.handle())?;
@@ -235,19 +255,10 @@ fn main() {
 
                 let mut callback = move |event: rdev::Event| {
                     let batch_hotkey = config_for_hotkey.hotkey();
-                    let subtitle_hotkey = config_for_hotkey.subtitle_hotkey();
 
                     match event.event_type {
                         rdev::EventType::KeyPress(key) => {
                             let vk = key_to_vk(key);
-
-                            if vk == subtitle_hotkey && vk != batch_hotkey && vk != 0 {
-                                // 字幕开关热键（默认 F7）：按下切换字幕会话
-                                let state = state_for_hotkey.clone();
-                                tauri::async_runtime::spawn(async move {
-                                    let _ = state.toggle_subtitle().await;
-                                });
-                            }
 
                             if vk == batch_hotkey {
                                 let trigger_mode = config_for_hotkey.trigger_mode();
@@ -307,8 +318,7 @@ fn main() {
         .expect("error while running Voice2Type application");
 }
 
-fn key_to_vk(key: rdev::Key) -> u32 {
-    match key {
+fn key_to_vk(key: rdev::Key) -> u32 {    match key {
         rdev::Key::F1 => 0x70,
         rdev::Key::F2 => 0x71,
         rdev::Key::F3 => 0x72,
@@ -361,4 +371,50 @@ fn key_to_vk(key: rdev::Key) -> u32 {
         rdev::Key::KeyZ => 0x5a,
         _ => 0,
     }
+}
+
+/// 将虚拟键码转换为全局快捷键加速器字符串（仅 F1-F12 / 数字 / 字母）
+fn vk_to_accelerator(vk: u32) -> Option<String> {
+    match vk {
+        0x70..=0x7b => Some(format!("F{}", vk - 0x6f)),
+        0x30..=0x39 | 0x41..=0x5a => char::from_u32(vk).map(|c| c.to_string()),
+        _ => None,
+    }
+}
+
+/// 注册字幕开关全局快捷键（系统级吞键，WebView2 不会收到按键，避免浏览器快捷键干扰）
+///
+/// 重复调用会先反注册旧快捷键再注册新的。
+pub fn register_subtitle_shortcut(
+    app: &AppHandle,
+    state: Arc<AppState>,
+    vk: u32,
+) -> Result<(), String> {
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+
+    let gs = app.global_shortcut();
+    if let Ok(mut prev) = SUBTITLE_SHORTCUT.lock() {
+        // 反注册旧快捷键
+        if let Some(p) = prev.as_ref() {
+            let _ = gs.unregister(p.as_str());
+        }
+        *prev = None;
+
+        let Some(accel) = vk_to_accelerator(vk) else {
+            return Ok(());
+        };
+
+        gs.on_shortcut(accel.as_str(), move |_app, _shortcut, event| {
+            if event.state == ShortcutState::Pressed {
+                let st = state.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = st.toggle_subtitle().await;
+                });
+            }
+        })
+        .map_err(|e| e.to_string())?;
+
+        *prev = Some(accel);
+    }
+    Ok(())
 }

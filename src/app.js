@@ -976,7 +976,7 @@
     function renderTranscript(segments) {
         const list = $('#subtitle-transcript-list');
         if (!list) return;
-        state.transcriptSegments = Array.isArray(segments) ? segments : [];
+        if (Array.isArray(segments)) state.transcriptSegments = segments;
         const segs = state.transcriptSegments;
         const countEl = $('#transcript-status');
         if (countEl) countEl.textContent = segs.length ? `共 ${segs.length} 条` : '';
@@ -985,12 +985,21 @@
             return;
         }
         const wasAtBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
-        list.innerHTML = segs.map(seg => {
+        // 仅渲染最近 N 条，防止 DOM 节点无限增长导致卡顿
+        const TRANSCRIPT_DOM_CAP = 400;
+        const shown = segs.length > TRANSCRIPT_DOM_CAP ? segs.slice(-TRANSCRIPT_DOM_CAP) : segs;
+        const omitted = segs.length - shown.length;
+        let html = '';
+        if (omitted > 0) {
+            html += `<div class="transcript-item" style="color:var(--text-tertiary)">… 更早的 ${omitted} 条已省略（导出可保留完整记录）</div>`;
+        }
+        html += shown.map(seg => {
             const srcBadge = seg.source === 'B' ? '<span class="tr-source-b">麦克风</span>' : '';
             const speaker = seg.speaker ? `<span class="tr-speaker">${escapeHtml(seg.speaker)}:</span>` : '';
             const trans = seg.translation ? `<span class="tr-translation">译: ${escapeHtml(seg.translation)}</span>` : '';
             return `<div class="transcript-item"><span class="tr-time">[${formatTranscriptTime(seg.start_ms)}]</span>${srcBadge}${speaker}${escapeHtml(seg.text)}${trans}</div>`;
         }).join('');
+        list.innerHTML = html;
         if (wasAtBottom) list.scrollTop = list.scrollHeight;
     }
 
@@ -2686,6 +2695,12 @@
             } catch (e) {
                 console.warn('Failed to push subtitle config:', e);
             }
+            // 重新注册字幕开关全局热键（吞键，避免浏览器快捷键干扰）
+            try {
+                await invoke('apply_subtitle_hotkey');
+            } catch (e) {
+                console.warn('Failed to apply subtitle hotkey:', e);
+            }
             setStatus('ready', '设置已保存');
             setTimeout(() => setStatus('idle', '就绪'), 2000);
         } catch (err) {
@@ -3138,6 +3153,11 @@
                         state.settingsDirty = false;
                     }
                     await invoke('push_subtitle_config');
+                    try {
+                        await invoke('apply_subtitle_hotkey');
+                    } catch (e) {
+                        console.warn('Failed to apply subtitle hotkey:', e);
+                    }
                     setStatus('ready', '字幕配置已应用');
                     setTimeout(() => setStatus('idle', '就绪'), 2000);
                 } catch (err) {
@@ -3196,6 +3216,8 @@
                 if (invoke) {
                     try {
                         await invoke('set_subtitle_obs_mode', { sceneId: state.currentSceneId, obsMode: !on });
+                        setStatus('ready', 'OBS 兼容模式已切换（需重启应用生效）');
+                        setTimeout(() => setStatus('idle', '就绪'), 4000);
                     } catch (err) {
                         console.error('Failed to set OBS mode:', err);
                     }
@@ -3941,10 +3963,21 @@
             state.unlisteners.push(unlisten);
         });
 
-        // 转录更新（句段定稿）
+        // 转录更新（增量：append=新增句段，update=译文落地）
         listen('subtitle-transcript-updated', (event) => {
             const p = event.payload || {};
-            renderTranscript(p.segments || []);
+            if (p.type === 'append' && Array.isArray(p.segments)) {
+                state.transcriptSegments.push(...p.segments);
+                renderTranscript();
+            } else if (p.type === 'update' && Array.isArray(p.updates)) {
+                p.updates.forEach(u => {
+                    const idx = Array.isArray(u) ? u[0] : u.index;
+                    const text = Array.isArray(u) ? u[1] : u.translation;
+                    const seg = state.transcriptSegments.find(x => x.index === idx);
+                    if (seg) seg.translation = text || '';
+                });
+                renderTranscript();
+            }
         }).then(unlisten => {
             state.unlisteners.push(unlisten);
         });

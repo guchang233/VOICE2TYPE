@@ -77,15 +77,19 @@ pub fn build_config_payload(scene: &SubtitleSceneConfig) -> serde_json::Value {
         "customElements": s.custom_elements,
         "elementOrder": s.element_order,
         "preset": s.preset,
+        // OBS 兼容模式（窗口端据此切换黑底/透明与模糊）
+        "obsMode": scene.window.obs_mode,
         // 同声传译配置（供窗口端展示/调试）
         "translationEngine": scene.translation.engine,
         "translationTargetLang": scene.translation.target_lang,
     })
 }
 
-/// 推送场景样式配置事件（app 级广播，窗口按 sceneId 过滤）
+/// 推送场景样式配置事件（窗口定向发送，避免广播到无关窗口）
 pub fn push_scene_config(app: &AppHandle, scene: &SubtitleSceneConfig) {
-    let _ = app.emit("subtitle-config", build_config_payload(scene));
+    if let Some(window) = app.get_webview_window(&scene_window_label(&scene.id)) {
+        let _ = window.emit("subtitle-config", build_config_payload(scene));
+    }
 }
 
 /// 将场景窗口控制配置应用到窗口（位置/尺寸/置顶/穿透）
@@ -176,6 +180,7 @@ pub async fn ensure_scene_window(
         .title("Voice2Type 实时字幕")
         .decorations(false)
         .resizable(true)
+        .transparent(true)
         .always_on_top(scene.window.always_on_top)
         .skip_taskbar(true)
         .visible(false);

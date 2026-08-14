@@ -35,6 +35,8 @@ pub struct SubtitleService {
     session_gen: Arc<std::sync::atomic::AtomicU64>,
     /// 最近一次会话的转录（会话结束后保留，供导出；下次会话启动时替换）
     transcript: Arc<StdMutex<Option<Arc<StdMutex<Transcript>>>>>,
+    /// 启停串行化锁：防止快速连续 toggle/start/stop 竞态创建多个会话
+    toggle_lock: Arc<Mutex<()>>,
 }
 
 impl SubtitleService {
@@ -46,6 +48,7 @@ impl SubtitleService {
             stop_tx: Arc::new(Mutex::new(None)),
             session_gen: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             transcript: Arc::new(StdMutex::new(None)),
+            toggle_lock: Arc::new(Mutex::new(())),
         }
     }
 
@@ -70,11 +73,34 @@ impl SubtitleService {
         *self.transcript.lock().unwrap() = None;
     }
 
+    /// 启动字幕会话（串行化，避免竞态重复创建会话）
     pub async fn start(&self, config: Arc<ConfigManager>) -> Result<(), String> {
+        let _guard = self.toggle_lock.lock().await;
         if self.running.load(Ordering::SeqCst) {
             return Err("字幕已在运行".to_string());
         }
+        self.start_inner(config).await
+    }
 
+    /// 停止字幕会话（串行化）
+    pub async fn stop(&self) -> Result<(), String> {
+        let _guard = self.toggle_lock.lock().await;
+        self.stop_inner().await
+    }
+
+    /// 切换字幕会话：运行中则停止，否则启动（串行化，返回切换后的运行状态）
+    pub async fn toggle(&self, config: Arc<ConfigManager>) -> Result<bool, String> {
+        let _guard = self.toggle_lock.lock().await;
+        if self.running.load(Ordering::SeqCst) {
+            self.stop_inner().await?;
+            Ok(false)
+        } else {
+            self.start_inner(config).await?;
+            Ok(true)
+        }
+    }
+
+    async fn start_inner(&self, config: Arc<ConfigManager>) -> Result<(), String> {
         let handle = self.app_handle.lock().await;
         let app = handle.as_ref().ok_or("App handle not ready")?.clone();
         drop(handle);
@@ -154,8 +180,14 @@ impl SubtitleService {
             // 只有最新会话才执行收尾（旧会话收尾不隐藏新会话刚显示的窗口）
             if gen_flag.load(Ordering::SeqCst) == session_gen {
                 for scene_id in &scene_ids_task {
-                    if let Some(window) = app_handle.get_webview_window(&scene_window_label(scene_id)) {
-                        let _ = window.hide();
+                    let label = scene_window_label(scene_id);
+                    if let Some(window) = app_handle.get_webview_window(&label) {
+                        if scene_id == DEFAULT_SCENE_ID {
+                            // 主场景窗口保留（隐藏），动态场景窗口销毁以释放 WebView 内存
+                            let _ = window.hide();
+                        } else {
+                            let _ = window.destroy();
+                        }
                     }
                 }
                 let _ = app_handle.emit("subtitle-session-stopped", ());
@@ -165,7 +197,7 @@ impl SubtitleService {
         Ok(())
     }
 
-    pub async fn stop(&self) -> Result<(), String> {
+    async fn stop_inner(&self) -> Result<(), String> {
         self.running.store(false, Ordering::SeqCst);
 
         let mut tx = self.stop_tx.lock().await;

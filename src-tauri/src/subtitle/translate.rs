@@ -11,13 +11,14 @@
 //! 6. 多场景共享翻译缓存（语言+原文 → 译文），避免相同内容重复调用 LLM。
 
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use async_trait::async_trait;
 use serde::Deserialize;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::Mutex;
 
 use crate::api::client::HTTP_CLIENT;
 use crate::config::ConfigManager;
@@ -26,8 +27,8 @@ use crate::config::ConfigManager;
 const CURRENT_MIN_INTERVAL_MS: u64 = 1000;
 /// 单次翻译请求超时
 const TRANSLATE_TIMEOUT_SECS: u64 = 15;
-/// 未翻译的 definite 尾部超过该长度时强制作为句段翻译（防止长句等待标点过久）
-const FORCE_SEGMENT_CHARS: usize = 40;
+/// 行宽（字符数）：原文/译文长行超过该宽度自动切行滚动
+pub const LINE_WIDTH_CHARS: usize = 40;
 /// 历史行最大保留数
 const HISTORY_LIMIT: usize = 8;
 
@@ -233,8 +234,8 @@ pub struct TranslationPipeline {
     config: Arc<ConfigManager>,
     /// 跨场景共享翻译缓存：key = "lang\u{1}text"
     cache: Arc<Mutex<HashMap<String, String>>>,
-    /// 译文落地/变化时通知会话重发帧（主动推送，保证翻译实时上屏）
-    dirty_tx: mpsc::UnboundedSender<()>,
+    /// 译文落地/变化时置脏标记（由会话合并发射器统一上屏，避免高频事件淹没消息队列）
+    dirty_flag: Arc<AtomicBool>,
 }
 
 impl TranslationPipeline {
@@ -245,7 +246,7 @@ impl TranslationPipeline {
         target_lang: String,
         interim_enabled: bool,
         cache: Arc<Mutex<HashMap<String, String>>>,
-        dirty_tx: mpsc::UnboundedSender<()>,
+        dirty_flag: Arc<AtomicBool>,
     ) -> Self {
         Self {
             engine,
@@ -254,7 +255,7 @@ impl TranslationPipeline {
             state: Arc::new(Mutex::new(TranslationState::new())),
             config,
             cache,
-            dirty_tx,
+            dirty_flag,
         }
     }
 
@@ -305,13 +306,16 @@ impl TranslationPipeline {
                 segment_spawns.push((seq, sentence));
             }
 
-            // 长尾强制切段（避免长时间等标点）
-            if tail.chars().count() >= FORCE_SEGMENT_CHARS {
-                let seq = st.next_seq;
-                st.next_seq += 1;
-                segment_spawns.push((seq, tail.clone()));
-                st.translated_chars = d_chars.len();
-                tail.clear();
+            // 长尾按行宽强制切行（大量文本自动换行滚动，不再等标点）
+            if tail.chars().count() >= LINE_WIDTH_CHARS {
+                let (lines, new_tail) = split_by_width(&tail, LINE_WIDTH_CHARS);
+                for line in lines {
+                    let seq = st.next_seq;
+                    st.next_seq += 1;
+                    segment_spawns.push((seq, line));
+                }
+                st.translated_chars += tail.chars().count() - new_tail.chars().count();
+                tail = new_tail;
             }
 
             // ===== 当前行译文（未成句尾部 + 临时文本，防抖） =====
@@ -363,7 +367,7 @@ impl TranslationPipeline {
         let config = self.config.clone();
         let cache = self.cache.clone();
         let lang = self.target_lang.clone();
-        let dirty = self.dirty_tx.clone();
+        let dirty = self.dirty_flag.clone();
         tokio::spawn(async move {
             let translated = translate_with_cache(&config, &cache, engine.as_ref(), &lang, &sentence)
                 .await
@@ -395,7 +399,7 @@ impl TranslationPipeline {
                     }
                 }
             }
-            let _ = dirty.send(());
+            dirty.store(true, Ordering::Relaxed);
         });
     }
 
@@ -405,7 +409,7 @@ impl TranslationPipeline {
         let config = self.config.clone();
         let cache = self.cache.clone();
         let lang = self.target_lang.clone();
-        let dirty = self.dirty_tx.clone();
+        let dirty = self.dirty_flag.clone();
         tokio::spawn(async move {
             let translated = translate_with_cache(&config, &cache, engine.as_ref(), &lang, &text)
                 .await
@@ -419,7 +423,7 @@ impl TranslationPipeline {
                     st.current = translated;
                 }
             }
-            let _ = dirty.send(());
+            dirty.store(true, Ordering::Relaxed);
         });
     }
 }
@@ -446,10 +450,80 @@ pub fn split_complete_sentences(text: &str) -> (Vec<String>, String) {
     (sentences, tail)
 }
 
+/// 长行按行宽强制切行：大量文本自动换行滚动（顶行滚出历史）
+/// 与 split_complete_sentences 配合：先按标点断句，再按行宽切长行。
+pub fn split_by_width(text: &str, limit: usize) -> (Vec<String>, String) {
+    let chars: Vec<char> = text.chars().collect();
+    let mut lines = Vec::new();
+    let mut idx = 0usize;
+    while idx + limit <= chars.len() {
+        let mut end = idx + limit;
+        // 英文/带空格文本：在行尾区间内找最近的空格断行，避免切断单词
+        if chars[end - 1].is_alphanumeric() {
+            let start = idx + limit * 3 / 4;
+            for i in (start..end).rev() {
+                if chars[i] == ' ' {
+                    end = i;
+                    break;
+                }
+            }
+        }
+        if end == idx {
+            end = idx + limit;
+        }
+        let line: String = chars[idx..end].iter().collect();
+        let trimmed = line.trim().to_string();
+        if !trimmed.is_empty() {
+            lines.push(trimmed);
+        }
+        idx = end;
+        // 跳过行间空白
+        while idx < chars.len() && chars[idx] == ' ' {
+            idx += 1;
+        }
+    }
+    let tail: String = chars[idx..].iter().collect();
+    (lines, tail)
+}
+
 /// 判断文本是否含有实质内容（字母/数字/CJK 等）
 fn is_meaningful(text: &str) -> bool {
     text.chars()
         .any(|c| c.is_alphanumeric() || (c as u32) > 0x2E80)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split_by_width_chunks_long_cjk_text() {
+        let text = "一二三四五六七八九十".repeat(10); // 100 字
+        let (lines, tail) = split_by_width(&text, 40);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].chars().count(), 40);
+        assert_eq!(lines[1].chars().count(), 40);
+        assert_eq!(tail.chars().count(), 20);
+    }
+
+    #[test]
+    fn split_by_width_breaks_at_space_for_english() {
+        let text = "hello world this is a fairly long english sentence that keeps going";
+        let (lines, tail) = split_by_width(text, 40);
+        assert!(!lines.is_empty(), "长文本应切出至少一行");
+        for line in &lines {
+            assert!(line.chars().count() <= 40, "每行不超过宽度限制");
+        }
+        let all: String = lines.join(" ") + " " + &tail;
+        assert_eq!(all.replace(' ', ""), text.replace(' ', ""), "内容不丢失");
+    }
+
+    #[test]
+    fn split_by_width_short_text_stays_tail() {
+        let (lines, tail) = split_by_width("短文本", 40);
+        assert!(lines.is_empty());
+        assert_eq!(tail, "短文本");
+    }
 }
 
 /// 带缓存翻译：先查缓存，未命中则调用引擎并写入缓存

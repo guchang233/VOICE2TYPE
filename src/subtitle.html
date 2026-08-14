@@ -10,15 +10,23 @@
             height: 100%;
             width: 100%;
             overflow: hidden;
-            background: #000;
+            background: transparent;
             font-family: "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont,
                          "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
             -webkit-user-select: none;
             user-select: none;
         }
+        /* OBS 兼容模式：窗口透明失效（DComp 被禁用），用实底黑保证采集干净 */
+        body.obs-mode {
+            background: #000;
+        }
         body.obs-mode #subtitle-container {
             -webkit-app-region: no-drag;
             app-region: no-drag;
+        }
+        body.obs-mode #subtitle-box {
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
         }
         /* 容器：对齐锚点由 JS 按设置写入 justify-content / align-items */
         #subtitle-container {
@@ -161,6 +169,8 @@
         // 主窗口 label 为 "subtitle"（对应 default 场景）；
         // 动态窗口 label 为 "subtitle-scene-{sceneId}"
         let sceneId = 'default';
+        // OBS 兼容模式标记（配置推送或 obs-mode 事件更新）
+        let obsMode = false;
         try {
             window.__TAURI__.window.getCurrentWindow().then((w) => {
                 const label = (w && w.label) || 'subtitle';
@@ -203,6 +213,10 @@
         function applyConfig(cfg) {
             Object.assign(cfgCache, cfg);
 
+            // OBS 兼容模式：切换黑底/透明 + 关闭模糊
+            obsMode = !!cfg.obsMode;
+            document.body.classList.toggle('obs-mode', obsMode);
+
             // ===== 容器对齐锚点 + 最大宽度 =====
             const alignX = ALIGN_MAP[cfg.containerAlignX] || 'center';
             const alignY = ALIGN_MAP[cfg.containerAlignY] || 'flex-end';
@@ -219,8 +233,14 @@
             const bgOpacity = typeof cfg.bgOpacity === 'number' ? cfg.bgOpacity : 0.6;
             boxEl.background = hexToRgba(bgColor, bgOpacity);
             const blur = typeof cfg.blur === 'number' ? cfg.blur : 20;
-            boxEl.backdropFilter = `blur(${blur}px)`;
-            boxEl.webkitBackdropFilter = `blur(${blur}px)`;
+            if (obsMode) {
+                // OBS 模式：GDI 合成下 backdrop-filter 会导致采集画面不刷新，关闭之
+                boxEl.backdropFilter = 'none';
+                boxEl.webkitBackdropFilter = 'none';
+            } else {
+                boxEl.backdropFilter = `blur(${blur}px)`;
+                boxEl.webkitBackdropFilter = `blur(${blur}px)`;
+            }
             if (typeof cfg.paddingX === 'number' && typeof cfg.paddingY === 'number') {
                 boxEl.padding = `${cfg.paddingY}px ${cfg.paddingX}px`;
             }
@@ -590,6 +610,7 @@
 
         // ===== 窗口高度自适应内容（容纳不下时变大，不遮文字） =====
         let autoFitTimer = null;
+        let lastSetSizeAt = 0;
 
         function applyAutoFit() {
             if (cfgCache.autoFit !== true) return;
@@ -601,6 +622,13 @@
             const desiredH = Math.max(40, Math.ceil(subtitleBox.offsetHeight) + 32);
             // 阈值防抖，避免频繁重设
             if (Math.abs(window.innerHeight - desiredH) <= 6) return;
+            const now = Date.now();
+            // 限频：两次调整至少间隔 300ms，防止 resize 风暴击穿消息队列
+            if (now - lastSetSizeAt < 300) {
+                scheduleAutoFit();
+                return;
+            }
+            lastSetSizeAt = now;
             getWin().then((win) => {
                 win.setSize(new LogicalSize(window.innerWidth, desiredH)).catch(() => {});
             }).catch(() => {});
@@ -608,7 +636,7 @@
 
         function scheduleAutoFit() {
             if (autoFitTimer) clearTimeout(autoFitTimer);
-            autoFitTimer = setTimeout(applyAutoFit, 60);
+            autoFitTimer = setTimeout(applyAutoFit, 80);
         }
 
         // ===== 事件监听（按 sceneId 过滤） =====
@@ -645,7 +673,10 @@
         listen('subtitle-obs-mode', (event) => {
             const p = event.payload || {};
             if (p.sceneId && p.sceneId !== sceneId) return;
-            document.body.classList.toggle('obs-mode', !!p.enabled);
+            obsMode = !!p.enabled;
+            document.body.classList.toggle('obs-mode', obsMode);
+            // 重新应用配置：OBS 模式下关闭模糊以保持采集画面持续刷新
+            applyConfig(cfgCache);
         });
 
         // 时间戳每秒刷新 + 自定义元素占位符刷新

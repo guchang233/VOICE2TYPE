@@ -4,6 +4,9 @@ use std::time::Instant;
 
 use serde::Serialize;
 
+/// 转录句段上限：防止超长会话导致内存无限增长
+const MAX_TRANSCRIPT_SEGMENTS: usize = 2000;
+
 /// 一条转录句段（已定稿的完整句段）
 #[derive(Debug, Clone, Serialize)]
 pub struct TranscriptSegment {
@@ -49,22 +52,33 @@ impl Transcript {
         };
         self.next_index += 1;
         self.segments.push(seg.clone());
+        // 超上限时丢弃最旧句段，保持内存有界
+        if self.segments.len() > MAX_TRANSCRIPT_SEGMENTS {
+            let excess = self.segments.len() - MAX_TRANSCRIPT_SEGMENTS;
+            self.segments.drain(..excess);
+        }
         seg
     }
 
-    /// 用主场景翻译流水线的历史译文按位置同步 A 源句段的译文
-    /// （两者按同一套切句逻辑推进，历史索引一一对应）
-    pub fn sync_translations(&mut self, translation_history: &[String]) {
+    /// 用主场景翻译流水线的历史译文按位置同步 A 源句段的译文。
+    /// 返回本次发生变化的 (句段序号, 新译文) 列表（供增量推送）。
+    pub fn sync_translations(&mut self, translation_history: &[String]) -> Vec<(u64, String)> {
+        let mut changed = Vec::new();
         let mut a_idx = 0usize;
         for seg in self.segments.iter_mut() {
             if seg.source != "A" {
                 continue;
             }
             if a_idx < translation_history.len() {
-                seg.translation = translation_history[a_idx].clone();
+                let t = &translation_history[a_idx];
+                if seg.translation != *t {
+                    seg.translation = t.clone();
+                    changed.push((seg.index, t.clone()));
+                }
             }
             a_idx += 1;
         }
+        changed
     }
 
     pub fn segments(&self) -> &[TranscriptSegment] {

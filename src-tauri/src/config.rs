@@ -515,46 +515,51 @@ pub struct SubtitleStyle {
 
 impl Default for SubtitleStyle {
     fn default() -> Self {
-        let base = SubtitleConfig::default();
         Self {
-            font_family: base.subtitle_font_family,
-            font_size: base.subtitle_font_size,
-            font_color: base.subtitle_font_color,
-            font_weight: base.subtitle_font_weight,
-            italic: base.subtitle_italic,
-            text_align: base.subtitle_text_align,
-            letter_spacing: base.subtitle_letter_spacing,
-            line_height: base.subtitle_line_height,
-            text_shadow_color: base.subtitle_text_shadow_color,
-            text_shadow_strength: base.subtitle_text_shadow_strength,
-            bg_color: base.subtitle_bg_color,
-            bg_opacity: base.subtitle_bg_opacity,
-            blur: base.subtitle_blur,
-            padding_x: base.subtitle_padding_x,
-            padding_y: base.subtitle_padding_y,
-            max_lines: base.subtitle_max_lines,
-            interim_color: base.subtitle_interim_color,
-            interim_opacity: base.subtitle_interim_opacity,
-            show_original: base.subtitle_show_original,
-            show_translation: base.subtitle_show_translation,
-            show_speaker: base.subtitle_show_speaker,
-            show_timestamp: base.subtitle_show_timestamp,
+            font_family: "SimHei".to_string(),
+            font_size: 32,
+            font_color: "#ffffff".to_string(),
+            font_weight: 400,
+            italic: false,
+            text_align: "center".to_string(),
+            letter_spacing: 0.0,
+            line_height: 1.0,
+            text_shadow_color: "#000000".to_string(),
+            text_shadow_strength: 10,
+            bg_color: "#ffffff".to_string(),
+            bg_opacity: 0.6,
+            blur: 20,
+            padding_x: 24,
+            padding_y: 12,
+            max_lines: 3,
+            interim_color: "#a8a8a8".to_string(),
+            interim_opacity: 0.1,
+            show_original: true,
+            show_translation: true,
+            show_speaker: false,
+            show_timestamp: false,
             show_original_secondary: false,
-            layout: base.subtitle_layout,
-            translation_font_size: base.subtitle_translation_font_size,
-            translation_font_color: base.subtitle_translation_font_color,
-            translation_font_weight: base.subtitle_translation_font_weight,
-            translation_opacity: base.subtitle_translation_opacity,
-            translation_prefix: base.subtitle_translation_prefix,
-            speaker_color: base.subtitle_speaker_color,
-            speaker_font_size: base.subtitle_speaker_font_size,
-            speaker_prefix: base.subtitle_speaker_prefix,
-            timestamp_color: base.subtitle_timestamp_color,
-            timestamp_font_size: base.subtitle_timestamp_font_size,
-            timestamp_format: base.subtitle_timestamp_format,
+            layout: "vertical".to_string(),
+            translation_font_size: 24,
+            translation_font_color: "#fff45c".to_string(),
+            translation_font_weight: 400,
+            translation_opacity: 0.85,
+            translation_prefix: String::new(),
+            speaker_color: "#818cf8".to_string(),
+            speaker_font_size: 16,
+            speaker_prefix: String::new(),
+            timestamp_color: "#a1a1aa".to_string(),
+            timestamp_font_size: 14,
+            timestamp_format: "HH:MM:SS".to_string(),
             custom_elements: Vec::new(),
-            element_order: default_element_order(),
-            preset: "clean".to_string(),
+            element_order: vec![
+                "speaker".to_string(),
+                "original".to_string(),
+                "translation".to_string(),
+                "timestamp".to_string(),
+                "original2".to_string(),
+            ],
+            preset: "custom".to_string(),
             container_align_x: "center".to_string(),
             container_align_y: "bottom".to_string(),
             box_max_width: 100,
@@ -805,35 +810,35 @@ impl Default for SubtitleConfig {
             subtitle_font_color: "#ffffff".to_string(),
             subtitle_bg_opacity: 0.6,
             subtitle_blur: 20,
-            subtitle_max_lines: 2,
+            subtitle_max_lines: 3,
             subtitle_window_x: -1,
             subtitle_window_y: -1,
             subtitle_window_width: 1200,
             subtitle_window_height: 120,
-            subtitle_font_family: "Microsoft YaHei".to_string(),
+            subtitle_font_family: "SimHei".to_string(),
             subtitle_font_weight: 400,
             subtitle_italic: false,
             subtitle_text_align: "center".to_string(),
             subtitle_letter_spacing: 0.0,
-            subtitle_line_height: 1.4,
+            subtitle_line_height: 1.0,
             subtitle_text_shadow_color: "#000000".to_string(),
-            subtitle_text_shadow_strength: 4,
-            subtitle_bg_color: "#000000".to_string(),
+            subtitle_text_shadow_strength: 10,
+            subtitle_bg_color: "#ffffff".to_string(),
             subtitle_padding_x: 24,
             subtitle_padding_y: 12,
-            subtitle_interim_color: "#ffffff".to_string(),
-            subtitle_interim_opacity: 0.7,
+            subtitle_interim_color: "#a8a8a8".to_string(),
+            subtitle_interim_opacity: 0.1,
             subtitle_input_device: String::new(),
             subtitle_audio_source: "microphone".to_string(),
             // 元素级显示控制
             subtitle_show_original: true,
-            subtitle_show_translation: false,
+            subtitle_show_translation: true,
             subtitle_show_speaker: false,
             subtitle_show_timestamp: false,
             subtitle_layout: "vertical".to_string(),
             // 译文样式
             subtitle_translation_font_size: 24,
-            subtitle_translation_font_color: "#ffffff".to_string(),
+            subtitle_translation_font_color: "#fff45c".to_string(),
             subtitle_translation_font_weight: 400,
             subtitle_translation_opacity: 0.85,
             subtitle_translation_prefix: String::new(),
@@ -846,13 +851,19 @@ impl Default for SubtitleConfig {
             subtitle_timestamp_font_size: 14,
             subtitle_timestamp_format: "HH:MM:SS".to_string(),
             // 翻译配置
-            subtitle_translation_enabled: false,
-            subtitle_translation_target_lang: "en".to_string(),
-            subtitle_translation_engine: "none".to_string(),
+            subtitle_translation_enabled: true,
+            subtitle_translation_target_lang: "中文".to_string(),
+            subtitle_translation_engine: "llm".to_string(),
             // 自定义元素系统
             subtitle_custom_elements: Vec::new(),
-            subtitle_element_order: default_element_order(),
-            subtitle_preset: "clean".to_string(),
+            subtitle_element_order: vec![
+                "speaker".to_string(),
+                "original".to_string(),
+                "translation".to_string(),
+                "timestamp".to_string(),
+                "original2".to_string(),
+            ],
+            subtitle_preset: "custom".to_string(),
             // 多场景与同声传译
             subtitle_scenes: Vec::new(),
             subtitle_translation_llm_api_url: String::new(),
@@ -2417,5 +2428,55 @@ mod tests {
         assert_eq!(mgr2.get_config().subtitle.subtitle_scenes.len(), 1);
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 验证字幕默认样式为「当前这套」视觉值（SimHei、白底、译文明黄等）
+    #[test]
+    fn subtitle_default_style_matches_current_layout() {
+        let style = SubtitleStyle::default();
+        assert_eq!(style.font_family, "SimHei");
+        assert_eq!(style.font_size, 32);
+        assert_eq!(style.font_color, "#ffffff");
+        assert_eq!(style.font_weight, 400);
+        assert_eq!(style.line_height, 1.0);
+        assert_eq!(style.text_shadow_color, "#000000");
+        assert_eq!(style.text_shadow_strength, 10);
+        assert_eq!(style.bg_color, "#ffffff");
+        assert_eq!(style.bg_opacity, 0.6);
+        assert_eq!(style.blur, 20);
+        assert_eq!(style.padding_x, 24);
+        assert_eq!(style.padding_y, 12);
+        assert_eq!(style.max_lines, 3);
+        assert_eq!(style.interim_color, "#a8a8a8");
+        assert_eq!(style.interim_opacity, 0.1);
+        assert_eq!(style.show_original, true);
+        assert_eq!(style.show_translation, true);
+        assert_eq!(style.show_speaker, false);
+        assert_eq!(style.show_timestamp, false);
+        assert_eq!(style.layout, "vertical");
+        assert_eq!(style.translation_font_size, 24);
+        assert_eq!(style.translation_font_color, "#fff45c");
+        assert_eq!(style.translation_font_weight, 400);
+        assert_eq!(style.translation_opacity, 0.85);
+        assert_eq!(style.speaker_color, "#818cf8");
+        assert_eq!(style.speaker_font_size, 16);
+        assert_eq!(style.timestamp_color, "#a1a1aa");
+        assert_eq!(style.timestamp_font_size, 14);
+        assert_eq!(style.preset, "custom");
+        assert_eq!(style.container_align_x, "center");
+        assert_eq!(style.container_align_y, "bottom");
+        assert_eq!(style.box_max_width, 100);
+        assert_eq!(
+            style.element_order,
+            vec!["speaker", "original", "translation", "timestamp", "original2"]
+        );
+
+        let flat = SubtitleConfig::default();
+        assert_eq!(flat.subtitle_font_family, "SimHei");
+        assert_eq!(flat.subtitle_bg_color, "#ffffff");
+        assert_eq!(flat.subtitle_line_height, 1.0);
+        assert_eq!(flat.subtitle_max_lines, 3);
+        assert_eq!(flat.subtitle_translation_font_color, "#fff45c");
+        assert_eq!(flat.subtitle_translation_engine, "llm");
     }
 }

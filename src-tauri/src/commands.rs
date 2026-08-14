@@ -1131,12 +1131,12 @@ pub async fn set_subtitle_obs_mode(
     use tauri::{Emitter, Manager};
     config.set_subtitle_scene_window_flag(&scene_id, "obs_mode", obs_mode);
     let _ = config.save();
-    let _ = app_handle.emit(
-        "subtitle-obs-mode",
-        serde_json::json!({ "sceneId": scene_id, "enabled": obs_mode }),
-    );
     let label = crate::subtitle::scene_window_label(&scene_id);
     if let Some(window) = app_handle.get_webview_window(&label) {
+        let _ = window.emit(
+            "subtitle-obs-mode",
+            serde_json::json!({ "sceneId": scene_id, "enabled": obs_mode }),
+        );
         if obs_mode {
             let _ = window.set_always_on_top(true);
         }
@@ -1192,6 +1192,20 @@ pub async fn remove_subtitle_scene(
     }
     config.remove_subtitle_scene(&scene_id)?;
     config.save().map_err(|e| e.to_string())
+}
+
+/// 应用字幕开关热键：重新注册全局快捷键（设置变更后调用）
+#[tauri::command]
+pub fn apply_subtitle_hotkey(
+    app_handle: tauri::AppHandle,
+    config: tauri::State<'_, Arc<ConfigManager>>,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    crate::register_subtitle_shortcut(
+        &app_handle,
+        state.inner().clone(),
+        config.subtitle_hotkey(),
+    )
 }
 
 // ===================== 字幕转录（会议纪要） =====================
