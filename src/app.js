@@ -11,8 +11,12 @@
         subtitleAlign: 'center',
         subtitleLayout: 'vertical',
         subtitlePreset: 'clean',
+        subtitleAlign: 'center',
+        subtitleContainerAlignX: 'center',
+        subtitleContainerAlignY: 'bottom',
         customElements: [],
-        elementOrder: ['speaker', 'original', 'translation', 'timestamp'],
+        elementOrder: ['speaker', 'original', 'original2', 'translation', 'timestamp'],
+        transcriptSegments: [],
         scenes: [],
         currentSceneId: 'default',
         previewInterim: false,
@@ -386,12 +390,20 @@
     function updateSubtitleSourceUI(source) {
         const micGroup = $('#subtitle-mic-device-group');
         const systemHint = $('#subtitle-system-hint');
+        const dualHint = $('#subtitle-dual-hint');
         if (source === 'system') {
             if (micGroup) micGroup.style.display = 'none';
             if (systemHint) systemHint.style.display = '';
+            if (dualHint) dualHint.style.display = 'none';
+        } else if (source === 'dual') {
+            // 同传模式：系统音为主源，麦克风为副字幕音源
+            if (micGroup) micGroup.style.display = '';
+            if (systemHint) systemHint.style.display = 'none';
+            if (dualHint) dualHint.style.display = '';
         } else {
             if (micGroup) micGroup.style.display = '';
             if (systemHint) systemHint.style.display = 'none';
+            if (dualHint) dualHint.style.display = 'none';
         }
     }
 
@@ -400,6 +412,16 @@
         const previewText = $('#subtitle-preview-text');
         if (!preview || !previewText) return;
         const box = ensurePreviewBox();
+
+        // 原文预览包裹容器（历史行 + 当前行，与真实窗口 #sub-original 结构一致）
+        let origWrap = $('#preview-original');
+        if (!origWrap) {
+            origWrap = document.createElement('div');
+            origWrap.id = 'preview-original';
+            origWrap.className = 'sub-preview-original';
+            box.appendChild(origWrap);
+            origWrap.appendChild(previewText);
+        }
 
         // 同步 bold 开关状态：与后端 push_subtitle_config 一致，bold = font_weight >= 700
         const weightSelect = $('#subtitle-font-weight');
@@ -417,23 +439,25 @@
         const shadowStrength = typeof cfg.subtitle_text_shadow_strength === 'number' ? cfg.subtitle_text_shadow_strength : 4;
         const textShadow = buildTextShadow(shadowColor, shadowStrength);
 
-        // ===== 容器样式（背景/边框/圆角/模糊/内边距/布局） =====
+        // ===== 容器对齐锚点 + 卡片最大宽度（与真实窗口一致） =====
+        const alignMap = { left: 'flex-start', center: 'center', right: 'flex-end', top: 'flex-start', bottom: 'flex-end' };
+        preview.style.justifyContent = alignMap[cfg.subtitle_container_align_x] || 'center';
+        preview.style.alignItems = alignMap[cfg.subtitle_container_align_y] || 'flex-end';
+        box.style.maxWidth = cfg.subtitle_box_max_width + '%';
+
+        // ===== 容器样式（背景/模糊/内边距/布局） =====
         const bEl = box.style;
         bEl.background = hexToRgba(cfg.subtitle_bg_color, cfg.subtitle_bg_opacity);
         bEl.backdropFilter = `blur(${cfg.subtitle_blur}px)`;
         bEl.webkitBackdropFilter = `blur(${cfg.subtitle_blur}px)`;
-        bEl.borderRadius = cfg.subtitle_border_radius + 'px';
-        bEl.borderWidth = cfg.subtitle_border_width + 'px';
-        bEl.borderStyle = cfg.subtitle_border_width > 0 ? 'solid' : 'none';
-        bEl.borderColor = cfg.subtitle_border_color;
         bEl.padding = `${cfg.subtitle_padding_y}px ${cfg.subtitle_padding_x}px`;
         const layout = cfg.subtitle_layout || 'vertical';
         bEl.flexDirection = layout === 'horizontal' ? 'row' : 'column';
         bEl.alignItems = layout === 'horizontal' ? 'center' : 'stretch';
         bEl.gap = layout === 'horizontal' ? '16px' : '6px';
 
-        // ===== 原文元素 =====
-        const oEl = previewText.style;
+        // ===== 原文元素（样式作用于包裹容器，历史行继承） =====
+        const oEl = origWrap.style;
         oEl.fontFamily = `"${cfg.subtitle_font_family}", sans-serif`;
         oEl.fontSize = cfg.subtitle_font_size + 'px';
         oEl.fontWeight = cfg.subtitle_bold ? '700' : String(cfg.subtitle_font_weight);
@@ -441,26 +465,51 @@
         oEl.textAlign = cfg.subtitle_text_align;
         oEl.letterSpacing = cfg.subtitle_letter_spacing + 'px';
         oEl.lineHeight = String(cfg.subtitle_line_height);
-        oEl.padding = '';
-        oEl.background = '';
-        oEl.backdropFilter = '';
-        oEl.webkitBackdropFilter = '';
-        oEl.borderRadius = '';
-        oEl.borderWidth = '';
-        oEl.borderStyle = '';
-        oEl.borderColor = '';
         oEl.textShadow = textShadow;
-        oEl.webkitLineClamp = String(cfg.subtitle_max_lines);
         oEl.display = cfg.subtitle_show_original !== false ? '' : 'none';
+
+        // 当前行文本元素：颜色/透明度跟随 最终/临时 状态
+        const tCur = previewText.style;
+        tCur.fontFamily = '';
+        tCur.fontSize = '';
+        tCur.fontWeight = '';
+        tCur.fontStyle = '';
+        tCur.letterSpacing = '';
+        tCur.lineHeight = '';
+        tCur.padding = '';
+        tCur.background = '';
+        tCur.backdropFilter = '';
+        tCur.webkitBackdropFilter = '';
+        tCur.textShadow = '';
+        tCur.webkitLineClamp = '';
+        tCur.display = '';
         if (state.previewInterim) {
-            oEl.color = cfg.subtitle_interim_color;
-            oEl.opacity = String(cfg.subtitle_interim_opacity);
+            tCur.color = cfg.subtitle_interim_color;
+            tCur.opacity = String(cfg.subtitle_interim_opacity);
             previewText.textContent = '临时识别结果预览效果...';
         } else {
-            oEl.color = cfg.subtitle_font_color;
-            oEl.opacity = '1';
+            tCur.color = cfg.subtitle_font_color;
+            tCur.opacity = '1';
             previewText.textContent = '实时字幕预览效果';
         }
+
+        // 历史行示例（反映「显示行数」设置：maxLines-1 条，越老越淡）
+        const histCount = Math.max(0, Math.min(cfg.subtitle_max_lines, 6) - 1);
+        let histNodes = origWrap.querySelectorAll('.sub-preview-history-line');
+        while (histNodes.length < histCount) {
+            const h = document.createElement('div');
+            h.className = 'sub-preview-history-line';
+            origWrap.insertBefore(h, previewText);
+            histNodes = origWrap.querySelectorAll('.sub-preview-history-line');
+        }
+        while (histNodes.length > histCount) {
+            histNodes[0].remove();
+            histNodes = origWrap.querySelectorAll('.sub-preview-history-line');
+        }
+        origWrap.querySelectorAll('.sub-preview-history-line').forEach((h, i) => {
+            h.style.opacity = String(Math.min(0.95, 0.5 + 0.15 * i));
+            h.textContent = '历史字幕示例行';
+        });
 
         // ===== 译文元素 =====
         let transEl = $('#preview-translation');
@@ -479,10 +528,49 @@
             tEl.color = cfg.subtitle_translation_font_color;
             tEl.opacity = String(cfg.subtitle_translation_opacity);
             tEl.textAlign = cfg.subtitle_text_align;
+            tEl.letterSpacing = cfg.subtitle_letter_spacing + 'px';
+            tEl.lineHeight = String(cfg.subtitle_line_height);
             tEl.textShadow = textShadow;
-            transEl.textContent = (cfg.subtitle_translation_prefix || '') + '译文预览效果';
+            if (cfg.subtitle_max_lines > 1) {
+                transEl.innerHTML = '';
+                const hline = document.createElement('div');
+                hline.className = 'sub-preview-history-line';
+                hline.style.opacity = '0.6';
+                hline.textContent = '译文历史示例';
+                const cline = document.createElement('div');
+                cline.textContent = (cfg.subtitle_translation_prefix || '') + '译文预览效果';
+                transEl.appendChild(hline);
+                transEl.appendChild(cline);
+            } else {
+                transEl.textContent = (cfg.subtitle_translation_prefix || '') + '译文预览效果';
+            }
         } else if (transEl) {
             transEl.style.display = 'none';
+        }
+
+        // ===== 副原文元素（双源同传模式的麦克风副字幕示例） =====
+        let orig2El = $('#preview-original2');
+        if (cfg.subtitle_show_original_secondary) {
+            if (!orig2El) {
+                orig2El = document.createElement('div');
+                orig2El.id = 'preview-original2';
+                orig2El.className = 'sub-preview-element';
+                box.appendChild(orig2El);
+            }
+            const o2 = orig2El.style;
+            o2.display = '';
+            o2.fontFamily = `"${cfg.subtitle_font_family}", sans-serif`;
+            o2.fontSize = Math.max(14, Math.round(cfg.subtitle_font_size * 0.8)) + 'px';
+            o2.fontWeight = String(cfg.subtitle_font_weight);
+            o2.color = '#7dd3fc';
+            o2.opacity = '0.9';
+            o2.textAlign = cfg.subtitle_text_align;
+            o2.letterSpacing = cfg.subtitle_letter_spacing + 'px';
+            o2.lineHeight = String(cfg.subtitle_line_height);
+            o2.textShadow = textShadow;
+            orig2El.textContent = '副字幕预览效果（麦克风）';
+        } else if (orig2El) {
+            orig2El.style.display = 'none';
         }
 
         // ===== 说话人元素 =====
@@ -579,7 +667,7 @@
         existingCustom.forEach((node, id) => { if (!seenCustom.has(id)) node.remove(); });
 
         // ===== 按 elementOrder 重排预览元素 =====
-        const idMap = { speaker: 'preview-speaker', original: 'subtitle-preview-text', translation: 'preview-translation', timestamp: 'preview-timestamp' };
+        const idMap = { speaker: 'preview-speaker', original: 'preview-original', original2: 'preview-original2', translation: 'preview-translation', timestamp: 'preview-timestamp' };
         const order = (state.elementOrder && state.elementOrder.length > 0) ? state.elementOrder : ['speaker', 'original', 'translation', 'timestamp'];
         order.forEach(key => {
             let node = null;
@@ -593,11 +681,10 @@
         updateValueDisplay('subtitle-opacity', `${Math.round(cfg.subtitle_bg_opacity * 100)}%`);
         updateValueDisplay('subtitle-blur', `${cfg.subtitle_blur}px`);
         updateValueDisplay('subtitle-lines', `${cfg.subtitle_max_lines} 行`);
+        updateValueDisplay('subtitle-box-max-width', `${cfg.subtitle_box_max_width}%`);
         updateValueDisplay('subtitle-line-height', cfg.subtitle_line_height.toFixed(1));
         updateValueDisplay('subtitle-letter-spacing', `${cfg.subtitle_letter_spacing}px`);
         updateValueDisplay('subtitle-text-shadow-strength', String(cfg.subtitle_text_shadow_strength));
-        updateValueDisplay('subtitle-border-radius', `${cfg.subtitle_border_radius}px`);
-        updateValueDisplay('subtitle-border-width', `${cfg.subtitle_border_width}px`);
         updateValueDisplay('subtitle-padding-x', `${cfg.subtitle_padding_x}px`);
         updateValueDisplay('subtitle-padding-y', `${cfg.subtitle_padding_y}px`);
         updateValueDisplay('subtitle-interim-opacity', `${Math.round(cfg.subtitle_interim_opacity * 100)}%`);
@@ -632,13 +719,14 @@
     const SCENE_STYLE_FIELDS = [
         'font_family', 'font_size', 'font_color', 'font_weight', 'italic', 'text_align',
         'letter_spacing', 'line_height', 'text_shadow_color', 'text_shadow_strength',
-        'bg_color', 'bg_opacity', 'blur', 'border_radius', 'border_color', 'border_width',
+        'bg_color', 'bg_opacity', 'blur',
         'padding_x', 'padding_y', 'max_lines', 'interim_color', 'interim_opacity',
         'show_original', 'show_translation', 'show_speaker', 'show_timestamp', 'layout',
         'translation_font_size', 'translation_font_color', 'translation_font_weight',
         'translation_opacity', 'translation_prefix', 'speaker_color', 'speaker_font_size',
         'speaker_prefix', 'timestamp_color', 'timestamp_font_size', 'timestamp_format',
-        'custom_elements', 'element_order', 'preset'
+        'custom_elements', 'element_order', 'preset',
+        'container_align_x', 'container_align_y', 'box_max_width', 'show_original_secondary'
     ];
 
     function getCurrentScene() {
@@ -660,6 +748,7 @@
                 always_on_top: true,
                 click_through: false,
                 obs_mode: false,
+                auto_fit: true,
             },
             style: {
                 font_family: flat.subtitle_font_family || 'Microsoft YaHei',
@@ -675,12 +764,9 @@
                 bg_color: flat.subtitle_bg_color || '#000000',
                 bg_opacity: flat.subtitle_bg_opacity !== undefined ? flat.subtitle_bg_opacity : 0.6,
                 blur: flat.subtitle_blur || 20,
-                border_radius: flat.subtitle_border_radius || 12,
-                border_color: flat.subtitle_border_color || '#ffffff',
-                border_width: flat.subtitle_border_width || 0,
                 padding_x: flat.subtitle_padding_x || 24,
                 padding_y: flat.subtitle_padding_y || 12,
-                max_lines: flat.subtitle_max_lines || 3,
+                max_lines: flat.subtitle_max_lines || 2,
                 interim_color: flat.subtitle_interim_color || '#ffffff',
                 interim_opacity: flat.subtitle_interim_opacity !== undefined ? flat.subtitle_interim_opacity : 0.7,
                 show_original: flat.subtitle_show_original !== false,
@@ -702,8 +788,12 @@
                 custom_elements: Array.isArray(flat.subtitle_custom_elements) ? flat.subtitle_custom_elements.map(e => ({ ...e })) : [],
                 element_order: (Array.isArray(flat.subtitle_element_order) && flat.subtitle_element_order.length > 0)
                     ? [...flat.subtitle_element_order]
-                    : ['speaker', 'original', 'translation', 'timestamp'],
+                    : ['speaker', 'original', 'original2', 'translation', 'timestamp'],
                 preset: flat.subtitle_preset || 'clean',
+                container_align_x: 'center',
+                container_align_y: 'bottom',
+                box_max_width: 100,
+                show_original_secondary: false,
             },
             translation: {
                 engine: flat.subtitle_translation_engine || 'none',
@@ -871,6 +961,70 @@
         } catch (err) {
             console.error('Failed to remove subtitle scene:', err);
             alert('删除场景失败: ' + err);
+        }
+    }
+
+    // ===== 实时转录面板（会议纪要） =====
+
+    function formatTranscriptTime(ms) {
+        const total = Math.floor((ms || 0) / 1000);
+        const m = String(Math.floor(total / 60)).padStart(2, '0');
+        const s = String(total % 60).padStart(2, '0');
+        return `${m}:${s}`;
+    }
+
+    function renderTranscript(segments) {
+        const list = $('#subtitle-transcript-list');
+        if (!list) return;
+        state.transcriptSegments = Array.isArray(segments) ? segments : [];
+        const segs = state.transcriptSegments;
+        const countEl = $('#transcript-status');
+        if (countEl) countEl.textContent = segs.length ? `共 ${segs.length} 条` : '';
+        if (!segs.length) {
+            list.innerHTML = '<div class="transcript-empty">开启实时字幕后，定稿句段将显示在这里</div>';
+            return;
+        }
+        const wasAtBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+        list.innerHTML = segs.map(seg => {
+            const srcBadge = seg.source === 'B' ? '<span class="tr-source-b">麦克风</span>' : '';
+            const speaker = seg.speaker ? `<span class="tr-speaker">${escapeHtml(seg.speaker)}:</span>` : '';
+            const trans = seg.translation ? `<span class="tr-translation">译: ${escapeHtml(seg.translation)}</span>` : '';
+            return `<div class="transcript-item"><span class="tr-time">[${formatTranscriptTime(seg.start_ms)}]</span>${srcBadge}${speaker}${escapeHtml(seg.text)}${trans}</div>`;
+        }).join('');
+        if (wasAtBottom) list.scrollTop = list.scrollHeight;
+    }
+
+    function setTranscriptStatus(text, isError) {
+        const el = $('#transcript-status');
+        if (!el) return;
+        el.textContent = text || '';
+        el.style.color = isError ? 'var(--accent-red)' : '';
+    }
+
+    async function exportTranscript(format) {
+        if (!invoke) return;
+        const label = { txt: 'TXT', srt: 'SRT', md: 'Markdown' }[format] || 'TXT';
+        setTranscriptStatus(`导出 ${label} 中...`);
+        try {
+            const path = await invoke('export_subtitle_transcript', { format });
+            setTranscriptStatus(`已导出: ${path}`);
+            setTimeout(() => setTranscriptStatus(''), 8000);
+        } catch (err) {
+            console.error('Failed to export transcript:', err);
+            setTranscriptStatus(`导出失败: ${err}`, true);
+            setTimeout(() => setTranscriptStatus(''), 8000);
+        }
+    }
+
+    async function clearTranscript() {
+        if (!invoke) return;
+        try {
+            await invoke('clear_subtitle_transcript');
+            renderTranscript([]);
+            setTranscriptStatus('已清空');
+            setTimeout(() => setTranscriptStatus(''), 2000);
+        } catch (err) {
+            console.error('Failed to clear transcript:', err);
         }
     }
 
@@ -1079,7 +1233,7 @@
 
     function syncCustomElementsOrder() {
         const customOrder = state.elementOrder.filter(k =>
-            !(k === 'speaker' || k === 'original' || k === 'translation' || k === 'timestamp'));
+            !(k === 'speaker' || k === 'original' || k === 'original2' || k === 'translation' || k === 'timestamp'));
         state.customElements.sort((a, b) => {
             const ia = customOrder.indexOf(a.id);
             const ib = customOrder.indexOf(b.id);
@@ -1107,7 +1261,7 @@
         const list = $('#element-order-list');
         if (!list) return;
         list.innerHTML = '';
-        const labels = { speaker: '说话人', original: '原文', translation: '译文', timestamp: '时间戳' };
+        const labels = { speaker: '说话人', original: '原文', original2: '副原文', translation: '译文', timestamp: '时间戳' };
         const order = state.elementOrder || ['speaker', 'original', 'translation', 'timestamp'];
         order.forEach(key => {
             let label, isCustom = false;
@@ -1256,9 +1410,6 @@
         cfg.subtitle_bg_color = ($('#subtitle-bg-color') || {}).value || '#000000';
         cfg.subtitle_bg_opacity = parseInt(($('#subtitle-opacity') || {}).value || 60) / 100;
         cfg.subtitle_blur = parseInt(($('#subtitle-blur') || {}).value || 20);
-        cfg.subtitle_border_radius = parseInt(($('#subtitle-border-radius') || {}).value || 12);
-        cfg.subtitle_border_color = ($('#subtitle-border-color') || {}).value || '#ffffff';
-        cfg.subtitle_border_width = parseInt(($('#subtitle-border-width') || {}).value || 0);
         cfg.subtitle_padding_x = parseInt(($('#subtitle-padding-x') || {}).value || 24);
         cfg.subtitle_padding_y = parseInt(($('#subtitle-padding-y') || {}).value || 12);
         cfg.subtitle_max_lines = parseInt(($('#subtitle-lines') || {}).value || 3);
@@ -1269,7 +1420,12 @@
         cfg.subtitle_show_translation = ($('#subtitle-show-translation') || {}).dataset.on === 'true';
         cfg.subtitle_show_speaker = ($('#subtitle-show-speaker') || {}).dataset.on === 'true';
         cfg.subtitle_show_timestamp = ($('#subtitle-show-timestamp') || {}).dataset.on === 'true';
+        cfg.subtitle_show_original_secondary = ($('#subtitle-show-original2') || {}).dataset.on === 'true';
         cfg.subtitle_layout = state.subtitleLayout || 'vertical';
+        // 容器对齐锚点 + 卡片最大宽度
+        cfg.subtitle_container_align_x = state.subtitleContainerAlignX || 'center';
+        cfg.subtitle_container_align_y = state.subtitleContainerAlignY || 'bottom';
+        cfg.subtitle_box_max_width = parseInt(($('#subtitle-box-max-width') || {}).value || 100);
         // 译文样式
         cfg.subtitle_translation_font_size = parseInt(($('#subtitle-translation-size') || {}).value || 24);
         cfg.subtitle_translation_font_color = ($('#subtitle-translation-color') || {}).value || '#ffffff';
@@ -1293,7 +1449,7 @@
         cfg.subtitle_custom_elements = (state.customElements || []).map(e => ({ ...e }));
         cfg.subtitle_element_order = (state.elementOrder && state.elementOrder.length > 0)
             ? [...state.elementOrder]
-            : ['speaker', 'original', 'translation', 'timestamp'];
+            : ['speaker', 'original', 'original2', 'translation', 'timestamp'];
         cfg.subtitle_preset = state.subtitlePreset || 'custom';
         return cfg;
     }
@@ -1320,9 +1476,11 @@
         const onTopSw = $('#subtitle-always-on-top');
         const clickSw = $('#subtitle-click-through');
         const obsSw = $('#subtitle-obs-mode');
+        const autoFitSw = $('#subtitle-auto-fit');
         if (onTopSw) scene.window.always_on_top = onTopSw.dataset.on === 'true';
         if (clickSw) scene.window.click_through = clickSw.dataset.on === 'true';
         if (obsSw) scene.window.obs_mode = obsSw.dataset.on === 'true';
+        if (autoFitSw) scene.window.auto_fit = autoFitSw.dataset.on === 'true';
 
         // 场景名称
         const nameInput = $('#subtitle-scene-name');
@@ -1860,9 +2018,6 @@
         setVal('subtitle-bg-color', s.bg_color);
         setVal('subtitle-opacity', Math.round((s.bg_opacity ?? 0.6) * 100));
         setVal('subtitle-blur', s.blur);
-        setVal('subtitle-border-radius', s.border_radius);
-        setVal('subtitle-border-color', s.border_color);
-        setVal('subtitle-border-width', s.border_width);
         setVal('subtitle-padding-x', s.padding_x);
         setVal('subtitle-padding-y', s.padding_y);
         setVal('subtitle-lines', s.max_lines);
@@ -1878,6 +2033,8 @@
         if (showSpeakerSw) showSpeakerSw.dataset.on = s.show_speaker === true ? 'true' : 'false';
         const showTsSw = $('#subtitle-show-timestamp');
         if (showTsSw) showTsSw.dataset.on = s.show_timestamp === true ? 'true' : 'false';
+        const showOrig2Sw = $('#subtitle-show-original2');
+        if (showOrig2Sw) showOrig2Sw.dataset.on = s.show_original_secondary === true ? 'true' : 'false';
 
         // 译文样式
         setVal('subtitle-translation-color', s.translation_font_color);
@@ -1900,6 +2057,10 @@
         const sub = (config && config.subtitle) || {};
         const subDeviceSel = $('#setting-subtitle-input-device');
         if (subDeviceSel) subDeviceSel.value = sub.subtitle_input_device || '';
+
+        // 字幕开关热键
+        const subHotkeyInput = $('#subtitle-hotkey');
+        if (subHotkeyInput) subHotkeyInput.value = virtualKeyToName(sub.subtitle_hotkey || 0x76);
 
         const audioSource = sub.subtitle_audio_source || 'microphone';
         const sourceActiveBtn = $(`#subtitle-audio-source .seg-btn[data-source="${audioSource}"]`);
@@ -1933,6 +2094,25 @@
             btn.classList.toggle('active', btn === layoutActiveBtn);
         });
         if (layoutActiveBtn) moveSegIndicator(layoutActiveBtn);
+
+        // 容器对齐锚点 + 卡片最大宽度
+        const alignX = s.container_align_x || 'center';
+        state.subtitleContainerAlignX = alignX;
+        const axBtn = $(`#subtitle-container-align-x .seg-btn[data-mode="${alignX}"]`);
+        $$('#subtitle-container-align-x .seg-btn').forEach(btn => {
+            btn.classList.toggle('active', btn === axBtn);
+        });
+        if (axBtn) moveSegIndicator(axBtn);
+
+        const alignY = s.container_align_y || 'bottom';
+        state.subtitleContainerAlignY = alignY;
+        const ayBtn = $(`#subtitle-container-align-y .seg-btn[data-mode="${alignY}"]`);
+        $$('#subtitle-container-align-y .seg-btn').forEach(btn => {
+            btn.classList.toggle('active', btn === ayBtn);
+        });
+        if (ayBtn) moveSegIndicator(ayBtn);
+
+        setVal('subtitle-box-max-width', s.box_max_width || 100);
 
         // 预设模板
         state.subtitlePreset = s.preset || 'custom';
@@ -1972,6 +2152,9 @@
         if (clickSw) clickSw.dataset.on = w.click_through === true ? 'true' : 'false';
         const obsSw = $('#subtitle-obs-mode');
         if (obsSw) obsSw.dataset.on = w.obs_mode === true ? 'true' : 'false';
+
+        const autoFitSw = $('#subtitle-auto-fit');
+        if (autoFitSw) autoFitSw.dataset.on = w.auto_fit !== false ? 'true' : 'false';
 
         // 场景名称
         const nameInput = $('#subtitle-scene-name');
@@ -2462,6 +2645,13 @@
         if (transLlmKey) newConfig.subtitle.subtitle_translation_llm_api_key = transLlmKey.value.trim();
         if (transLlmModel) newConfig.subtitle.subtitle_translation_llm_model = transLlmModel.value.trim();
 
+        // 字幕开关热键
+        const subHotkeyInput = $('#subtitle-hotkey');
+        if (subHotkeyInput) {
+            const vk = nameToVirtualKey(subHotkeyInput.value);
+            if (vk) newConfig.subtitle.subtitle_hotkey = vk;
+        }
+
         // 主题
         const activeThemeBtn = $('.theme-selector .seg-btn.active');
         if (activeThemeBtn) {
@@ -2802,8 +2992,8 @@
             'subtitle-font-color', 'subtitle-letter-spacing', 'subtitle-line-height',
             'subtitle-text-shadow-color', 'subtitle-text-shadow-strength',
             'subtitle-bg-color', 'subtitle-opacity', 'subtitle-blur',
-            'subtitle-border-radius', 'subtitle-border-color', 'subtitle-border-width',
             'subtitle-padding-x', 'subtitle-padding-y', 'subtitle-lines',
+            'subtitle-box-max-width',
             'subtitle-interim-color', 'subtitle-interim-opacity'
         ];
         previewIds.forEach(id => {
@@ -2876,6 +3066,28 @@
                 btn.classList.add('active');
                 state.subtitleLayout = btn.dataset.mode;
                 markPresetCustom();
+                updateSubtitlePreview();
+                moveSegIndicator(btn);
+            });
+        });
+
+        // 容器水平对齐锚点 segmented control
+        $$('#subtitle-container-align-x .seg-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                $$('#subtitle-container-align-x .seg-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                state.subtitleContainerAlignX = btn.dataset.mode;
+                updateSubtitlePreview();
+                moveSegIndicator(btn);
+            });
+        });
+
+        // 容器垂直对齐锚点 segmented control
+        $$('#subtitle-container-align-y .seg-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                $$('#subtitle-container-align-y .seg-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                state.subtitleContainerAlignY = btn.dataset.mode;
                 updateSubtitlePreview();
                 moveSegIndicator(btn);
             });
@@ -2991,6 +3203,15 @@
             });
         }
 
+        const autoFitSw = $('#subtitle-auto-fit');
+        if (autoFitSw) {
+            autoFitSw.addEventListener('click', () => {
+                autoFitSw.dataset.on = autoFitSw.dataset.on === 'true' ? 'false' : 'true';
+                const sceneObj = getCurrentScene();
+                if (sceneObj && sceneObj.window) sceneObj.window.auto_fit = autoFitSw.dataset.on === 'true';
+            });
+        }
+
         // 显示/隐藏字幕窗口（当前场景）
         const showBtn = $('#btn-show-subtitle-window');
         if (showBtn) {
@@ -3059,6 +3280,16 @@
                 transInterimSw.dataset.on = transInterimSw.dataset.on === 'true' ? 'false' : 'true';
             });
         }
+
+        // ===== 实时转录面板 =====
+        const exportTxtBtn = $('#btn-export-transcript-txt');
+        if (exportTxtBtn) exportTxtBtn.addEventListener('click', () => exportTranscript('txt'));
+        const exportSrtBtn = $('#btn-export-transcript-srt');
+        if (exportSrtBtn) exportSrtBtn.addEventListener('click', () => exportTranscript('srt'));
+        const exportMdBtn = $('#btn-export-transcript-md');
+        if (exportMdBtn) exportMdBtn.addEventListener('click', () => exportTranscript('md'));
+        const clearTrBtn = $('#btn-clear-transcript');
+        if (clearTrBtn) clearTrBtn.addEventListener('click', clearTranscript);
     }
 
     function initHistory() {
@@ -3701,7 +3932,35 @@
                     state.isSubtitleActive = running;
                     updateSubtitleButton();
                 }).catch(() => {});
+                // 加载上一次会话遗留的转录（服务保留到下次会话启动）
+                invoke('get_subtitle_transcript').then(segments => {
+                    if (Array.isArray(segments) && segments.length) renderTranscript(segments);
+                }).catch(() => {});
             }
+        }).then(unlisten => {
+            state.unlisteners.push(unlisten);
+        });
+
+        // 转录更新（句段定稿）
+        listen('subtitle-transcript-updated', (event) => {
+            const p = event.payload || {};
+            renderTranscript(p.segments || []);
+        }).then(unlisten => {
+            state.unlisteners.push(unlisten);
+        });
+
+        // 会话生命周期
+        listen('subtitle-session-started', () => {
+            state.isSubtitleActive = true;
+            updateSubtitleButton();
+            renderTranscript([]);
+        }).then(unlisten => {
+            state.unlisteners.push(unlisten);
+        });
+
+        listen('subtitle-session-stopped', () => {
+            state.isSubtitleActive = false;
+            updateSubtitleButton();
         }).then(unlisten => {
             state.unlisteners.push(unlisten);
         });

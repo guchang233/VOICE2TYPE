@@ -1117,8 +1117,6 @@ html, body {
     background: rgba(0, 0, 0, 0.6);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
-    border-radius: 12px;
-    border: 1px solid transparent;
     max-width: 100%;
     word-wrap: break-word;
     word-break: break-word;
@@ -1145,6 +1143,16 @@ html, body {
     word-wrap: break-word;
     word-break: break-word;
     transition: opacity 0.15s ease, color 0.15s ease;
+}
+/* 预览原文包裹容器：历史行 + 当前行（与真实窗口 #sub-original 一致） */
+.sub-preview-original {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: 100%;
+}
+.sub-preview-history-line {
+    transition: opacity 0.2s ease;
 }
 .sub-preview-element:empty { display: none; }
 
@@ -1381,6 +1389,73 @@ html, body {
 .scene-btn-danger:disabled {
     opacity: 0.4;
     pointer-events: none;
+}
+
+/* ===== 实时转录面板 ===== */
+.transcript-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+}
+
+.transcript-status {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-left: auto;
+}
+
+.transcript-list {
+    max-height: 220px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-code);
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.transcript-empty {
+    font-size: 13px;
+    color: var(--text-tertiary);
+    text-align: center;
+    padding: 18px 0;
+}
+
+.transcript-item {
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-primary, #e4e4e7);
+    word-break: break-word;
+}
+
+.transcript-item .tr-time {
+    font-family: var(--font-mono, Consolas, monospace);
+    color: var(--text-tertiary);
+    margin-right: 6px;
+}
+
+.transcript-item .tr-speaker {
+    color: #818cf8;
+    margin-right: 6px;
+}
+
+.transcript-item .tr-source-b {
+    font-size: 10px;
+    color: #7dd3fc;
+    border: 1px solid rgba(125, 211, 252, 0.4);
+    border-radius: 4px;
+    padding: 0 4px;
+    margin-right: 6px;
+}
+
+.transcript-item .tr-translation {
+    display: block;
+    color: var(--text-secondary);
+    margin-top: 1px;
 }
 
 .subtitle-card:hover {

@@ -2043,7 +2043,12 @@
                                         <div class="segmented-control" id="subtitle-audio-source">
                                             <button class="seg-btn active" data-source="microphone" type="button">麦克风输入</button>
                                             <button class="seg-btn" data-source="system" type="button">系统扬声器</button>
+                                            <button class="seg-btn" data-source="dual" type="button">同传模式</button>
                                         </div>
+                                    </div>
+                                    <div class="control-group">
+                                        <label>字幕开关热键</label>
+                                        <input type="text" class="text-input hotkey-input" id="subtitle-hotkey" value="F7" placeholder="点击后按键" readonly>
                                     </div>
                                     <div class="control-group" id="subtitle-mic-device-group" style="grid-column: 1 / -1;">
                                         <label>音频输入设备</label>
@@ -2053,6 +2058,9 @@
                                     </div>
                                     <div class="control-group" id="subtitle-system-hint" style="grid-column: 1 / -1; display: none;">
                                         <p class="subtitle-tip subtitle-tip-left">已选择系统扬声器音源，将直接捕获电脑正在播放的声音（WASAPI loopback），无需选择设备。</p>
+                                    </div>
+                                    <div class="control-group" id="subtitle-dual-hint" style="grid-column: 1 / -1; display: none;">
+                                        <p class="subtitle-tip subtitle-tip-left">同传模式：捕获系统播放的声音作为主音源（识别并翻译为译文），同时用下方选择的麦克风设备录制原声作为副字幕，并写入转录记录。</p>
                                     </div>
                                 </div>
                             </div>
@@ -2148,9 +2156,9 @@
                                         <span class="value-display">4</span>
                                     </div>
                                     <div class="control-group">
-                                        <label>显示行数</label>
-                                        <input type="range" min="1" max="6" value="3" class="slider" id="subtitle-lines" style="--fill: 40%;">
-                                        <span class="value-display">3 行</span>
+                                        <label>显示行数（含当前行）</label>
+                                        <input type="range" min="1" max="6" value="2" class="slider" id="subtitle-lines" style="--fill: 20%;">
+                                        <span class="value-display">2 行</span>
                                     </div>
                                 </div>
                             </div>
@@ -2173,11 +2181,6 @@
                                         <span class="value-display">20px</span>
                                     </div>
                                     <div class="control-group">
-                                        <label>圆角</label>
-                                        <input type="range" min="0" max="40" value="12" class="slider" id="subtitle-border-radius" style="--fill: 30%;">
-                                        <span class="value-display">12px</span>
-                                    </div>
-                                    <div class="control-group">
                                         <label>内边距 X</label>
                                         <input type="range" min="0" max="60" value="24" class="slider" id="subtitle-padding-x" style="--fill: 40%;">
                                         <span class="value-display">24px</span>
@@ -2186,21 +2189,6 @@
                                         <label>内边距 Y</label>
                                         <input type="range" min="0" max="40" value="12" class="slider" id="subtitle-padding-y" style="--fill: 30%;">
                                         <span class="value-display">12px</span>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="subtitle-card">
-                                <h4 class="subtitle-card-title">边框</h4>
-                                <div class="subtitle-grid">
-                                    <div class="control-group">
-                                        <label>边框颜色</label>
-                                        <input type="color" class="color-input" id="subtitle-border-color" value="#ffffff">
-                                    </div>
-                                    <div class="control-group">
-                                        <label>边框宽度</label>
-                                        <input type="range" min="0" max="6" value="0" class="slider" id="subtitle-border-width" style="--fill: 0%;">
-                                        <span class="value-display">0px</span>
                                     </div>
                                 </div>
                             </div>
@@ -2240,7 +2228,7 @@
 
                             <div class="subtitle-card">
                                 <h4 class="subtitle-card-title">显示元素与布局</h4>
-                                <p class="subtitle-tip subtitle-tip-left">自由组合字幕窗口中显示的元素。每个元素可独立开关，布局方向控制元素的排列方式。</p>
+                                <p class="subtitle-tip subtitle-tip-left">自由组合字幕窗口中显示的元素。布局方向控制元素排列方式，容器对齐控制字幕卡片在窗口内的锚点位置。</p>
                                 <div class="subtitle-grid">
                                     <div class="control-group-inline">
                                         <label class="toggle-group">
@@ -2267,6 +2255,12 @@
                                                 <div class="switch-knob"></div>
                                             </div>
                                         </label>
+                                        <label class="toggle-group">
+                                            <span>副原文（麦克风）</span>
+                                            <div class="switch" id="subtitle-show-original2" data-on="false" title="同传模式下显示麦克风原声副字幕">
+                                                <div class="switch-knob"></div>
+                                            </div>
+                                        </label>
                                     </div>
                                     <div class="control-group" style="grid-column: 1 / -1;">
                                         <label>布局方向</label>
@@ -2274,6 +2268,27 @@
                                             <button class="seg-btn active" data-mode="vertical">垂直堆叠</button>
                                             <button class="seg-btn" data-mode="horizontal">水平排列</button>
                                         </div>
+                                    </div>
+                                    <div class="control-group">
+                                        <label>窗口内水平位置</label>
+                                        <div class="segmented-control" id="subtitle-container-align-x">
+                                            <button class="seg-btn" data-mode="left">靠左</button>
+                                            <button class="seg-btn active" data-mode="center">居中</button>
+                                            <button class="seg-btn" data-mode="right">靠右</button>
+                                        </div>
+                                    </div>
+                                    <div class="control-group">
+                                        <label>窗口内垂直位置</label>
+                                        <div class="segmented-control" id="subtitle-container-align-y">
+                                            <button class="seg-btn" data-mode="top">顶部</button>
+                                            <button class="seg-btn" data-mode="center">居中</button>
+                                            <button class="seg-btn active" data-mode="bottom">底部</button>
+                                        </div>
+                                    </div>
+                                    <div class="control-group">
+                                        <label>卡片最大宽度</label>
+                                        <input type="range" min="30" max="100" value="100" class="slider" id="subtitle-box-max-width" style="--fill: 100%;">
+                                        <span class="value-display">100%</span>
                                     </div>
                                 </div>
                             </div>
@@ -2363,6 +2378,7 @@
 
                             <div class="subtitle-card" id="card-speaker-style">
                                 <h4 class="subtitle-card-title">说话人样式</h4>
+                                <p class="subtitle-tip subtitle-tip-left">说话人按停顿自动分轮显示（说话人1、说话人2…依次递增），无需手动标注，适合会议纪要等场景。</p>
                                 <div class="subtitle-grid">
                                     <div class="control-group">
                                         <label>说话人颜色</label>
@@ -2444,6 +2460,12 @@
                                             <div class="switch-knob"></div>
                                         </div>
                                     </div>
+                                    <div class="control-group">
+                                        <label>窗口高度自适应内容</label>
+                                        <div class="switch" id="subtitle-auto-fit" data-on="true">
+                                            <div class="switch-knob"></div>
+                                        </div>
+                                    </div>
                                     <div class="control-group subtitle-action-row">
                                         <label>字幕窗口显示</label>
                                         <div class="window-ctrl-buttons">
@@ -2455,8 +2477,25 @@
                             </div>
                         </div>
 
+                        <div class="subtitle-cards subtitle-cards-full">
+                            <div class="subtitle-card" id="card-transcript">
+                                <h4 class="subtitle-card-title">实时转录（本次会话）</h4>
+                                <p class="subtitle-tip subtitle-tip-left">会话期间定稿的句段自动记录于此，可导出为 TXT / SRT / Markdown 用作会议纪要或视频字幕。</p>
+                                <div class="transcript-toolbar">
+                                    <button class="secondary-btn" id="btn-export-transcript-txt" type="button">导出 TXT</button>
+                                    <button class="secondary-btn" id="btn-export-transcript-srt" type="button">导出 SRT</button>
+                                    <button class="secondary-btn" id="btn-export-transcript-md" type="button">导出 Markdown</button>
+                                    <button class="secondary-btn scene-btn-danger" id="btn-clear-transcript" type="button">清空</button>
+                                    <span class="transcript-status" id="transcript-status"></span>
+                                </div>
+                                <div class="transcript-list" id="subtitle-transcript-list">
+                                    <div class="transcript-empty">开启实时字幕后，定稿句段将显示在这里</div>
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="subtitle-toggle-section">
-                            <p class="subtitle-tip">点击右上角「开启实时字幕」按钮开始 / 停止</p>
+                            <p class="subtitle-tip">点击右上角「开启实时字幕」按钮（或按字幕开关热键）开始 / 停止</p>
                         </div>
                     </div>
                 </div>

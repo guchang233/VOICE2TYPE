@@ -1194,6 +1194,92 @@ pub async fn remove_subtitle_scene(
     config.save().map_err(|e| e.to_string())
 }
 
+// ===================== 字幕转录（会议纪要） =====================
+
+/// 获取最近一次字幕会话的转录句段
+#[tauri::command]
+pub fn get_subtitle_transcript(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Vec<crate::subtitle::transcript::TranscriptSegment> {
+    state
+        .subtitle
+        .transcript()
+        .map(|t| t.lock().unwrap().segments().to_vec())
+        .unwrap_or_default()
+}
+
+/// 清空转录
+#[tauri::command]
+pub fn clear_subtitle_transcript(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    state.subtitle.clear_transcript();
+    Ok(())
+}
+
+/// 导出转录（txt/srt/md）：弹出保存对话框，返回保存路径
+#[tauri::command]
+pub async fn export_subtitle_transcript(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+    format: String,
+) -> Result<String, String> {
+    use tauri_plugin_dialog::DialogExt;
+    use tokio::sync::oneshot;
+
+    let transcript = state
+        .subtitle
+        .transcript()
+        .ok_or("暂无转录内容，请先开启实时字幕")?;
+
+    let ext = match format.as_str() {
+        "srt" => "srt",
+        "md" => "md",
+        _ => "txt",
+    };
+    // 注意：MutexGuard 不能跨 await 持有（future 需 Send）
+    let content = {
+        let tr = transcript.lock().unwrap();
+        if tr.is_empty() {
+            return Err("暂无转录内容，请先开启实时字幕".to_string());
+        }
+        match format.as_str() {
+            "srt" => tr.to_srt(),
+            "md" => tr.to_md(),
+            _ => tr.to_txt(),
+        }
+    };
+
+    let default_name = format!(
+        "字幕转录_{}.{}",
+        chrono::Local::now().format("%Y%m%d_%H%M%S"),
+        ext
+    );
+
+    let (tx, rx) = oneshot::channel::<Option<std::path::PathBuf>>();
+    let filter_label = match ext {
+        "srt" => "SRT 字幕",
+        "md" => "Markdown",
+        _ => "文本文件",
+    };
+    app.dialog()
+        .file()
+        .set_title("导出字幕转录")
+        .set_file_name(&default_name)
+        .add_filter(filter_label, &[ext])
+        .save_file(move |path| {
+            let _ = tx.send(path.map(|p| p.into_path().unwrap_or_default()));
+        });
+
+    let path = rx.await.map_err(|e| format!("对话框通道错误: {}", e))?;
+    let Some(path) = path else {
+        return Err("已取消导出".to_string());
+    };
+
+    std::fs::write(&path, content).map_err(|e| format!("写入文件失败: {}", e))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 // ===================== Fish Audio TTS（文本转语音）=====================
 
 /// 根据输出格式返回文件扩展名

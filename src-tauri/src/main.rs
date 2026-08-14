@@ -16,7 +16,6 @@ mod recorder;
 mod session;
 mod streaming;
 mod subtitle;
-mod translate;
 mod tts;
 mod update;
 mod utils;
@@ -114,6 +113,9 @@ fn main() {
             commands::add_subtitle_scene,
             commands::duplicate_subtitle_scene,
             commands::remove_subtitle_scene,
+            commands::get_subtitle_transcript,
+            commands::clear_subtitle_transcript,
+            commands::export_subtitle_transcript,
             commands::tts_synthesize,
             commands::tts_export,
             commands::tts_list_voices,
@@ -233,10 +235,19 @@ fn main() {
 
                 let mut callback = move |event: rdev::Event| {
                     let batch_hotkey = config_for_hotkey.hotkey();
+                    let subtitle_hotkey = config_for_hotkey.subtitle_hotkey();
 
                     match event.event_type {
                         rdev::EventType::KeyPress(key) => {
                             let vk = key_to_vk(key);
+
+                            if vk == subtitle_hotkey && vk != batch_hotkey && vk != 0 {
+                                // 字幕开关热键（默认 F7）：按下切换字幕会话
+                                let state = state_for_hotkey.clone();
+                                tauri::async_runtime::spawn(async move {
+                                    let _ = state.toggle_subtitle().await;
+                                });
+                            }
 
                             if vk == batch_hotkey {
                                 let trigger_mode = config_for_hotkey.trigger_mode();
@@ -310,6 +321,44 @@ fn key_to_vk(key: rdev::Key) -> u32 {
         rdev::Key::F10 => 0x79,
         rdev::Key::F11 => 0x7a,
         rdev::Key::F12 => 0x7b,
+        // 数字键
+        rdev::Key::Num0 => 0x30,
+        rdev::Key::Num1 => 0x31,
+        rdev::Key::Num2 => 0x32,
+        rdev::Key::Num3 => 0x33,
+        rdev::Key::Num4 => 0x34,
+        rdev::Key::Num5 => 0x35,
+        rdev::Key::Num6 => 0x36,
+        rdev::Key::Num7 => 0x37,
+        rdev::Key::Num8 => 0x38,
+        rdev::Key::Num9 => 0x39,
+        // 字母键
+        rdev::Key::KeyA => 0x41,
+        rdev::Key::KeyB => 0x42,
+        rdev::Key::KeyC => 0x43,
+        rdev::Key::KeyD => 0x44,
+        rdev::Key::KeyE => 0x45,
+        rdev::Key::KeyF => 0x46,
+        rdev::Key::KeyG => 0x47,
+        rdev::Key::KeyH => 0x48,
+        rdev::Key::KeyI => 0x49,
+        rdev::Key::KeyJ => 0x4a,
+        rdev::Key::KeyK => 0x4b,
+        rdev::Key::KeyL => 0x4c,
+        rdev::Key::KeyM => 0x4d,
+        rdev::Key::KeyN => 0x4e,
+        rdev::Key::KeyO => 0x4f,
+        rdev::Key::KeyP => 0x50,
+        rdev::Key::KeyQ => 0x51,
+        rdev::Key::KeyR => 0x52,
+        rdev::Key::KeyS => 0x53,
+        rdev::Key::KeyT => 0x54,
+        rdev::Key::KeyU => 0x55,
+        rdev::Key::KeyV => 0x56,
+        rdev::Key::KeyW => 0x57,
+        rdev::Key::KeyX => 0x58,
+        rdev::Key::KeyY => 0x59,
+        rdev::Key::KeyZ => 0x5a,
         _ => 0,
     }
 }

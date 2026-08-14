@@ -282,12 +282,6 @@ pub struct SubtitleConfig {
     pub subtitle_text_shadow_strength: u32,
     /// 背景颜色 (RGB)
     pub subtitle_bg_color: String,
-    /// 圆角 px
-    pub subtitle_border_radius: u32,
-    /// 边框颜色
-    pub subtitle_border_color: String,
-    /// 边框宽度 px
-    pub subtitle_border_width: u32,
     /// 内边距 px
     pub subtitle_padding_x: u32,
     pub subtitle_padding_y: u32,
@@ -449,6 +443,8 @@ pub struct SubtitleSceneWindowConfig {
     pub always_on_top: bool,
     pub click_through: bool,
     pub obs_mode: bool,
+    /// 窗口高度自适应内容：容纳不下时窗口变大，不遮文字
+    pub auto_fit: bool,
 }
 
 impl Default for SubtitleSceneWindowConfig {
@@ -461,6 +457,7 @@ impl Default for SubtitleSceneWindowConfig {
             always_on_top: true,
             click_through: false,
             obs_mode: false,
+            auto_fit: true,
         }
     }
 }
@@ -482,9 +479,6 @@ pub struct SubtitleStyle {
     pub bg_color: String,
     pub bg_opacity: f32,
     pub blur: u32,
-    pub border_radius: u32,
-    pub border_color: String,
-    pub border_width: u32,
     pub padding_x: u32,
     pub padding_y: u32,
     pub max_lines: u32,
@@ -494,6 +488,8 @@ pub struct SubtitleStyle {
     pub show_translation: bool,
     pub show_speaker: bool,
     pub show_timestamp: bool,
+    /// 显示副原文元素（双音源同传模式下麦克风原声，单源模式下隐藏）
+    pub show_original_secondary: bool,
     pub layout: String,
     pub translation_font_size: u32,
     pub translation_font_color: String,
@@ -509,6 +505,12 @@ pub struct SubtitleStyle {
     pub custom_elements: Vec<SubtitleCustomElement>,
     pub element_order: Vec<String>,
     pub preset: String,
+    /// 容器水平对齐（窗口内）："left" | "center" | "right"
+    pub container_align_x: String,
+    /// 容器垂直对齐（窗口内）："top" | "center" | "bottom"
+    pub container_align_y: String,
+    /// 字幕卡片最大宽度（窗口宽度的百分比 30-100）
+    pub box_max_width: u32,
 }
 
 impl Default for SubtitleStyle {
@@ -528,9 +530,6 @@ impl Default for SubtitleStyle {
             bg_color: base.subtitle_bg_color,
             bg_opacity: base.subtitle_bg_opacity,
             blur: base.subtitle_blur,
-            border_radius: base.subtitle_border_radius,
-            border_color: base.subtitle_border_color,
-            border_width: base.subtitle_border_width,
             padding_x: base.subtitle_padding_x,
             padding_y: base.subtitle_padding_y,
             max_lines: base.subtitle_max_lines,
@@ -540,6 +539,7 @@ impl Default for SubtitleStyle {
             show_translation: base.subtitle_show_translation,
             show_speaker: base.subtitle_show_speaker,
             show_timestamp: base.subtitle_show_timestamp,
+            show_original_secondary: false,
             layout: base.subtitle_layout,
             translation_font_size: base.subtitle_translation_font_size,
             translation_font_color: base.subtitle_translation_font_color,
@@ -555,6 +555,9 @@ impl Default for SubtitleStyle {
             custom_elements: Vec::new(),
             element_order: default_element_order(),
             preset: "clean".to_string(),
+            container_align_x: "center".to_string(),
+            container_align_y: "bottom".to_string(),
+            box_max_width: 100,
         }
     }
 }
@@ -624,6 +627,7 @@ impl SubtitleSceneConfig {
                 always_on_top: true,
                 click_through: false,
                 obs_mode: false,
+                auto_fit: true,
             },
             style: SubtitleStyle {
                 font_family: sub.subtitle_font_family.clone(),
@@ -639,9 +643,6 @@ impl SubtitleSceneConfig {
                 bg_color: sub.subtitle_bg_color.clone(),
                 bg_opacity: sub.subtitle_bg_opacity,
                 blur: sub.subtitle_blur,
-                border_radius: sub.subtitle_border_radius,
-                border_color: sub.subtitle_border_color.clone(),
-                border_width: sub.subtitle_border_width,
                 padding_x: sub.subtitle_padding_x,
                 padding_y: sub.subtitle_padding_y,
                 max_lines: sub.subtitle_max_lines,
@@ -651,6 +652,7 @@ impl SubtitleSceneConfig {
                 show_translation: sub.subtitle_show_translation,
                 show_speaker: sub.subtitle_show_speaker,
                 show_timestamp: sub.subtitle_show_timestamp,
+                show_original_secondary: false,
                 layout: sub.subtitle_layout.clone(),
                 translation_font_size: sub.subtitle_translation_font_size,
                 translation_font_color: sub.subtitle_translation_font_color.clone(),
@@ -666,6 +668,9 @@ impl SubtitleSceneConfig {
                 custom_elements: sub.subtitle_custom_elements.clone(),
                 element_order: sub.subtitle_element_order.clone(),
                 preset: sub.subtitle_preset.clone(),
+                container_align_x: "center".to_string(),
+                container_align_y: "bottom".to_string(),
+                box_max_width: 100,
             },
             translation: SubtitleTranslationConfig {
                 engine: sub.subtitle_translation_engine.clone(),
@@ -720,7 +725,19 @@ impl SubtitleSceneConfig {
             "clean" | "bilingual" | "meeting" | "live" | "custom" => s.preset.clone(),
             _ => "clean".to_string(),
         };
-        for fixed in &["speaker", "original", "translation", "timestamp"] {
+        s.container_align_x = match s.container_align_x.as_str() {
+            "left" | "center" | "right" => s.container_align_x.clone(),
+            _ => "center".to_string(),
+        };
+        s.container_align_y = match s.container_align_y.as_str() {
+            "top" | "center" | "bottom" => s.container_align_y.clone(),
+            _ => "bottom".to_string(),
+        };
+        if s.box_max_width == 0 {
+            s.box_max_width = 100;
+        }
+        s.box_max_width = s.box_max_width.clamp(30, 100);
+        for fixed in &["speaker", "original", "translation", "timestamp", "original2"] {
             if !s.element_order.iter().any(|e| e == fixed) {
                 s.element_order.push((*fixed).to_string());
             }
@@ -788,7 +805,7 @@ impl Default for SubtitleConfig {
             subtitle_font_color: "#ffffff".to_string(),
             subtitle_bg_opacity: 0.6,
             subtitle_blur: 20,
-            subtitle_max_lines: 3,
+            subtitle_max_lines: 2,
             subtitle_window_x: -1,
             subtitle_window_y: -1,
             subtitle_window_width: 1200,
@@ -802,9 +819,6 @@ impl Default for SubtitleConfig {
             subtitle_text_shadow_color: "#000000".to_string(),
             subtitle_text_shadow_strength: 4,
             subtitle_bg_color: "#000000".to_string(),
-            subtitle_border_radius: 12,
-            subtitle_border_color: "#ffffff".to_string(),
-            subtitle_border_width: 0,
             subtitle_padding_x: 24,
             subtitle_padding_y: 12,
             subtitle_interim_color: "#ffffff".to_string(),
@@ -1182,13 +1196,13 @@ impl AppConfig {
             "clean" | "bilingual" | "meeting" | "live" | "custom" => self.subtitle.subtitle_preset.clone(),
             _ => "clean".to_string(),
         };
-        // 字幕识别音源类型校验
+        // 字幕识别音源类型校验："microphone"（麦克风）| "system"（系统扬声器）| "dual"（双音源同传）
         self.subtitle.subtitle_audio_source = match self.subtitle.subtitle_audio_source.as_str() {
-            "microphone" | "system" => self.subtitle.subtitle_audio_source.clone(),
+            "microphone" | "system" | "dual" => self.subtitle.subtitle_audio_source.clone(),
             _ => "microphone".to_string(),
         };
         // 确保元素顺序包含所有固定元素
-        for fixed in &["speaker", "original", "translation", "timestamp"] {
+        for fixed in &["speaker", "original", "translation", "timestamp", "original2"] {
             if !self.subtitle.subtitle_element_order.iter().any(|e| e == fixed) {
                 self.subtitle.subtitle_element_order.push((*fixed).to_string());
             }

@@ -20,16 +20,17 @@
             -webkit-app-region: no-drag;
             app-region: no-drag;
         }
+        /* 容器：对齐锚点由 JS 按设置写入 justify-content / align-items */
         #subtitle-container {
             height: 100%;
+            width: 100%;
             display: flex;
-            align-items: flex-end;
-            justify-content: center;
-            padding: 12px 24px;
+            flex-direction: column;
+            padding: 16px;
             -webkit-app-region: drag;
             app-region: drag;
         }
-        /* 卡片容器：承载背景/边框/圆角/模糊，内部为多元素 */
+        /* 卡片容器：承载背景/模糊/内边距，内部为多元素 */
         #subtitle-box {
             display: flex;
             flex-direction: column;
@@ -37,16 +38,14 @@
             background: rgba(0, 0, 0, 0.6);
             backdrop-filter: blur(20px);
             -webkit-backdrop-filter: blur(20px);
-            border-radius: 12px;
             padding: 12px 24px;
-            border: 1px solid transparent;
-            max-width: 100%;
             transition: opacity 0.15s ease;
+            overflow: hidden;
         }
         /* 水平布局时元素横向排列 */
         #subtitle-box.layout-horizontal {
             flex-direction: row;
-            align-items: center;
+            align-items: flex-start;
             gap: 16px;
         }
         /* 各语义元素通用样式 */
@@ -56,7 +55,19 @@
             transition: opacity 0.15s ease, color 0.15s ease;
         }
         .sub-element:empty { display: none; }
-        /* 原文元素 */
+        /* 行容器（历史行 + 当前行堆叠） */
+        .sub-lines {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            width: 100%;
+        }
+        .sub-line {
+            word-wrap: break-word;
+            word-break: break-word;
+            transition: opacity 0.2s ease;
+        }
+        /* 原文元素（主源 A） */
         #sub-original {
             color: #ffffff;
             font-family: "Microsoft YaHei", sans-serif;
@@ -66,20 +77,42 @@
             letter-spacing: 0px;
             text-align: center;
             text-shadow: 0 1px 4px rgba(0,0,0,0.5);
-            display: -webkit-box;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-            -webkit-line-clamp: 3;
         }
+        #sub-original .sub-line.sub-current {
+            opacity: 1;
+        }
+        /* 副原文元素（双音源同传模式的麦克风原声 B） */
+        #sub-original2 {
+            color: #7dd3fc;
+            font-family: "Microsoft YaHei", sans-serif;
+            font-size: 26px;
+            font-weight: 400;
+            line-height: 1.4;
+            letter-spacing: 0px;
+            text-align: center;
+            opacity: 0.9;
+            text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+        }
+        #sub-original2 .sub-line.sub-current {
+            opacity: 1;
+        }
+        /* 已确定文本段（definite），使用正常颜色 */
+        #sub-original .seg-definite { }
+        /* 临时文本段（indefinite），使用 interim 颜色 */
+        #sub-original .seg-indefinite { }
         /* 译文元素 */
         #sub-translation {
             color: #ffffff;
             font-size: 24px;
             font-weight: 400;
             line-height: 1.4;
+            letter-spacing: 0px;
             text-align: center;
             opacity: 0.85;
             text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+        }
+        #sub-translation .sub-line.sub-current {
+            opacity: 1;
         }
         /* 说话人元素 */
         #sub-speaker {
@@ -87,6 +120,7 @@
             font-size: 16px;
             font-weight: 500;
             line-height: 1.3;
+            letter-spacing: 0px;
         }
         /* 时间戳元素 */
         #sub-timestamp {
@@ -94,21 +128,8 @@
             font-size: 14px;
             font-weight: 400;
             line-height: 1.3;
+            letter-spacing: 0px;
             font-family: "Cascadia Code", "Consolas", monospace;
-        }
-        /* 已确定文本段（definite），使用正常颜色 */
-        #sub-original .seg-definite {
-            /* color 和 opacity 由 JS 动态设置（normalColor / 1） */
-        }
-        /* 临时文本段（indefinite），使用 interim 颜色 */
-        #sub-original .seg-indefinite {
-            /* color 和 opacity 由 JS 动态设置（interimColor / interimOpacity） */
-        }
-        /* 译文定稿段 */
-        #sub-translation .trans-definite { }
-        /* 译文临时预览段（同声传译中间结果） */
-        #sub-translation .trans-indefinite {
-            /* color/opacity 由 JS 动态设置 */
         }
     </style>
 </head>
@@ -116,8 +137,9 @@
     <div id="subtitle-container">
         <div id="subtitle-box">
             <div class="sub-element" id="sub-speaker" style="display:none"></div>
-            <div class="sub-element" id="sub-original">等待语音输入...</div>
-            <div class="sub-element" id="sub-translation" style="display:none"></div>
+            <div class="sub-element" id="sub-original"><div class="sub-lines" id="sub-original-lines"></div></div>
+            <div class="sub-element" id="sub-original2" style="display:none"><div class="sub-lines" id="sub-original2-lines"></div></div>
+            <div class="sub-element" id="sub-translation" style="display:none"><div class="sub-lines" id="sub-translation-lines"></div></div>
             <div class="sub-element" id="sub-timestamp" style="display:none"></div>
         </div>
     </div>
@@ -125,7 +147,12 @@
         const { listen } = window.__TAURI__.event;
 
         const subtitleBox = document.getElementById('subtitle-box');
+        const subtitleContainer = document.getElementById('subtitle-container');
+        const originalLines = document.getElementById('sub-original-lines');
+        const original2Lines = document.getElementById('sub-original2-lines');
+        const translationLines = document.getElementById('sub-translation-lines');
         const subOriginal = document.getElementById('sub-original');
+        const subOriginal2 = document.getElementById('sub-original2');
         const subTranslation = document.getElementById('sub-translation');
         const subSpeaker = document.getElementById('sub-speaker');
         const subTimestamp = document.getElementById('sub-timestamp');
@@ -145,7 +172,10 @@
         const cfgCache = {};
         const frameCache = {
             text: '', isFinal: false, definite: '', indefinite: '',
-            translation: '', translationInterim: '', speaker: ''
+            history: [], currentDefinite: '',
+            speaker: '', translationHistory: [], translationCurrent: '',
+            dual: false,
+            bText: '', bDefinite: '', bIndefinite: '', bHistory: [], bCurrentDefinite: '', bSpeaker: ''
         };
 
         function hexToRgba(hex, alpha) {
@@ -168,10 +198,22 @@
                 .join(', ');
         }
 
+        const ALIGN_MAP = { left: 'flex-start', center: 'center', right: 'flex-end', top: 'flex-start', bottom: 'flex-end' };
+
         function applyConfig(cfg) {
             Object.assign(cfgCache, cfg);
 
-            // ===== 卡片容器样式（背景/边框/圆角/模糊/内边距） =====
+            // ===== 容器对齐锚点 + 最大宽度 =====
+            const alignX = ALIGN_MAP[cfg.containerAlignX] || 'center';
+            const alignY = ALIGN_MAP[cfg.containerAlignY] || 'flex-end';
+            // 容器为纵向 flex：#subtitle-container 的主轴是垂直方向，
+            // 因此 justify-content 控制垂直位置（Y），align-items 控制水平位置（X）
+            subtitleContainer.style.alignItems = alignX;
+            subtitleContainer.style.justifyContent = alignY;
+            const maxW = typeof cfg.boxMaxWidth === 'number' ? cfg.boxMaxWidth : 100;
+            subtitleBox.style.maxWidth = maxW + '%';
+
+            // ===== 卡片容器样式（背景/模糊/内边距） =====
             const boxEl = subtitleBox.style;
             const bgColor = cfg.bgColor || '#000000';
             const bgOpacity = typeof cfg.bgOpacity === 'number' ? cfg.bgOpacity : 0.6;
@@ -179,13 +221,6 @@
             const blur = typeof cfg.blur === 'number' ? cfg.blur : 20;
             boxEl.backdropFilter = `blur(${blur}px)`;
             boxEl.webkitBackdropFilter = `blur(${blur}px)`;
-            if (typeof cfg.borderRadius === 'number') {
-                boxEl.borderRadius = cfg.borderRadius + 'px';
-            }
-            const borderWidth = typeof cfg.borderWidth === 'number' ? cfg.borderWidth : 0;
-            boxEl.borderWidth = borderWidth + 'px';
-            boxEl.borderStyle = borderWidth > 0 ? 'solid' : 'none';
-            boxEl.borderColor = cfg.borderColor || '#ffffff';
             if (typeof cfg.paddingX === 'number' && typeof cfg.paddingY === 'number') {
                 boxEl.padding = `${cfg.paddingY}px ${cfg.paddingX}px`;
             }
@@ -199,10 +234,12 @@
             const showTranslation = cfg.showTranslation === true;
             const showSpeaker = cfg.showSpeaker === true;
             const showTimestamp = cfg.showTimestamp === true;
+            const showOriginalSecondary = cfg.showOriginalSecondary === true;
             subOriginal.style.display = showOriginal ? '' : 'none';
             subTranslation.style.display = showTranslation ? '' : 'none';
             subSpeaker.style.display = showSpeaker ? '' : 'none';
             subTimestamp.style.display = showTimestamp ? '' : 'none';
+            subOriginal2.style.display = showOriginalSecondary ? '' : 'none';
 
             // ===== 原文元素样式 =====
             const oEl = subOriginal.style;
@@ -221,13 +258,19 @@
             const shadowColor = cfg.textShadowColor || '#000000';
             const shadowStrength = typeof cfg.textShadowStrength === 'number' ? cfg.textShadowStrength : 4;
             oEl.textShadow = buildTextShadow(shadowColor, shadowStrength);
-            if (typeof cfg.maxLines === 'number' && cfg.maxLines > 0) {
-                oEl.webkitLineClamp = String(cfg.maxLines);
-            }
-            if (typeof cfg.interimOpacity === 'number') {
-                subOriginal.dataset.interimOpacity = cfg.interimOpacity;
-            }
+            if (typeof cfg.interimOpacity === 'number') subOriginal.dataset.interimOpacity = cfg.interimOpacity;
             if (cfg.interimColor) subOriginal.dataset.interimColor = cfg.interimColor;
+
+            // ===== 副原文元素样式（双源模式麦克风原声，跟随原文基础样式） =====
+            const o2El = subOriginal2.style;
+            if (cfg.fontFamily) o2El.fontFamily = `"${cfg.fontFamily}", sans-serif`;
+            if (cfg.fontSize) o2El.fontSize = Math.max(14, Math.round(cfg.fontSize * 0.8)) + 'px';
+            if (cfg.fontWeight) o2El.fontWeight = String(cfg.fontWeight);
+            o2El.fontStyle = cfg.italic === true ? 'italic' : 'normal';
+            if (cfg.textAlign) o2El.textAlign = cfg.textAlign;
+            if (typeof cfg.letterSpacing === 'number') o2El.letterSpacing = cfg.letterSpacing + 'px';
+            if (typeof cfg.lineHeight === 'number') o2El.lineHeight = String(cfg.lineHeight);
+            o2El.textShadow = buildTextShadow(shadowColor, shadowStrength);
 
             // ===== 译文元素样式 =====
             const tEl = subTranslation.style;
@@ -237,17 +280,27 @@
             if (cfg.translationFontColor) tEl.color = cfg.translationFontColor;
             if (typeof cfg.translationOpacity === 'number') tEl.opacity = String(cfg.translationOpacity);
             if (cfg.textAlign) tEl.textAlign = cfg.textAlign;
+            if (typeof cfg.letterSpacing === 'number') tEl.letterSpacing = cfg.letterSpacing + 'px';
+            if (typeof cfg.lineHeight === 'number') tEl.lineHeight = String(cfg.lineHeight);
             tEl.textShadow = buildTextShadow(shadowColor, shadowStrength);
 
             // ===== 说话人元素样式 =====
             const sEl = subSpeaker.style;
+            if (cfg.fontFamily) sEl.fontFamily = `"${cfg.fontFamily}", sans-serif`;
             if (cfg.speakerColor) sEl.color = cfg.speakerColor;
             if (typeof cfg.speakerFontSize === 'number') sEl.fontSize = cfg.speakerFontSize + 'px';
+            if (cfg.textAlign) sEl.textAlign = cfg.textAlign;
+            if (typeof cfg.letterSpacing === 'number') sEl.letterSpacing = cfg.letterSpacing + 'px';
+            if (typeof cfg.lineHeight === 'number') sEl.lineHeight = String(cfg.lineHeight);
+            sEl.textShadow = buildTextShadow(shadowColor, shadowStrength);
 
             // ===== 时间戳元素样式 =====
             const tsEl = subTimestamp.style;
             if (cfg.timestampColor) tsEl.color = cfg.timestampColor;
             if (typeof cfg.timestampFontSize === 'number') tsEl.fontSize = cfg.timestampFontSize + 'px';
+            if (cfg.textAlign) tsEl.textAlign = cfg.textAlign;
+            if (typeof cfg.letterSpacing === 'number') tsEl.letterSpacing = cfg.letterSpacing + 'px';
+            if (typeof cfg.lineHeight === 'number') tsEl.lineHeight = String(cfg.lineHeight);
 
             // ===== 自定义元素 DOM 同步 =====
             syncCustomElements(cfg, shadowColor, shadowStrength);
@@ -255,7 +308,7 @@
             // ===== 元素顺序重排 =====
             reorderElements(cfg.elementOrder);
 
-            // 重渲染当前帧（样式变化后内容保持）
+            // 样式变化后重渲染当前帧
             renderFrame();
         }
 
@@ -330,6 +383,8 @@
                     st.textAlign = el.align || 'center';
                     st.textShadow = buildTextShadow(shadowColor, shadowStrength);
                     if (cfg.fontFamily) st.fontFamily = `"${cfg.fontFamily}", sans-serif`;
+                    if (typeof cfg.letterSpacing === 'number') st.letterSpacing = cfg.letterSpacing + 'px';
+                    if (typeof cfg.lineHeight === 'number') st.lineHeight = String(cfg.lineHeight);
                     node.dataset.content = el.content || '';
                     node.dataset.prefix = el.prefix || '';
                 }
@@ -345,6 +400,7 @@
             const idMap = {
                 'speaker': 'sub-speaker',
                 'original': 'sub-original',
+                'original2': 'sub-original2',
                 'translation': 'sub-translation',
                 'timestamp': 'sub-timestamp',
             };
@@ -383,6 +439,12 @@
             return div.innerHTML;
         }
 
+        // 显示行数：历史行数 = maxLines - 1（当前行始终保留 1 行）
+        function visibleHistoryCount() {
+            const max = typeof cfgCache.maxLines === 'number' ? cfgCache.maxLines : 3;
+            return Math.max(0, Math.min(max, 6) - 1);
+        }
+
         // ===== 帧渲染 =====
 
         function renderOriginal() {
@@ -390,60 +452,93 @@
             const interimColor = subOriginal.dataset.interimColor || '#ffffff';
             const normalColor = subOriginal.dataset.normalColor || '#ffffff';
 
-            const defText = (frameCache.definite || '').trim();
+            const defTail = (frameCache.currentDefinite || '').trim();
             const indefText = (frameCache.indefinite || '').trim();
+            const history = Array.isArray(frameCache.history) ? frameCache.history : [];
+            const histCount = visibleHistoryCount();
+            const shownHistory = history.slice(-histCount);
 
-            if (defText || indefText) {
-                let html = '';
-                if (defText) {
-                    html += `<span class="seg-definite" style="color:${normalColor};opacity:1">${escapeHtml(defText)}</span>`;
+            let html = '';
+            // 历史行（越老越淡）
+            shownHistory.forEach((line, i) => {
+                const opacity = Math.min(0.95, 0.5 + 0.15 * i + (histCount - shownHistory.length) * 0.15);
+                html += `<div class="sub-line sub-history" style="opacity:${opacity.toFixed(2)}">${escapeHtml(line)}</div>`;
+            });
+            // 当前行：未成句定稿 + 临时文本
+            if (defTail || indefText) {
+                let cur = '';
+                if (defTail) {
+                    cur += `<span class="seg-definite" style="color:${normalColor};opacity:1">${escapeHtml(defTail)}</span>`;
                 }
                 if (indefText) {
-                    if (defText) html += ' ';
-                    html += `<span class="seg-indefinite" style="color:${interimColor};opacity:${interimOpacity}">${escapeHtml(indefText)}</span>`;
+                    if (defTail) cur += ' ';
+                    cur += `<span class="seg-indefinite" style="color:${interimColor};opacity:${interimOpacity}">${escapeHtml(indefText)}</span>`;
                 }
-                subOriginal.innerHTML = html;
-                subOriginal.style.opacity = '1';
-                subOriginal.style.color = '';
-            } else {
-                const displayText = frameCache.text || '...';
-                subOriginal.textContent = displayText;
-                if (frameCache.isFinal) {
-                    subOriginal.style.opacity = '1';
-                    subOriginal.style.color = normalColor;
-                } else {
-                    subOriginal.style.opacity = String(interimOpacity);
-                    subOriginal.style.color = interimColor;
-                }
+                html += `<div class="sub-line sub-current">${cur}</div>`;
+            } else if (!shownHistory.length) {
+                // 占位：状态提示文本
+                const displayText = frameCache.text || '等待语音输入...';
+                const style = frameCache.isFinal
+                    ? `color:${normalColor};opacity:1`
+                    : `color:${interimColor};opacity:${interimOpacity}`;
+                html += `<div class="sub-line sub-current" style="${style}">${escapeHtml(displayText)}</div>`;
             }
+
+            originalLines.innerHTML = html;
         }
 
-        function renderTranslation() {
-            const prefix = cfgCache.translationPrefix || '';
-            const fin = (frameCache.translation || '').trim();
-            const prov = (frameCache.translationInterim || '').trim();
+        // 副原文（双源模式 B：麦克风原声）
+        function renderOriginal2() {
+            if (!frameCache.dual) {
+                original2Lines.innerHTML = '';
+                return;
+            }
+            const defTail = (frameCache.bCurrentDefinite || '').trim();
+            const indefText = (frameCache.bIndefinite || '').trim();
+            const history = Array.isArray(frameCache.bHistory) ? frameCache.bHistory : [];
+            const histCount = visibleHistoryCount();
+            const shownHistory = history.slice(-histCount);
 
-            // 定稿译文重复包含临时预览内容时，去掉重复展示（防抖译文与定稿重叠）
-            let provText = prov;
-            if (fin && provText && fin.endsWith(provText)) {
-                provText = '';
+            let html = '';
+            shownHistory.forEach((line, i) => {
+                const opacity = Math.min(0.95, 0.5 + 0.15 * i + (histCount - shownHistory.length) * 0.15);
+                html += `<div class="sub-line sub-history" style="opacity:${opacity.toFixed(2)}">${escapeHtml(line)}</div>`;
+            });
+            if (defTail || indefText) {
+                let cur = '';
+                if (defTail) cur += escapeHtml(defTail);
+                if (indefText) {
+                    if (defTail) cur += ' ';
+                    cur += `<span style="opacity:0.7">${escapeHtml(indefText)}</span>`;
+                }
+                html += `<div class="sub-line sub-current">${cur}</div>`;
+            }
+            original2Lines.innerHTML = html;
+        }
+
+        function renderTranslation() {            const prefix = cfgCache.translationPrefix || '';
+            const hist = Array.isArray(frameCache.translationHistory) ? frameCache.translationHistory : [];
+            const cur = (frameCache.translationCurrent || '').trim();
+            const histCount = visibleHistoryCount();
+            const shownHistory = hist.slice(-histCount);
+
+            if (!shownHistory.length && !cur) {
+                translationLines.innerHTML = '';
+                return;
             }
 
-            if (fin || provText) {
-                const interimOpacity = parseFloat(subOriginal.dataset.interimOpacity || '0.7');
-                const interimColor = subOriginal.dataset.interimColor || '#ffffff';
-                let html = '';
-                if (fin) {
-                    html += `<span class="trans-definite">${escapeHtml(fin)}</span>`;
-                }
-                if (provText) {
-                    if (fin) html += ' ';
-                    html += `<span class="trans-indefinite" style="color:${interimColor};opacity:${interimOpacity}">${escapeHtml(provText)}</span>`;
-                }
-                subTranslation.innerHTML = (prefix ? escapeHtml(prefix) : '') + html;
-            } else {
-                subTranslation.textContent = '';
+            const interimOpacity = parseFloat(subOriginal.dataset.interimOpacity || '0.7');
+            const interimColor = subOriginal.dataset.interimColor || '#ffffff';
+
+            let html = '';
+            shownHistory.forEach((line, i) => {
+                const opacity = Math.min(0.95, 0.5 + 0.15 * i + (histCount - shownHistory.length) * 0.15);
+                html += `<div class="sub-line sub-history" style="opacity:${opacity.toFixed(2)}">${escapeHtml(line)}</div>`;
+            });
+            if (cur) {
+                html += `<div class="sub-line sub-current"><span style="color:${interimColor};opacity:${interimOpacity}">${escapeHtml(prefix + cur)}</span></div>`;
             }
+            translationLines.innerHTML = html;
         }
 
         function renderSpeaker() {
@@ -472,9 +567,10 @@
                 let text = content;
                 const hasBindings = /\{text\}|\{translation\}|\{speaker\}/.test(text);
                 if (hasBindings) {
+                    const fullText = frameCache.definite + (frameCache.indefinite ? ' ' + frameCache.indefinite : '');
                     text = text
-                        .replace(/\{text\}/g, frameCache.definite + (frameCache.indefinite ? ' ' + frameCache.indefinite : ''))
-                        .replace(/\{translation\}/g, ((frameCache.translation || '') + ' ' + (frameCache.translationInterim || '')).trim())
+                        .replace(/\{text\}/g, fullText)
+                        .replace(/\{translation\}/g, (frameCache.translationCurrent || '').trim())
                         .replace(/\{speaker\}/g, frameCache.speaker || '');
                 }
                 text = resolvePlaceholders(text);
@@ -484,10 +580,35 @@
 
         function renderFrame() {
             renderOriginal();
+            renderOriginal2();
             renderTranslation();
             renderSpeaker();
             renderTimestamp();
             renderCustomElements();
+            scheduleAutoFit();
+        }
+
+        // ===== 窗口高度自适应内容（容纳不下时变大，不遮文字） =====
+        let autoFitTimer = null;
+
+        function applyAutoFit() {
+            if (cfgCache.autoFit !== true) return;
+            const LogicalSize = window.__TAURI__?.window?.LogicalSize;
+            if (!LogicalSize) return;
+            const getWin = window.__TAURI__?.window?.getCurrentWindow;
+            if (typeof getWin !== 'function') return;
+            // 卡片实际内容高度 + 容器上下内边距（16px * 2）
+            const desiredH = Math.max(40, Math.ceil(subtitleBox.offsetHeight) + 32);
+            // 阈值防抖，避免频繁重设
+            if (Math.abs(window.innerHeight - desiredH) <= 6) return;
+            getWin().then((win) => {
+                win.setSize(new LogicalSize(window.innerWidth, desiredH)).catch(() => {});
+            }).catch(() => {});
+        }
+
+        function scheduleAutoFit() {
+            if (autoFitTimer) clearTimeout(autoFitTimer);
+            autoFitTimer = setTimeout(applyAutoFit, 60);
         }
 
         // ===== 事件监听（按 sceneId 过滤） =====
@@ -499,9 +620,18 @@
             frameCache.isFinal = !!p.isFinal;
             frameCache.definite = p.definite || '';
             frameCache.indefinite = p.indefinite || '';
-            frameCache.translation = p.translation || '';
-            frameCache.translationInterim = p.translationInterim || '';
+            frameCache.history = Array.isArray(p.history) ? p.history : [];
+            frameCache.currentDefinite = p.currentDefinite || '';
             frameCache.speaker = p.speaker || '';
+            frameCache.translationHistory = Array.isArray(p.translationHistory) ? p.translationHistory : [];
+            frameCache.translationCurrent = p.translationCurrent || '';
+            frameCache.dual = !!p.dual;
+            frameCache.bText = p.bText || '';
+            frameCache.bDefinite = p.bDefinite || '';
+            frameCache.bIndefinite = p.bIndefinite || '';
+            frameCache.bHistory = Array.isArray(p.bHistory) ? p.bHistory : [];
+            frameCache.bCurrentDefinite = p.bCurrentDefinite || '';
+            frameCache.bSpeaker = p.bSpeaker || '';
             renderFrame();
         });
 
