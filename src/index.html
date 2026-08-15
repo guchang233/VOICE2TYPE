@@ -2032,7 +2032,7 @@
                             <div class="subtitle-card">
                                 <h4 class="subtitle-card-title">音源与全局</h4>
                                 <div class="subtitle-grid">
-                                    <div class="control-group" style="grid-column: 1 / -1;">
+                                    <div class="control-group span-full">
                                         <label>音源类型</label>
                                         <div class="segmented-control" id="subtitle-audio-source">
                                             <button class="seg-btn active" data-source="microphone" type="button">麦克风输入</button>
@@ -2044,27 +2044,27 @@
                                         <label>字幕开关热键</label>
                                         <input type="text" class="text-input hotkey-input" id="subtitle-hotkey" value="F7" placeholder="点击后按键" readonly>
                                     </div>
-                                    <div class="control-group" id="subtitle-mic-device-group" style="grid-column: 1 / -1;">
+                                    <div class="control-group" id="subtitle-mic-device-group">
                                         <label>音频输入设备</label>
                                         <select class="text-input" id="setting-subtitle-input-device" title="实时字幕识别使用的音频源，可选立体声混音等系统音频设备">
                                             <option value="">系统默认</option>
                                         </select>
                                     </div>
-                                    <div class="control-group" id="subtitle-system-hint" style="grid-column: 1 / -1; display: none;">
+                                    <div class="control-group span-full" id="subtitle-system-hint" style="display: none;">
                                         <p class="subtitle-tip subtitle-tip-left">已选择系统扬声器音源，将直接捕获电脑正在播放的声音（WASAPI loopback），无需选择设备。</p>
                                     </div>
-                                    <div class="control-group" id="subtitle-dual-hint" style="grid-column: 1 / -1; display: none;">
+                                    <div class="control-group span-full" id="subtitle-dual-hint" style="display: none;">
                                         <p class="subtitle-tip subtitle-tip-left">同传模式：捕获系统播放的声音作为主音源（识别并翻译为译文），同时用下方选择的麦克风设备录制原声作为副字幕，并写入转录记录。</p>
                                     </div>
-                                    <div class="control-group" style="grid-column: 1 / -1;">
+                                    <div class="control-group span-full">
                                         <label>同声传译 LLM 接口地址（全局共享）</label>
                                         <input type="text" class="text-input" id="subtitle-llm-url" placeholder="如 https://api.siliconflow.cn/v1/chat/completions">
                                     </div>
-                                    <div class="control-group" style="grid-column: 1 / -1;">
+                                    <div class="control-group">
                                         <label>同声传译 LLM API Key（留空则复用 LLM 智能校对配置）</label>
                                         <input type="password" class="text-input" id="subtitle-llm-key" placeholder="sk-...">
                                     </div>
-                                    <div class="control-group" style="grid-column: 1 / -1;">
+                                    <div class="control-group">
                                         <label>同声传译 LLM 模型名</label>
                                         <input type="text" class="text-input" id="subtitle-llm-model" placeholder="如 Qwen/Qwen2.5-7B-Instruct">
                                     </div>
@@ -2079,11 +2079,12 @@
                         </div>
 
                         <div class="subtitle-cards">
-                            <div class="subtitle-card" id="card-preset">
-                                <h4 class="subtitle-card-title">预设模板</h4>
-                                <p class="subtitle-tip subtitle-tip-left">一键应用预设方案，应用后仍可在下方微调各元素与样式。选择「自定义」则完全由你控制。</p>
+                            <div class="subtitle-card" id="card-appearance">
+                                <h4 class="subtitle-card-title">外观样式</h4>
+                                <p class="subtitle-tip subtitle-tip-left">「预设模板」一键套用整体方案，应用后仍可在下方微调；选择「自定义」则完全由你控制。</p>
                                 <div class="subtitle-grid">
-                                    <div class="control-group" style="grid-column: 1 / -1;">
+                                    <div class="control-group span-full">
+                                        <label>预设模板</label>
                                         <div class="segmented-control" id="subtitle-preset">
                                             <button class="seg-btn" data-preset="clean" type="button">纯净</button>
                                             <button class="seg-btn" data-preset="bilingual" type="button">双语</button>
@@ -2093,11 +2094,9 @@
                                         </div>
                                     </div>
                                 </div>
-                            </div>
 
-                            <div class="subtitle-card">
-                                <h4 class="subtitle-card-title">字体</h4>
-                                <div class="subtitle-grid">
+                                <h5 class="subtitle-sub-title">字体</h5>
+                                <div class="subtitle-grid subtitle-grid-3">
                                     <div class="control-group">
                                         <label>字体族</label>
                                         <select class="text-input" id="subtitle-font-family">
@@ -2153,11 +2152,9 @@
                                         <span class="value-display">0px</span>
                                     </div>
                                 </div>
-                            </div>
 
-                            <div class="subtitle-card">
-                                <h4 class="subtitle-card-title">文字</h4>
-                                <div class="subtitle-grid">
+                                <h5 class="subtitle-sub-title">文字</h5>
+                                <div class="subtitle-grid subtitle-grid-3">
                                     <div class="control-group">
                                         <label>文字颜色</label>
                                         <input type="color" class="color-input" id="subtitle-font-color" value="#ffffff">
@@ -2184,12 +2181,19 @@
                                         <input type="range" min="1" max="6" value="3" class="slider" id="subtitle-lines">
                                         <span class="value-display">3 行</span>
                                     </div>
+                                    <div class="control-group">
+                                        <label>临时文字颜色</label>
+                                        <input type="color" class="color-input" id="subtitle-interim-color" value="#ffffff">
+                                    </div>
+                                    <div class="control-group">
+                                        <label>临时文字透明度</label>
+                                        <input type="range" min="0" max="100" value="70" class="slider" id="subtitle-interim-opacity">
+                                        <span class="value-display">70%</span>
+                                    </div>
                                 </div>
-                            </div>
 
-                            <div class="subtitle-card">
-                                <h4 class="subtitle-card-title">背景</h4>
-                                <div class="subtitle-grid">
+                                <h5 class="subtitle-sub-title">背景</h5>
+                                <div class="subtitle-grid subtitle-grid-3">
                                     <div class="control-group">
                                         <label>背景颜色</label>
                                         <input type="color" class="color-input" id="subtitle-bg-color" value="#000000">
@@ -2215,27 +2219,10 @@
                                         <span class="value-display">12px</span>
                                     </div>
                                 </div>
-                            </div>
 
-                            <div class="subtitle-card">
-                                <h4 class="subtitle-card-title">临时文字（中间结果）</h4>
-                                <div class="subtitle-grid">
+                                <h5 class="subtitle-sub-title">布局</h5>
+                                <div class="subtitle-grid subtitle-grid-3">
                                     <div class="control-group">
-                                        <label>临时文字颜色</label>
-                                        <input type="color" class="color-input" id="subtitle-interim-color" value="#ffffff">
-                                    </div>
-                                    <div class="control-group">
-                                        <label>临时文字透明度</label>
-                                        <input type="range" min="0" max="100" value="70" class="slider" id="subtitle-interim-opacity">
-                                        <span class="value-display">70%</span>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="subtitle-card">
-                                <h4 class="subtitle-card-title">布局</h4>
-                                <div class="subtitle-grid">
-                                    <div class="control-group" style="grid-column: 1 / -1;">
                                         <label>布局方向</label>
                                         <div class="segmented-control" id="subtitle-layout">
                                             <button class="seg-btn active" data-mode="vertical">垂直堆叠</button>
@@ -2263,19 +2250,21 @@
                                         <input type="range" min="30" max="100" value="100" class="slider" id="subtitle-max-width">
                                         <span class="value-display">100%</span>
                                     </div>
-                                    <div class="control-group" style="grid-column: 1 / -1;">
-                                        <label>完成句段自动分行（历史行）</label>
-                                        <div class="switch" id="subtitle-auto-wrap" data-on="false" title="关闭（默认）：所有文字保持在当前行连续显示，说完整的一句也不会跳到新行；开启：完成句段跳到上方历史行，当前行继续显示新内容">
+                                    <div class="control-group switch-row">
+                                        <label title="关闭（默认）：所有文字保持在当前行连续显示；开启：完成句段跳到上方历史行">完成句段自动分行（历史行）</label>
+                                        <div class="switch" id="subtitle-auto-wrap" data-on="false">
                                             <div class="switch-knob"></div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
+                        </div>
 
+                        <div class="subtitle-cards">
                             <div class="subtitle-card" id="card-translation-engine">
                                 <h4 class="subtitle-card-title">同声传译（当前窗口）</h4>
                                 <p class="subtitle-tip subtitle-tip-left">把识别原文实时翻译成目标语言显示在「译文」元素中（增量句段翻译 + 中间结果同声预览）。接口地址 / API Key / 模型名在上方「音源与全局」中全局共享。</p>
-                                <div class="subtitle-grid">
+                                <div class="subtitle-grid subtitle-grid-3">
                                     <div class="control-group">
                                         <label>翻译引擎</label>
                                         <select class="text-input" id="subtitle-translation-engine">
@@ -2296,7 +2285,7 @@
                                             <option value="俄文">俄文 Русский</option>
                                         </select>
                                     </div>
-                                    <div class="control-group" id="subtitle-translation-interim-group">
+                                    <div class="control-group switch-row" id="subtitle-translation-interim-group">
                                         <label>翻译中间结果（同声预览）</label>
                                         <div class="switch" id="subtitle-translation-interim" data-on="true">
                                             <div class="switch-knob"></div>
@@ -2304,10 +2293,15 @@
                                     </div>
                                 </div>
                             </div>
+                        </div>
 
-                            <div class="subtitle-card" id="card-translation-style">
-                                <h4 class="subtitle-card-title">译文样式</h4>
-                                <div class="subtitle-grid">
+                        <div class="subtitle-cards">
+                            <div class="subtitle-card" id="card-element-styles">
+                                <h4 class="subtitle-card-title">元素样式（译文 / 说话人 / 时间戳）</h4>
+                                <p class="subtitle-tip subtitle-tip-left">以下样式作用于「译文」「说话人」「时间戳」固定元素；各元素的开关与顺序在下方「显示元素」中配置。</p>
+
+                                <h5 class="subtitle-sub-title">译文</h5>
+                                <div class="subtitle-grid subtitle-grid-3">
                                     <div class="control-group">
                                         <label>译文颜色</label>
                                         <input type="color" class="color-input" id="subtitle-translation-color" value="#ffffff">
@@ -2336,17 +2330,14 @@
                                         <input type="range" min="0" max="100" value="85" class="slider" id="subtitle-translation-opacity">
                                         <span class="value-display">85%</span>
                                     </div>
-                                    <div class="control-group" style="grid-column: 1 / -1;">
+                                    <div class="control-group span-full">
                                         <label>译文前缀（可选）</label>
                                         <input type="text" class="text-input" id="subtitle-translation-prefix" placeholder="如 译: " value="">
                                     </div>
                                 </div>
-                            </div>
 
-                            <div class="subtitle-card" id="card-speaker-style">
-                                <h4 class="subtitle-card-title">说话人样式</h4>
-                                <p class="subtitle-tip subtitle-tip-left">说话人按停顿自动分轮显示（说话人1、说话人2…依次递增），无需手动标注，适合会议纪要等场景。</p>
-                                <div class="subtitle-grid">
+                                <h5 class="subtitle-sub-title">说话人</h5>
+                                <div class="subtitle-grid subtitle-grid-3">
                                     <div class="control-group">
                                         <label>说话人颜色</label>
                                         <input type="color" class="color-input" id="subtitle-speaker-color" value="#818cf8">
@@ -2356,16 +2347,14 @@
                                         <input type="range" min="8" max="48" value="16" class="slider" id="subtitle-speaker-size">
                                         <span class="value-display">16px</span>
                                     </div>
-                                    <div class="control-group" style="grid-column: 1 / -1;">
+                                    <div class="control-group span-full">
                                         <label>说话人前缀（可选）</label>
                                         <input type="text" class="text-input" id="subtitle-speaker-prefix" placeholder="如 说话人: " value="">
                                     </div>
                                 </div>
-                            </div>
 
-                            <div class="subtitle-card" id="card-timestamp-style">
-                                <h4 class="subtitle-card-title">时间戳样式</h4>
-                                <div class="subtitle-grid">
+                                <h5 class="subtitle-sub-title">时间戳</h5>
+                                <div class="subtitle-grid subtitle-grid-3">
                                     <div class="control-group">
                                         <label>时间戳颜色</label>
                                         <input type="color" class="color-input" id="subtitle-timestamp-color" value="#a1a1aa">
@@ -2406,25 +2395,25 @@
                                 <h4 class="subtitle-card-title">窗口控制</h4>
                                 <p class="subtitle-tip subtitle-tip-left">字幕窗口是完整的普通窗口，OBS 直接做「窗口采集」即可。OBS 兼容模式开/关显示完全一致（均为近黑背景、视觉等同纯黑、采集干净），开关切换不会影响文字显示。窗口被手动关闭后，此处的状态会同步更新。</p>
                                 <div class="subtitle-grid subtitle-grid-window-ctrl">
-                                    <div class="control-group">
+                                    <div class="control-group switch-row">
                                         <label>窗口置顶</label>
                                         <div class="switch" id="subtitle-always-on-top" data-on="true">
                                             <div class="switch-knob"></div>
                                         </div>
                                     </div>
-                                    <div class="control-group">
+                                    <div class="control-group switch-row">
                                         <label>点击穿透</label>
                                         <div class="switch" id="subtitle-click-through" data-on="false">
                                             <div class="switch-knob"></div>
                                         </div>
                                     </div>
-                                    <div class="control-group">
+                                    <div class="control-group switch-row">
                                         <label>OBS 捕捉兼容模式（纯黑背景）</label>
                                         <div class="switch" id="subtitle-obs-mode" data-on="true">
                                             <div class="switch-knob"></div>
                                         </div>
                                     </div>
-                                    <div class="control-group">
+                                    <div class="control-group switch-row">
                                         <label>窗口高度自适应内容</label>
                                         <div class="switch" id="subtitle-auto-fit" data-on="true">
                                             <div class="switch-knob"></div>

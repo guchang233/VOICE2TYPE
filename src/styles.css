@@ -1065,10 +1065,10 @@ html, body {
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
-    padding: 18px 24px 28px;
+    padding: 14px 20px 22px;
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 10px;
 }
 
 .subtitle-preview-section {
@@ -1160,7 +1160,7 @@ html, body {
     padding: 0;
     display: grid;
     grid-template-columns: 1fr;
-    gap: 12px;
+    gap: 10px;
 }
 
 /* ===== 自定义元素管理 ===== */
@@ -1448,7 +1448,7 @@ html, body {
     background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-secondary) 100%);
     border: 1px solid var(--border-color);
     border-radius: 10px;
-    padding: 14px 18px 16px;
+    padding: 12px 16px 14px;
     transition: border-color 0.2s ease;
 }
 
@@ -1586,8 +1586,8 @@ html, body {
     color: var(--text-tertiary);
     text-transform: uppercase;
     letter-spacing: 0.8px;
-    margin-bottom: 14px;
-    padding-bottom: 10px;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
     border-bottom: 1px solid var(--border-color);
     display: flex;
     align-items: center;
@@ -1644,23 +1644,98 @@ html, body {
 .subtitle-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 12px 16px;
+    gap: 10px 14px;
 }
 
+/* 三列紧凑网格（外观样式 / 元素样式） */
+.subtitle-grid-3 {
+    grid-template-columns: repeat(3, 1fr);
+}
+
+/* 跨满整行 */
+.subtitle-card .control-group.span-full {
+    grid-column: 1 / -1;
+}
+
+/* 控件组：标签与数值同排显示（一行标题行 + 一行控件），显著压缩纵向空间 */
 .subtitle-card .control-group {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    column-gap: 8px;
+    row-gap: 5px;
+}
+
+.subtitle-card .control-group > label {
+    grid-column: 1;
+    grid-row: 1;
+    min-width: 0;
+}
+
+.subtitle-card .control-group > .value-display {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
+    white-space: nowrap;
+}
+
+/* 控件本身占据整行（滑块/下拉/输入框/分段选择/开关/说明文字/按钮组） */
+.subtitle-card .control-group > input,
+.subtitle-card .control-group > select,
+.subtitle-card .control-group > .segmented-control,
+.subtitle-card .control-group > .switch,
+.subtitle-card .control-group > .window-ctrl-buttons,
+.subtitle-card .control-group > p {
+    grid-column: 1 / -1;
+}
+
+/* 开关行：标签在左、开关在右，单行显示 */
+.subtitle-card .control-group.switch-row {
     display: flex;
-    flex-direction: column;
-    gap: 6px;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    row-gap: 0;
+}
+
+.subtitle-card .control-group.switch-row label {
+    flex: 1;
+    min-width: 0;
 }
 
 .subtitle-card .control-group label {
     font-size: 11px;
     color: var(--text-secondary);
     font-weight: 500;
+    line-height: 1.4;
+}
+
+/* 子分组标题（外观样式卡片内的「字体/文字/背景/布局」等小节） */
+.subtitle-sub-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 14px 0 8px;
+    font-family: var(--font-display);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+    user-select: none;
+}
+
+.subtitle-sub-title::before {
+    content: '';
+    width: 3px;
+    height: 10px;
+    background: var(--accent-cyan);
+    border-radius: 2px;
 }
 
 .control-group-inline {
-    grid-column: span 2;
+    grid-column: auto;
     display: flex;
     gap: 24px;
     align-items: center;
@@ -1681,20 +1756,21 @@ html, body {
     grid-template-columns: 1fr;
 }
 
-/* 窗口控制网格：4 列布局，让开关与按钮分行 */
+/* 窗口控制网格：2 列布局，开关行内显示 */
 .subtitle-grid-window-ctrl {
     grid-template-columns: repeat(2, 1fr);
-    gap: 14px 20px;
+    gap: 10px 20px;
 }
 
-.subtitle-action-row {
+.subtitle-card .control-group.subtitle-action-row {
     grid-column: span 2;
-    flex-direction: row !important;
+    display: flex;
+    flex-direction: row;
     align-items: center;
     justify-content: space-between;
     gap: 16px;
     padding-top: 10px;
-    margin-top: 4px;
+    margin-top: 2px;
     border-top: 1px dashed var(--border-color);
 }
 
