@@ -356,7 +356,9 @@
                 const el = lines[i];
                 if (el.classList.contains('off')) continue;
                 const isCurrent = el.classList.contains('current');
-                const r = Math.max(1, Math.ceil(el.offsetHeight / lh));
+                // 用 round 而非 ceil：offsetHeight 为整数 px，行高为小数（如 44.8px），
+                // ceil 会把 45/44.8=1.004 取成 2，导致每行被多算一行、行数设置与显示不同步
+                const r = Math.max(1, Math.round(el.offsetHeight / lh));
                 if (!isCurrent && rows + r > maxLines) {
                     el.classList.add('off');
                     continue;
