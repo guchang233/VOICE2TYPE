@@ -80,6 +80,7 @@ impl AppState {
         let whisper_model_dir = config.whisper_models_dir();
         let whisper_engine = Arc::new(std::sync::Mutex::new(LocalWhisperEngine::new(whisper_model_dir)));
         let subtitle = Arc::new(SubtitleEngine::new(config.clone()));
+        SubtitleEngine::register(&subtitle);
 
         // 读回持久化的 auto 检测语言，避免重启后首调再做语言检测
         let persisted_lang = config.local_whisper_detected_language();

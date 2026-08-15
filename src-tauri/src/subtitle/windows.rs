@@ -47,10 +47,12 @@ pub fn apply_window_props(window: &WebviewWindow, win: &SubtitleWindow) {
 }
 
 /// 构建字幕窗口（完整窗口：带标题栏、不透明、出现在任务栏，可被 OBS 稳定采集）。
+/// `on_close`：窗口被手动关闭（标题栏 X）时调用（用于停止字幕会话、同步主界面按钮）。
 pub fn build_window(
     app: &AppHandle,
     win: &SubtitleWindow,
     config: &Arc<ConfigManager>,
+    on_close: Option<Arc<dyn Fn() + Send + Sync>>,
 ) -> Option<WebviewWindow> {
     let label = window_label(&win.id);
     let mut builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("subtitle.html".into()))
@@ -74,7 +76,7 @@ pub fn build_window(
             return None;
         }
     };
-    attach_window_events(&window, &win.id, config);
+    attach_window_events(&window, &win.id, config, on_close);
     Some(window)
 }
 
@@ -83,12 +85,13 @@ pub fn ensure_window(
     app: &AppHandle,
     win: &SubtitleWindow,
     config: &Arc<ConfigManager>,
+    on_close: Option<Arc<dyn Fn() + Send + Sync>>,
 ) -> Option<WebviewWindow> {
     let label = window_label(&win.id);
     if let Some(window) = app.get_webview_window(&label) {
         return Some(window);
     }
-    build_window(app, win, config)
+    build_window(app, win, config, on_close)
 }
 
 /// 窗口几何变化 → 防抖持久化到配置
@@ -124,9 +127,15 @@ fn debounce_save_geometry(window: &WebviewWindow, window_id: &str, config: &Arc<
 }
 
 /// 为字幕窗口挂接事件：
-/// - 关闭（标题栏 X）→ 隐藏窗口，并广播窗口状态给主窗口（设置面板同步显示「窗口已关闭」）；
+/// - 关闭（标题栏 X）→ 隐藏窗口 + 广播窗口状态 + 调用 `on_close`（停止会话，
+///   让主界面按钮回到「开启实时字幕」）——窗口状态与会话状态强关联；
 /// - 移动/缩放 → 保存几何。
-pub fn attach_window_events(window: &WebviewWindow, window_id: &str, config: &Arc<ConfigManager>) {
+pub fn attach_window_events(
+    window: &WebviewWindow,
+    window_id: &str,
+    config: &Arc<ConfigManager>,
+    on_close: Option<Arc<dyn Fn() + Send + Sync>>,
+) {
     use tauri::Emitter;
 
     let win = window.clone();
@@ -142,6 +151,10 @@ pub fn attach_window_events(window: &WebviewWindow, window_id: &str, config: &Ar
                 "subtitle-window-state",
                 serde_json::json!({ "windowId": id, "visible": false }),
             );
+            // 停止字幕会话（若在运行），主界面「开启/停止字幕」按钮随之更新
+            if let Some(cb) = on_close.as_ref() {
+                cb();
+            }
         }
         tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
             debounce_save_geometry(&win, &id, &config);

@@ -23,8 +23,9 @@ pub mod translate;
 pub mod windows;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, Mutex as StdMutex, Weak};
 
+use once_cell::sync::OnceCell;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, Mutex};
 
@@ -33,6 +34,9 @@ use crate::subtitle::payload::{SignalPayload, SnapshotPayload, ThemePayload};
 use crate::subtitle::state::SharedState;
 use crate::subtitle::transcript::Transcript;
 use crate::subtitle::translate::TranslationHub;
+
+/// 引擎弱引用（供窗口关闭回调使用，避免循环强引用）
+static SUBTITLE_ENGINE: OnceCell<Weak<SubtitleEngine>> = OnceCell::new();
 
 /// 字幕服务：中央引擎 —— 权威状态、会话生命周期、窗口管理、信号发射。
 pub struct SubtitleEngine {
@@ -75,10 +79,32 @@ impl SubtitleEngine {
         }));
     }
 
-    /// 应用启动时为主窗口（静态 subtitle 窗口）挂接事件并应用窗口属性（黑底）。
+    /// 注册引擎弱引用（AppState 创建引擎后调用）
+    pub fn register(engine: &Arc<Self>) {
+        let _ = SUBTITLE_ENGINE.set(Arc::downgrade(engine));
+    }
+
+    /// 窗口关闭回调：停止字幕会话（若在运行）。
+    /// 由窗口的 CloseRequested 事件触发，保证「窗口关闭 ⇔ 会话停止 ⇔ 主界面按钮更新」。
+    fn close_callback() -> Arc<dyn Fn() + Send + Sync> {
+        Arc::new(|| {
+            if let Some(engine) = SUBTITLE_ENGINE.get().and_then(|w| w.upgrade()) {
+                tauri::async_runtime::spawn(async move {
+                    let _ = engine.stop().await;
+                });
+            }
+        })
+    }
+
+    /// 应用启动时为主窗口（静态 subtitle 窗口）挂接事件并应用窗口属性。
     pub fn init_primary_window(&self, app: &AppHandle) {
         if let Some(window) = app.get_webview_window("subtitle") {
-            windows::attach_window_events(&window, PRIMARY_WINDOW_ID, &self.config);
+            windows::attach_window_events(
+                &window,
+                PRIMARY_WINDOW_ID,
+                &self.config,
+                Some(Self::close_callback()),
+            );
             if let Some(primary) = self
                 .config
                 .get_subtitle_windows()
@@ -105,7 +131,9 @@ impl SubtitleEngine {
         Ok(ThemePayload::build(win))
     }
 
-    /// 显示/隐藏指定字幕窗口（显示即视为重新启用该窗口），并同步窗口状态给主窗口 UI
+    /// 显示/隐藏指定字幕窗口，与会话状态强关联：
+    /// - 隐藏（含标题栏关闭）→ 同时停止字幕会话，主界面按钮回到「开启实时字幕」；
+    /// - 显示 → 若会话未运行则自动启动会话（连带显示所有启用的字幕窗口）。
     pub async fn show_window(&self, app: &AppHandle, window_id: &str, show: bool) -> Result<(), String> {
         let label = windows::window_label(window_id);
         if !show {
@@ -113,8 +141,13 @@ impl SubtitleEngine {
                 let _ = window.hide();
             }
             emit_window_state(app, window_id, false);
+            // 强关联：隐藏窗口 = 停止会话
+            if self.running.load(Ordering::SeqCst) {
+                self.stop().await?;
+            }
             return Ok(());
         }
+        // 显示 = 重新启用该窗口
         let win = self
             .config
             .get_subtitle_windows()
@@ -123,7 +156,15 @@ impl SubtitleEngine {
             .ok_or("字幕窗口不存在")?;
         self.config.set_subtitle_window_enabled(window_id, true);
         let _ = self.config.save();
-        if let Some(window) = windows::ensure_window(app, &win, &self.config) {
+        // 强关联：会话未运行 → 先启动会话（start 会显示所有启用的窗口）
+        if !self.running.load(Ordering::SeqCst) {
+            let config = self.config.clone();
+            self.start(config).await?;
+            return Ok(());
+        }
+        if let Some(window) =
+            windows::ensure_window(app, &win, &self.config, Some(Self::close_callback()))
+        {
             windows::apply_window_props(&window, &win);
             let _ = window.show();
             let _ = window.set_focus();
@@ -243,7 +284,7 @@ impl SubtitleEngine {
 
         // 1. 确保窗口存在、应用窗口属性、显示；窗口显示后自行拉取主题与快照
         for win in &enabled {
-            if let Some(window) = windows::ensure_window(&app, win, &config) {
+            if let Some(window) = windows::ensure_window(&app, win, &config, Some(Self::close_callback())) {
                 windows::apply_window_props(&window, win);
                 let _ = window.show();
                 emit_window_state(&app, &win.id, true);
@@ -325,6 +366,8 @@ impl SubtitleEngine {
                         } else {
                             let _ = window.destroy();
                         }
+                        // 强关联：同步「窗口已关闭」状态给主界面设置面板
+                        emit_window_state(&app_handle, &win.id, false);
                     }
                 }
                 let _ = app_handle.emit("subtitle-session-stopped", serde_json::json!({ "running": false }));
