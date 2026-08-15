@@ -157,6 +157,7 @@ fn migrate_scene(scene: &Map<String, Value>, flat: &Map<String, Value>) -> Value
         "anchorX": str_of(&style, &["containerAlignX", "container_align_x"], "center"),
         "anchorY": str_of(&style, &["containerAlignY", "container_align_y"], "bottom"),
         "maxWidthPct": u32_of(&style, &["boxMaxWidth", "box_max_width"], 100),
+        "autoWrap": bool_of(&style, &["autoWrap", "auto_wrap"], false),
         "translation": {
             "size": u32_of(&style, &["translationFontSize", "translation_font_size"], u32_of(flat, &["subtitleTranslationFontSize", "subtitle_translation_font_size"], 24)),
             "weight": u32_of(&style, &["translationFontWeight", "translation_font_weight"], u32_of(flat, &["subtitleTranslationFontWeight", "subtitle_translation_font_weight"], 400)),

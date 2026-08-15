@@ -448,7 +448,10 @@
             cur.textContent = state.previewInterim ? '临时识别结果预览效果...' : '实时字幕预览效果';
 
             // 层级：历史行在上，当前行（定稿/临时）永远在最下
-            const histCount = Math.max(0, Math.min(theme.maxLines || 3, 6) - 1);
+            // 自动分行关闭时（默认）不显示历史行示例
+            const histCount = theme.autoWrap
+                ? Math.max(0, Math.min(theme.maxLines || 3, 6) - 1)
+                : 0;
             for (let i = 0; i < histCount; i++) {
                 const hline = document.createElement('div');
                 hline.className = 'sub-preview-history-line';
@@ -644,6 +647,7 @@
             anchorX: 'center',
             anchorY: 'bottom',
             maxWidthPct: 100,
+            autoWrap: false,
             fontColor: '#ffffff',
             translation: { size: 24, weight: 400, color: '#ffffff', opacity: 0.85, prefix: '' },
             speaker: { color: '#818cf8', size: 16, prefix: '' },
@@ -737,6 +741,7 @@
             anchorX: src.anchorX || base.anchorX,
             anchorY: src.anchorY || base.anchorY,
             maxWidthPct: src.maxWidthPct != null ? src.maxWidthPct : base.maxWidthPct,
+            autoWrap: !!src.autoWrap,
             fontColor: src.fontColor || base.fontColor,
             translation: { ...base.translation, ...(src.translation || {}) },
             speaker: { ...base.speaker, ...(src.speaker || {}) },
@@ -1940,6 +1945,8 @@
         if (ayBtn) moveSegIndicator(ayBtn);
 
         setVal('subtitle-max-width', theme.maxWidthPct != null ? theme.maxWidthPct : 100);
+        const autoWrapSw = $('#subtitle-auto-wrap');
+        if (autoWrapSw) autoWrapSw.dataset.on = theme.autoWrap ? 'true' : 'false';
 
         // 译文样式
         const tr = theme.translation || {};
@@ -2892,6 +2899,18 @@
                 italicSw.dataset.on = italicSw.dataset.on === 'true' ? 'false' : 'true';
                 const theme = getCurrentTheme();
                 if (theme) theme.italic = italicSw.dataset.on === 'true';
+                markPresetCustom();
+                updateSubtitlePreview();
+            });
+        }
+
+        // 完成句段自动分行（历史行）开关
+        const autoWrapSw = $('#subtitle-auto-wrap');
+        if (autoWrapSw) {
+            autoWrapSw.addEventListener('click', () => {
+                autoWrapSw.dataset.on = autoWrapSw.dataset.on === 'true' ? 'false' : 'true';
+                const theme = getCurrentTheme();
+                if (theme) theme.autoWrap = autoWrapSw.dataset.on === 'true';
                 markPresetCustom();
                 updateSubtitlePreview();
             });

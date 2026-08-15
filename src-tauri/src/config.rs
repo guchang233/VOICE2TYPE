@@ -417,6 +417,10 @@ pub struct SubtitleTheme {
     pub anchor_y: String,
     /// 卡片最大宽度（窗口宽度的百分比 30-100）
     pub max_width_pct: u32,
+    /// 完成句段自动分行（显示历史行）。
+    /// false（默认）= 所有文字保持在当前行连续显示，完成句段不跳到新行；
+    /// true = 完成句段跳到上方历史行，当前行继续显示新内容。
+    pub auto_wrap: bool,
     pub translation: SubtitleTextStyle,
     pub speaker: SubtitleSpeakerStyle,
     pub timestamp: SubtitleTimestampStyle,
@@ -449,6 +453,7 @@ impl Default for SubtitleTheme {
             anchor_x: "center".to_string(),
             anchor_y: "bottom".to_string(),
             max_width_pct: 100,
+            auto_wrap: false,
             translation: SubtitleTextStyle::default(),
             speaker: SubtitleSpeakerStyle::default(),
             timestamp: SubtitleTimestampStyle::default(),

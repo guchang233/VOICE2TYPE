@@ -367,6 +367,33 @@
             }
         }
 
+        /// 关闭「完成句段自动分行」时，当前行没有历史行可裁，长文本会无限增长突破
+        /// maxLines。这里对当前行做「尾部窗口」：只保留最近能放进 maxLines 行内的
+        /// 文字（定稿部分可从开头裁剪，临时部分永远保留），行数设置依然生效。
+        function fitCurrentToMax(linesEl, maxLines) {
+            if (linesEl.parentElement.hidden) return;
+            const lh = parseFloat(getComputedStyle(linesEl.parentElement).lineHeight);
+            if (!lh || lh <= 0) return;
+            const curRow = linesEl.querySelector('.line.current');
+            if (!curRow || curRow.classList.contains('off')) return;
+            const defSpan = curRow.querySelector('.seg-def');
+            if (!defSpan) return;
+            const full = defSpan.textContent;
+            if (!full) return;
+            const rowsOf = () => Math.max(1, Math.round(curRow.offsetHeight / lh));
+            if (rowsOf() <= maxLines) return;
+            // 二分：保留最后 keep 个字符时整行 <= maxLines
+            let lo = 0, hi = full.length, keep = 0;
+            while (lo <= hi) {
+                const mid = (lo + hi) >> 1;
+                defSpan.textContent = full.slice(full.length - mid);
+                if (rowsOf() <= maxLines) { keep = mid; lo = mid + 1; } else { hi = mid - 1; }
+            }
+            if (keep < full.length) {
+                defSpan.textContent = '…' + full.slice(full.length - Math.max(0, keep - 1));
+            }
+        }
+
         // ===== 快照渲染 =====
         function renderSnapshot(s) {
             if (!s) return;
@@ -375,10 +402,13 @@
             const tr = s.translation || {};
             const status = str(s.status, '等待语音输入...');
             const maxLines = Math.max(1, num(theme && theme.theme ? theme.theme.maxLines : 3, 3));
+            // 完成句段自动分行（历史行）：关闭（默认）时所有文字保持在当前行连续显示，
+            // 完成句段不跳到新行；开启时才显示历史行
+            const autoWrap = !!(theme && theme.theme && theme.theme.autoWrap);
 
             // 原文（A 源）
-            const shownA = sliceHistory(a.history);
-            const defTail = (a.tail || '').trim();
+            const shownA = autoWrap ? sliceHistory(a.history) : [];
+            const defTail = autoWrap ? (a.tail || '').trim() : (a.definite || '').trim();
             const indef = (a.indefinite || '').trim();
             viewOriginal.update({
                 history: shownA,
@@ -390,8 +420,8 @@
             });
 
             // 副原文（B 源）
-            const shownB = sliceHistory(b.history);
-            const bDef = (b.tail || '').trim();
+            const shownB = autoWrap ? sliceHistory(b.history) : [];
+            const bDef = autoWrap ? (b.tail || '').trim() : (b.definite || '').trim();
             const bInd = (b.indefinite || '').trim();
             viewSecondary.update({
                 history: shownB,
@@ -402,7 +432,7 @@
             });
 
             // 译文（当前行视为“临时”状态）
-            const shownT = sliceHistory(tr.history);
+            const shownT = autoWrap ? sliceHistory(tr.history) : [];
             const tCur = (tr.current || '').trim();
             const tPrefix = (theme && theme.theme && theme.theme.translation) ? (theme.theme.translation.prefix || '') : '';
             viewTranslation.update({
@@ -418,6 +448,14 @@
             trimLinesToMax(elOriginal.querySelector('.lines'), maxLines);
             trimLinesToMax(elSecondary.querySelector('.lines'), maxLines);
             trimLinesToMax(elTranslation.querySelector('.lines'), maxLines);
+
+            // 未开启自动分行时：没有历史行可裁，改为对当前行做尾部窗口裁剪，
+            // 保证 maxLines 仍然约束显示行数（文字不会无限向后增长）
+            if (!autoWrap) {
+                fitCurrentToMax(elOriginal.querySelector('.lines'), maxLines);
+                fitCurrentToMax(elSecondary.querySelector('.lines'), maxLines);
+                fitCurrentToMax(elTranslation.querySelector('.lines'), maxLines);
+            }
 
             // 说话人
             const speaker = (a.speaker || '').trim();
