@@ -18,7 +18,6 @@
         }
         /* OBS 兼容模式：窗口透明失效（DComp 被禁用），用实底黑保证采集干净 */
         body.obs { background: #000; }
-        body.obs #stage { -webkit-app-region: no-drag; app-region: no-drag; }
         body.obs #box { backdrop-filter: none; -webkit-backdrop-filter: none; }
 
         /* 舞台：对齐锚点由 JS 按设置写入 justify-content / align-items */
@@ -30,8 +29,8 @@
             justify-content: flex-end;
             align-items: center;
             padding: 16px;
-            -webkit-app-region: drag;
-            app-region: drag;
+            /* 不使用 app-region 拖动：Windows 模态移动循环会让透明窗口内容
+               闪烁/消失（tauri #14764），改为 JS 手动拖动（见脚本） */
         }
 
         /* 卡片：背景/模糊/内边距/方向全部走 CSS 变量，主题变更只改变量 */
@@ -674,6 +673,45 @@
         tauri.event.listen('tauri://focus', () => {
             pullAll();
         });
+
+        // ===== 手动拖动 =====
+        // Windows 模态移动循环（app-region: drag 触发）会让透明窗口内容
+        // 闪烁/消失（tauri #14764）。这里改为手动拖动：按住舞台任意位置，
+        // 用 setPosition 跟随鼠标移动，窗口内容全程保持渲染。
+        {
+            const getWin = tauri.window && tauri.window.getCurrentWindow;
+            const PhysicalPosition = tauri.window && tauri.window.PhysicalPosition;
+            let drag = null; // { sx, sy, x, y, scale }
+
+            stage.addEventListener('pointerdown', async (e) => {
+                if (e.button !== 0 || !getWin || !PhysicalPosition) return;
+                let win;
+                try { win = await getWin(); } catch (err) { return; }
+                let scale = 1;
+                try { scale = await win.scaleFactor(); } catch (err) {}
+                let pos;
+                try { pos = await win.outerPosition(); } catch (err) { return; }
+                drag = { sx: e.screenX, sy: e.screenY, x: pos.x, y: pos.y, scale: scale || 1 };
+                try { stage.setPointerCapture(e.pointerId); } catch (err) {}
+            });
+
+            stage.addEventListener('pointermove', async (e) => {
+                if (!drag || !getWin || !PhysicalPosition) return;
+                const dx = (e.screenX - drag.sx) * drag.scale;
+                const dy = (e.screenY - drag.sy) * drag.scale;
+                let win;
+                try { win = await getWin(); } catch (err) { return; }
+                win.setPosition(new PhysicalPosition(drag.x + dx, drag.y + dy))
+                    .catch(() => {});
+            });
+
+            const endDrag = () => {
+                drag = null;
+            };
+            stage.addEventListener('pointerup', endDrag);
+            stage.addEventListener('pointercancel', endDrag);
+            stage.addEventListener('lostpointercapture', endDrag);
+        }
 
         // 初始拉取
         pullAll();

@@ -54,17 +54,30 @@ fn main() {
     // - OBS 模式开：禁用 DirectComposition + GPU 合成，回退 GDI，使 OBS 窗口采集(BitBlt)
     //   既能捕捉到画面、又能持续刷新（否则画面会静止）；
     // - OBS 模式关：保持 DComp，字幕窗口透明可用（背景真正透明而非黑底）。
+    // 注意：把标志追加到可能已存在的环境变量中（旧实现会因变量已存在而静默跳过，
+    // 导致 DComp 未被禁用、OBS 采集仍为黑屏）。
     let obs_mode = config_manager
         .get_config()
         .subtitle
         .windows
         .iter()
         .any(|w| w.obs_mode);
-    if obs_mode && std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").is_err() {
-        std::env::set_var(
-            "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-            "--disable-direct-composition --disable-gpu-compositing",
-        );
+    if obs_mode {
+        let mut args = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").unwrap_or_default();
+        let mut changed = false;
+        for flag in ["--disable-direct-composition", "--disable-gpu-compositing"] {
+            if !args.contains(flag) {
+                if !args.trim().is_empty() {
+                    args.push(' ');
+                }
+                args.push_str(flag);
+                changed = true;
+            }
+        }
+        if changed {
+            std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", args);
+            log::info!("[字幕] OBS 兼容模式：已启用 GDI 合成回退");
+        }
     }
 
     let _ = CONFIG_GLOBAL.set(config_manager.clone());

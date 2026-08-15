@@ -324,20 +324,6 @@
             btn.classList.remove('active');
             btn.innerHTML = '<span class="btn-indicator"></span>开启实时字幕';
         }
-        updateSidebarSubtitleState();
-    }
-
-    /// 侧边栏「实时字幕」快捷开关状态（运行中：绿灯点亮）
-    function updateSidebarSubtitleState() {
-        const btn = $('#sidebar-subtitle-toggle');
-        if (!btn) return;
-        if (state.isSubtitleActive) {
-            btn.classList.add('active');
-            btn.title = '停止实时字幕';
-        } else {
-            btn.classList.remove('active');
-            btn.title = '开启实时字幕';
-        }
     }
 
     /// 解析预览占位符（{time} {date} {datetime} {text} {translation} {speaker}）
@@ -2698,15 +2684,6 @@
                 setTimeout(refreshAllIndicators, 180);
                 setTimeout(refreshAllIndicators, 320);
             });
-        }
-
-        // 侧边栏「实时字幕」快捷开关：直接启停字幕会话（与视图内的按钮同源）
-        const sidebarSubtitleBtn = $('#sidebar-subtitle-toggle');
-        if (sidebarSubtitleBtn) {
-            sidebarSubtitleBtn.addEventListener('click', () => {
-                toggleSubtitle();
-            });
-            updateSidebarSubtitleState();
         }
     }
 

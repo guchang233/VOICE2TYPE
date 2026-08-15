@@ -75,10 +75,22 @@ impl SubtitleEngine {
         }));
     }
 
-    /// 应用启动时为主窗口（静态 subtitle 窗口）挂接事件
+    /// 应用启动时为主窗口（静态 subtitle 窗口）挂接事件。
+    /// 注意：**不要销毁重建窗口**——OBS 采集源绑定窗口 HWND，
+    /// 重建会让 OBS 采集源指向已销毁的 HWND 而黑屏。
+    /// OBS 兼容靠「启动时 GDI 回退环境变量（main.rs）+ 运行时不透明黑底背景」实现。
     pub fn init_primary_window(&self, app: &AppHandle) {
         if let Some(window) = app.get_webview_window("subtitle") {
             windows::attach_window_events(&window, PRIMARY_WINDOW_ID, &self.config);
+            // 若主窗口开启了 OBS 模式，立即应用不透明黑底
+            if let Some(primary) = self
+                .config
+                .get_subtitle_windows()
+                .into_iter()
+                .find(|w| w.id == PRIMARY_WINDOW_ID)
+            {
+                windows::apply_window_props(&window, &primary);
+            }
         }
     }
 
@@ -114,7 +126,7 @@ impl SubtitleEngine {
             .ok_or("字幕窗口不存在")?;
         self.config.set_subtitle_window_enabled(window_id, true);
         let _ = self.config.save();
-        if let Some(window) = windows::ensure_window(app, &win, &self.config).await {
+        if let Some(window) = windows::ensure_window(app, &win, &self.config) {
             windows::apply_window_props(&window, &win);
             let _ = window.show();
             let _ = window.set_focus();
@@ -143,37 +155,43 @@ impl SubtitleEngine {
         self.config.set_subtitle_window_flag(window_id, flag, value);
         let _ = self.config.save();
         let label = windows::window_label(window_id);
-        if let Some(window) = app.get_webview_window(&label) {
-            match flag {
-                "always_on_top" => {
+        match flag {
+            "always_on_top" => {
+                if let Some(window) = app.get_webview_window(&label) {
                     let _ = window.set_always_on_top(value);
                 }
-                "click_through" => {
+            }
+            "click_through" => {
+                if let Some(window) = app.get_webview_window(&label) {
                     let _ = window.set_ignore_cursor_events(value);
                 }
-                "obs_mode" => {
-                    // OBS 模式切换 → 立即重应用窗口属性（不透明黑底/恢复透明）
-                    // 并让窗口重拉主题（黑底/关闭模糊策略），无需重启应用
-                    if let Some(win_cfg) = self
-                        .config
-                        .get_subtitle_windows()
-                        .iter()
-                        .find(|w| w.id == window_id)
-                        .cloned()
-                    {
-                        windows::apply_window_props(&window, &win_cfg);
-                    }
-                    let _ = window.set_always_on_top(true);
-                    let _ = window.emit(
-                        "subtitle-signal",
-                        SignalPayload {
-                            kind: "theme".to_string(),
-                            version: self.state.version(),
-                        },
-                    );
-                }
-                _ => {}
             }
+            "obs_mode" => {
+                // OBS 模式切换 → 立即切换窗口背景（不透明黑底/恢复透明）
+                // 并让窗口重拉主题（黑底/关闭模糊策略）。
+                // 注意：**不重建窗口**——重建会改变 HWND，导致 OBS 采集源失效变黑。
+                // BitBlt 最佳兼容仍需重启应用（GDI 回退环境变量在启动时应用）。
+                if let Some(win_cfg) = self
+                    .config
+                    .get_subtitle_windows()
+                    .iter()
+                    .find(|w| w.id == window_id)
+                    .cloned()
+                {
+                    if let Some(window) = app.get_webview_window(&label) {
+                        windows::apply_background(&window, win_cfg.obs_mode);
+                        let _ = window.set_always_on_top(true);
+                        let _ = window.emit(
+                            "subtitle-signal",
+                            SignalPayload {
+                                kind: "theme".to_string(),
+                                version: self.state.version(),
+                            },
+                        );
+                    }
+                }
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -249,7 +267,7 @@ impl SubtitleEngine {
 
         // 1. 确保窗口存在、应用窗口属性、显示；窗口显示后自行拉取主题与快照
         for win in &enabled {
-            if let Some(window) = windows::ensure_window(&app, win, &config).await {
+            if let Some(window) = windows::ensure_window(&app, win, &config) {
                 windows::apply_window_props(&window, win);
                 let _ = window.show();
                 let _ = window.emit(

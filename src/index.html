@@ -1952,13 +1952,6 @@
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
                     <span class="nav-label">设置</span>
                 </div>
-                <div class="sidebar-quick-actions">
-                    <button class="sidebar-action-btn" id="sidebar-subtitle-toggle" type="button" title="开启 / 停止实时字幕">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path><line x1="9" y1="10" x2="15" y2="10"></line><line x1="9" y1="13" x2="13" y2="13"></line></svg>
-                        <span class="sidebar-action-label">实时字幕</span>
-                        <span class="sidebar-action-dot" id="sidebar-subtitle-dot"></span>
-                    </button>
-                </div>
                 <div class="sidebar-toggle" id="sidebar-toggle" title="展开/收起侧边栏">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg>
                 </div>
@@ -2405,7 +2398,7 @@
                         <div class="subtitle-cards subtitle-cards-full">
                             <div class="subtitle-card">
                                 <h4 class="subtitle-card-title">窗口控制</h4>
-                                <p class="subtitle-tip subtitle-tip-left">需先开启实时字幕显示窗口后这些控制才会生效。开启 OBS 捕捉兼容模式后字幕窗口会立即切换为不透明黑底（无需重启），确保 OBS 窗口采集能正常捕捉到画面；重启应用后兼容性最佳（自动回退 GDI 合成）。关闭后字幕背景恢复透明。</p>
+                                <p class="subtitle-tip subtitle-tip-left">需先开启实时字幕显示窗口后这些控制才会生效。开启 OBS 捕捉兼容模式后，字幕窗口会立即切换为不透明黑底；<b>重启应用后自动回退 GDI 合成</b>，OBS「窗口采集」即可稳定捕捉（若 BitBlt 方式仍黑屏，请在 OBS 中把采集方式改为「Windows 图形捕获」）。切换过程不会重建窗口，OBS 采集源保持有效。关闭后字幕背景恢复透明。</p>
                                 <div class="subtitle-grid subtitle-grid-window-ctrl">
                                     <div class="control-group">
                                         <label>窗口置顶</label>
