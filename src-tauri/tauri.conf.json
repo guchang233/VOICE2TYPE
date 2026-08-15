@@ -26,14 +26,14 @@
         "label": "subtitle",
         "title": "Voice2Type 实时字幕",
         "width": 1200,
-        "height": 120,
+        "height": 180,
         "x": 360,
         "y": 900,
-        "transparent": true,
-        "decorations": false,
+        "transparent": false,
+        "decorations": true,
         "resizable": true,
         "alwaysOnTop": true,
-        "skipTaskbar": true,
+        "skipTaskbar": false,
         "url": "subtitle.html",
         "visible": false
       }

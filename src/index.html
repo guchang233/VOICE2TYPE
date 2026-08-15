@@ -2398,7 +2398,7 @@
                         <div class="subtitle-cards subtitle-cards-full">
                             <div class="subtitle-card">
                                 <h4 class="subtitle-card-title">窗口控制</h4>
-                                <p class="subtitle-tip subtitle-tip-left">需先开启实时字幕显示窗口后这些控制才会生效。开启 OBS 捕捉兼容模式后，字幕窗口会立即切换为不透明黑底；<b>重启应用后自动回退 GDI 合成</b>，OBS「窗口采集」即可稳定捕捉（若 BitBlt 方式仍黑屏，请在 OBS 中把采集方式改为「Windows 图形捕获」）。切换过程不会重建窗口，OBS 采集源保持有效。关闭后字幕背景恢复透明。</p>
+                                <p class="subtitle-tip subtitle-tip-left">字幕窗口现在是完整的普通窗口，OBS 直接做「窗口采集」即可。若 BitBlt 方式黑屏，请在 OBS 采集源里把采集方式改为「Windows 图形捕获」。开启 OBS 捕捉兼容模式会把背景换成纯黑，让采集画面更干净。</p>
                                 <div class="subtitle-grid subtitle-grid-window-ctrl">
                                     <div class="control-group">
                                         <label>窗口置顶</label>

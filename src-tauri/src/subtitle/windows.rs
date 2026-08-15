@@ -34,19 +34,15 @@ pub fn window_label(window_id: &str) -> String {
     }
 }
 
-/// 按 OBS 模式设置窗口背景：
-/// - OBS 模式：不透明黑底，保证 OBS 窗口采集（BitBlt/WGC）都能捕捉到画面；
-/// - 普通模式：全透明（alpha=0）。
-///
-/// ⚠️ 绝对不能调 `set_background_color(None)`：
-/// tauri-runtime-wry 在 Windows 上会把 `None` 替换成不透明白 `(255,255,255,255)`，
-/// 透明窗口会变成白底、白色字幕文字完全不可见。
-/// 用 `Some(Color(0,0,0,0))` 表达「透明」：WebView 层 alpha=0 即全透明。
+/// 设置窗口背景（完整窗口始终不透明，保证渲染与 OBS 采集稳定）：
+/// - OBS 模式：纯黑底；
+/// - 普通模式：深灰底（与页面底色一致）。
+/// ⚠️ 禁止 `set_background_color(None)`：Windows 上会被替换成不透明白。
 pub fn apply_background(window: &WebviewWindow, obs_mode: bool) {
     let color = if obs_mode {
         Color(0, 0, 0, 255)
     } else {
-        Color(0, 0, 0, 0)
+        Color(0x17, 0x17, 0x17, 255)
     };
     let _ = window.set_background_color(Some(color));
 }
@@ -70,8 +66,7 @@ pub fn apply_window_props(window: &WebviewWindow, win: &SubtitleWindow) {
     }
 }
 
-/// 构建字幕窗口。
-/// OBS 模式构建为**不透明**窗口（黑底白字），其余模式保持透明。
+/// 构建字幕窗口（完整窗口：带标题栏、不透明、出现在任务栏，可被 OBS 稳定采集）。
 pub fn build_window(
     app: &AppHandle,
     win: &SubtitleWindow,
@@ -80,11 +75,11 @@ pub fn build_window(
     let label = window_label(&win.id);
     let mut builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("subtitle.html".into()))
         .title("Voice2Type 实时字幕")
-        .decorations(false)
+        .decorations(true)
         .resizable(true)
-        .transparent(!win.obs_mode)
+        .transparent(false)
         .always_on_top(win.always_on_top)
-        .skip_taskbar(true)
+        .skip_taskbar(false)
         .visible(false);
     if win.width > 0 && win.height > 0 {
         builder = builder.inner_size(win.width as f64, win.height as f64);
@@ -149,11 +144,8 @@ fn debounce_save_geometry(window: &WebviewWindow, window_id: &str, config: &Arc<
 }
 
 /// 为字幕窗口挂接事件：
-/// - 关闭 → 停用窗口；
-/// - 移动/缩放 → 保存几何（手动拖动经 setPosition 同样触发，无模态循环）。
-///
-/// 注意：**不要**在焦点等事件里调 `set_background_color(None)`——
-/// Windows 上 None 会被替换成不透明白，导致透明窗口白底、文字不可见。
+/// - 关闭（标题栏 X）→ 仅隐藏窗口（不改变启用状态，完整窗口随时可再显示）；
+/// - 移动/缩放 → 保存几何。
 pub fn attach_window_events(window: &WebviewWindow, window_id: &str, config: &Arc<ConfigManager>) {
     let win = window.clone();
     let id = window_id.to_string();
@@ -163,8 +155,6 @@ pub fn attach_window_events(window: &WebviewWindow, window_id: &str, config: &Ar
         tauri::WindowEvent::CloseRequested { api, .. } => {
             api.prevent_close();
             let _ = win.hide();
-            config.set_subtitle_window_enabled(&id, false);
-            let _ = config.save();
         }
         tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
             debounce_save_geometry(&win, &id, &config);
