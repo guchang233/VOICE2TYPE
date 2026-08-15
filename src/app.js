@@ -8,25 +8,12 @@
         isSubtitleActive: false,
         triggerMode: 'hold',
         dictationMode: 'batch',
-        subtitleAlign: 'center',
-        subtitleLayout: 'vertical',
-        subtitlePreset: 'clean',
-        subtitleAlign: 'center',
-        subtitleContainerAlignX: 'center',
-        subtitleContainerAlignY: 'bottom',
-        customElements: [],
-        elementOrder: ['speaker', 'original', 'original2', 'translation', 'timestamp'],
         transcriptSegments: [],
-        scenes: [],
-        currentSceneId: 'default',
+        subtitleWindows: [],
+        currentWindowId: 'primary',
+        selectedElementId: null,
         previewInterim: false,
         config: null,
-        subtitleSettings: {
-            fontSize: 32,
-            opacity: 60,
-            blur: 20,
-            lines: 3
-        },
         unlisteners: [],
         isMouseDown: false,
         settingsDirty: false,
@@ -337,40 +324,40 @@
             btn.classList.remove('active');
             btn.innerHTML = '<span class="btn-indicator"></span>开启实时字幕';
         }
+        updateSidebarSubtitleState();
     }
 
-    function ensurePreviewBox() {
-        const preview = $('.subtitle-preview');
-        if (!preview) return null;
-        let box = $('#subtitle-preview-box');
-        if (!box) {
-            const textEl = $('#subtitle-preview-text');
-            box = document.createElement('div');
-            box.id = 'subtitle-preview-box';
-            box.className = 'subtitle-preview-box';
-            if (textEl && textEl.parentNode === preview) {
-                preview.insertBefore(box, textEl);
-                box.appendChild(textEl);
-            } else {
-                preview.appendChild(box);
-            }
+    /// 侧边栏「实时字幕」快捷开关状态（运行中：绿灯点亮）
+    function updateSidebarSubtitleState() {
+        const btn = $('#sidebar-subtitle-toggle');
+        if (!btn) return;
+        if (state.isSubtitleActive) {
+            btn.classList.add('active');
+            btn.title = '停止实时字幕';
+        } else {
+            btn.classList.remove('active');
+            btn.title = '开启实时字幕';
         }
-        return box;
     }
 
-    function resolvePreviewPlaceholders(text) {
+    /// 解析预览占位符（{time} {date} {datetime} {text} {translation} {speaker}）
+    function resolvePreviewPlaceholders(text, samples) {
         if (!text) return '';
         const now = new Date();
+        const s = samples || {};
         const h = String(now.getHours()).padStart(2, '0');
         const m = String(now.getMinutes()).padStart(2, '0');
-        const s = String(now.getSeconds()).padStart(2, '0');
+        const sec = String(now.getSeconds()).padStart(2, '0');
         const y = now.getFullYear();
         const mo = String(now.getMonth() + 1).padStart(2, '0');
         const d = String(now.getDate()).padStart(2, '0');
         return text
-            .replace(/\{time\}/g, `${h}:${m}:${s}`)
+            .replace(/\{time\}/g, `${h}:${m}:${sec}`)
             .replace(/\{date\}/g, `${y}-${mo}-${d}`)
-            .replace(/\{datetime\}/g, `${y}-${mo}-${d} ${h}:${m}:${s}`);
+            .replace(/\{datetime\}/g, `${y}-${mo}-${d} ${h}:${m}:${sec}`)
+            .replace(/\{text\}/g, s.text || '实时字幕预览效果')
+            .replace(/\{translation\}/g, s.translation || '译文预览效果')
+            .replace(/\{speaker\}/g, s.speaker || '说话人1');
     }
 
     function formatPreviewTimestamp(format) {
@@ -407,287 +394,192 @@
         }
     }
 
-    function updateSubtitlePreview() {
-        const preview = $('.subtitle-preview');
-        const previewText = $('#subtitle-preview-text');
-        if (!preview || !previewText) return;
-        const box = ensurePreviewBox();
+    /// 为文本类预览元素应用基础排版（字体/对齐/间距/行高/阴影）
+    function applyPreviewTextBase(st, theme, textShadow) {
+        st.fontFamily = `"${theme.fontFamily || 'SimHei'}", sans-serif`;
+        st.textAlign = theme.textAlign || 'center';
+        st.letterSpacing = (theme.letterSpacing || 0) + 'px';
+        st.lineHeight = String(theme.lineHeight != null ? theme.lineHeight : 1.4);
+        st.textShadow = textShadow;
+        st.wordWrap = 'break-word';
+        st.wordBreak = 'break-word';
+    }
 
-        // 原文预览包裹容器（历史行 + 当前行，与真实窗口 #sub-original 结构一致）
-        let origWrap = $('#preview-original');
-        if (!origWrap) {
-            origWrap = document.createElement('div');
-            origWrap.id = 'preview-original';
-            origWrap.className = 'sub-preview-original';
-            box.appendChild(origWrap);
-            origWrap.appendChild(previewText);
+    /// 渲染单个预览元素节点（按 kind），返回 DOM 节点或 null（不显示时）
+    function renderPreviewElement(el, theme, textShadow) {
+        const kind = el.kind || 'text';
+
+        if (kind === 'divider') {
+            const node = document.createElement('div');
+            node.className = 'sub-preview-divider';
+            node.dataset.previewKind = kind;
+            const st = node.style;
+            st.height = '1px';
+            st.width = '100%';
+            st.background = el.color || '#ffffff';
+            st.opacity = String(typeof el.opacity === 'number' ? el.opacity : 0.3);
+            st.margin = '4px 0';
+            return node;
+        }
+        if (kind === 'spacer') {
+            const node = document.createElement('div');
+            node.className = 'sub-preview-spacer';
+            node.dataset.previewKind = kind;
+            node.style.height = (typeof el.fontSize === 'number' && el.fontSize > 0 ? el.fontSize : 12) + 'px';
+            return node;
         }
 
-        // 同步 bold 开关状态：与后端 push_subtitle_config 一致，bold = font_weight >= 700
-        const weightSelect = $('#subtitle-font-weight');
-        const boldSwitch = $('#subtitle-bold');
-        if (weightSelect && boldSwitch) {
-            const shouldBold = parseInt(weightSelect.value) >= 700;
-            boldSwitch.dataset.on = shouldBold ? 'true' : 'false';
-        }
+        // 原文元素：历史行 + 当前行（最终/临时两种状态）
+        if (kind === 'original') {
+            const wrap = document.createElement('div');
+            wrap.className = 'sub-preview-element sub-preview-original';
+            wrap.dataset.previewKind = kind;
+            applyPreviewTextBase(wrap.style, theme, textShadow);
+            wrap.style.fontSize = (theme.fontSize || 32) + 'px';
+            wrap.style.fontWeight = String(theme.fontWeight || 400);
+            wrap.style.fontStyle = theme.italic ? 'italic' : 'normal';
 
-        const scene = collectSceneFromUI();
-        if (!scene) return;
-        const cfg = sceneToFlat(scene);
+            const cur = document.createElement('div');
+            cur.style.color = state.previewInterim
+                ? (theme.interimColor || '#ffffff')
+                : (theme.fontColor || '#ffffff');
+            cur.style.opacity = state.previewInterim
+                ? String(theme.interimOpacity != null ? theme.interimOpacity : 0.7)
+                : '1';
+            cur.textContent = state.previewInterim ? '临时识别结果预览效果...' : '实时字幕预览效果';
 
-        const shadowColor = cfg.subtitle_text_shadow_color || '#000000';
-        const shadowStrength = typeof cfg.subtitle_text_shadow_strength === 'number' ? cfg.subtitle_text_shadow_strength : 4;
-        const textShadow = buildTextShadow(shadowColor, shadowStrength);
-
-        // ===== 容器对齐锚点 + 卡片最大宽度（与真实窗口一致） =====
-        const alignMap = { left: 'flex-start', center: 'center', right: 'flex-end', top: 'flex-start', bottom: 'flex-end' };
-        preview.style.justifyContent = alignMap[cfg.subtitle_container_align_x] || 'center';
-        preview.style.alignItems = alignMap[cfg.subtitle_container_align_y] || 'flex-end';
-        box.style.maxWidth = cfg.subtitle_box_max_width + '%';
-
-        // ===== 容器样式（背景/模糊/内边距/布局） =====
-        const bEl = box.style;
-        bEl.background = hexToRgba(cfg.subtitle_bg_color, cfg.subtitle_bg_opacity);
-        bEl.backdropFilter = `blur(${cfg.subtitle_blur}px)`;
-        bEl.webkitBackdropFilter = `blur(${cfg.subtitle_blur}px)`;
-        bEl.padding = `${cfg.subtitle_padding_y}px ${cfg.subtitle_padding_x}px`;
-        const layout = cfg.subtitle_layout || 'vertical';
-        bEl.flexDirection = layout === 'horizontal' ? 'row' : 'column';
-        bEl.alignItems = layout === 'horizontal' ? 'center' : 'stretch';
-        bEl.gap = layout === 'horizontal' ? '16px' : '6px';
-
-        // ===== 原文元素（样式作用于包裹容器，历史行继承） =====
-        const oEl = origWrap.style;
-        oEl.fontFamily = `"${cfg.subtitle_font_family}", sans-serif`;
-        oEl.fontSize = cfg.subtitle_font_size + 'px';
-        oEl.fontWeight = cfg.subtitle_bold ? '700' : String(cfg.subtitle_font_weight);
-        oEl.fontStyle = cfg.subtitle_italic ? 'italic' : 'normal';
-        oEl.textAlign = cfg.subtitle_text_align;
-        oEl.letterSpacing = cfg.subtitle_letter_spacing + 'px';
-        oEl.lineHeight = String(cfg.subtitle_line_height);
-        oEl.textShadow = textShadow;
-        oEl.display = cfg.subtitle_show_original !== false ? '' : 'none';
-
-        // 当前行文本元素：颜色/透明度跟随 最终/临时 状态
-        const tCur = previewText.style;
-        tCur.fontFamily = '';
-        tCur.fontSize = '';
-        tCur.fontWeight = '';
-        tCur.fontStyle = '';
-        tCur.letterSpacing = '';
-        tCur.lineHeight = '';
-        tCur.padding = '';
-        tCur.background = '';
-        tCur.backdropFilter = '';
-        tCur.webkitBackdropFilter = '';
-        tCur.textShadow = '';
-        tCur.webkitLineClamp = '';
-        tCur.display = '';
-        if (state.previewInterim) {
-            tCur.color = cfg.subtitle_interim_color;
-            tCur.opacity = String(cfg.subtitle_interim_opacity);
-            previewText.textContent = '临时识别结果预览效果...';
-        } else {
-            tCur.color = cfg.subtitle_font_color;
-            tCur.opacity = '1';
-            previewText.textContent = '实时字幕预览效果';
-        }
-
-        // 历史行示例（反映「显示行数」设置：maxLines-1 条，越老越淡）
-        const histCount = Math.max(0, Math.min(cfg.subtitle_max_lines, 6) - 1);
-        let histNodes = origWrap.querySelectorAll('.sub-preview-history-line');
-        while (histNodes.length < histCount) {
-            const h = document.createElement('div');
-            h.className = 'sub-preview-history-line';
-            origWrap.insertBefore(h, previewText);
-            histNodes = origWrap.querySelectorAll('.sub-preview-history-line');
-        }
-        while (histNodes.length > histCount) {
-            histNodes[0].remove();
-            histNodes = origWrap.querySelectorAll('.sub-preview-history-line');
-        }
-        origWrap.querySelectorAll('.sub-preview-history-line').forEach((h, i) => {
-            h.style.opacity = String(Math.min(0.95, 0.5 + 0.15 * i));
-            h.textContent = '历史字幕示例行';
-        });
-
-        // ===== 译文元素 =====
-        let transEl = $('#preview-translation');
-        if (cfg.subtitle_show_translation) {
-            if (!transEl) {
-                transEl = document.createElement('div');
-                transEl.id = 'preview-translation';
-                transEl.className = 'sub-preview-element';
-                box.appendChild(transEl);
-            }
-            const tEl = transEl.style;
-            tEl.display = '';
-            tEl.fontFamily = `"${cfg.subtitle_font_family}", sans-serif`;
-            tEl.fontSize = cfg.subtitle_translation_font_size + 'px';
-            tEl.fontWeight = String(cfg.subtitle_translation_font_weight);
-            tEl.color = cfg.subtitle_translation_font_color;
-            tEl.opacity = String(cfg.subtitle_translation_opacity);
-            tEl.textAlign = cfg.subtitle_text_align;
-            tEl.letterSpacing = cfg.subtitle_letter_spacing + 'px';
-            tEl.lineHeight = String(cfg.subtitle_line_height);
-            tEl.textShadow = textShadow;
-            if (cfg.subtitle_max_lines > 1) {
-                transEl.innerHTML = '';
+            // 层级：历史行在上，当前行（定稿/临时）永远在最下
+            const histCount = Math.max(0, Math.min(theme.maxLines || 3, 6) - 1);
+            for (let i = 0; i < histCount; i++) {
                 const hline = document.createElement('div');
                 hline.className = 'sub-preview-history-line';
-                hline.style.opacity = '0.6';
-                hline.textContent = '译文历史示例';
-                const cline = document.createElement('div');
-                cline.textContent = (cfg.subtitle_translation_prefix || '') + '译文预览效果';
-                transEl.appendChild(hline);
-                transEl.appendChild(cline);
-            } else {
-                transEl.textContent = (cfg.subtitle_translation_prefix || '') + '译文预览效果';
+                hline.style.opacity = String(Math.min(0.95, 0.5 + 0.15 * i));
+                hline.textContent = '历史字幕示例行';
+                wrap.appendChild(hline);
             }
-        } else if (transEl) {
-            transEl.style.display = 'none';
+            wrap.appendChild(cur);
+            return wrap;
         }
 
-        // ===== 副原文元素（双源同传模式的麦克风副字幕示例） =====
-        let orig2El = $('#preview-original2');
-        if (cfg.subtitle_show_original_secondary) {
-            if (!orig2El) {
-                orig2El = document.createElement('div');
-                orig2El.id = 'preview-original2';
-                orig2El.className = 'sub-preview-element';
-                box.appendChild(orig2El);
-            }
-            const o2 = orig2El.style;
-            o2.display = '';
-            o2.fontFamily = `"${cfg.subtitle_font_family}", sans-serif`;
-            o2.fontSize = Math.max(14, Math.round(cfg.subtitle_font_size * 0.8)) + 'px';
-            o2.fontWeight = String(cfg.subtitle_font_weight);
-            o2.color = '#7dd3fc';
-            o2.opacity = '0.9';
-            o2.textAlign = cfg.subtitle_text_align;
-            o2.letterSpacing = cfg.subtitle_letter_spacing + 'px';
-            o2.lineHeight = String(cfg.subtitle_line_height);
-            o2.textShadow = textShadow;
-            orig2El.textContent = '副字幕预览效果（麦克风）';
-        } else if (orig2El) {
-            orig2El.style.display = 'none';
+        // 文本类元素（speaker / translation / secondary / timestamp / 自定义 text）
+        const node = document.createElement('div');
+        node.className = 'sub-preview-element';
+        node.dataset.previewKind = kind;
+        const st = node.style;
+
+        if (kind === 'speaker') {
+            const spk = theme.speaker || {};
+            st.color = spk.color || '#818cf8';
+            st.fontSize = (spk.size || 16) + 'px';
+            st.fontWeight = '500';
+            st.textAlign = theme.textAlign || 'center';
+            node.textContent = (spk.prefix || '') + '说话人1';
+        } else if (kind === 'translation') {
+            const tr = theme.translation || {};
+            applyPreviewTextBase(st, theme, textShadow);
+            st.fontSize = (tr.size || 24) + 'px';
+            st.fontWeight = String(tr.weight || 400);
+            st.color = tr.color || '#ffffff';
+            st.opacity = String(tr.opacity != null ? tr.opacity : 0.85);
+            node.textContent = (tr.prefix || '') + '译文预览效果';
+        } else if (kind === 'secondary') {
+            const sec = theme.secondary || {};
+            const secSize = sec.size > 0 ? sec.size : Math.max(14, Math.round((theme.fontSize || 32) * 0.8));
+            applyPreviewTextBase(st, theme, textShadow);
+            st.fontSize = secSize + 'px';
+            st.fontWeight = String(theme.fontWeight || 400);
+            st.color = sec.color || '#7dd3fc';
+            st.opacity = String(sec.opacity != null ? sec.opacity : 0.9);
+            node.textContent = '副原文预览效果（麦克风）';
+        } else if (kind === 'timestamp') {
+            const ts = theme.timestamp || {};
+            if (ts.format === 'none') return null;
+            st.color = ts.color || '#a1a1aa';
+            st.fontSize = (ts.size || 14) + 'px';
+            st.fontWeight = '400';
+            st.fontFamily = '"Cascadia Code", "Consolas", monospace';
+            st.textAlign = theme.textAlign || 'center';
+            node.textContent = formatPreviewTimestamp(ts.format);
+        } else {
+            // 自定义 text
+            applyPreviewTextBase(st, theme, textShadow);
+            if (typeof el.fontSize === 'number' && el.fontSize > 0) st.fontSize = el.fontSize + 'px';
+            if (typeof el.fontWeight === 'number' && el.fontWeight > 0) st.fontWeight = String(el.fontWeight);
+            st.color = el.color || '#ffffff';
+            if (typeof el.opacity === 'number') st.opacity = String(el.opacity);
+            st.textAlign = el.align || 'center';
+            node.textContent = (el.prefix || '') + resolvePreviewPlaceholders(el.content || '自定义文本');
+        }
+        return node;
+    }
+
+    function updateSubtitlePreview() {
+        const preview = $('#subtitle-preview');
+        const box = $('#subtitle-preview-box');
+        if (!preview || !box) return;
+
+        const win = getCurrentSubtitleWindow();
+        const theme = (win && win.theme) ? win.theme : defaultSubtitleTheme();
+        if (!win) {
+            box.innerHTML = '';
+            return;
         }
 
-        // ===== 说话人元素 =====
-        let spkEl = $('#preview-speaker');
-        if (cfg.subtitle_show_speaker) {
-            if (!spkEl) {
-                spkEl = document.createElement('div');
-                spkEl.id = 'preview-speaker';
-                spkEl.className = 'sub-preview-element';
-                box.appendChild(spkEl);
-            }
-            const sEl = spkEl.style;
-            sEl.display = '';
-            sEl.color = cfg.subtitle_speaker_color;
-            sEl.fontSize = cfg.subtitle_speaker_font_size + 'px';
-            sEl.fontWeight = '500';
-            sEl.textAlign = cfg.subtitle_text_align;
-            spkEl.textContent = (cfg.subtitle_speaker_prefix || '') + '说话人';
-        } else if (spkEl) {
-            spkEl.style.display = 'none';
-        }
+        const textShadow = buildTextShadow(theme.textShadowColor, theme.textShadowStrength);
 
-        // ===== 时间戳元素 =====
-        let tsEl = $('#preview-timestamp');
-        if (cfg.subtitle_show_timestamp && cfg.subtitle_timestamp_format !== 'none') {
-            if (!tsEl) {
-                tsEl = document.createElement('div');
-                tsEl.id = 'preview-timestamp';
-                tsEl.className = 'sub-preview-element';
-                box.appendChild(tsEl);
-            }
-            const tse = tsEl.style;
-            tse.display = '';
-            tse.color = cfg.subtitle_timestamp_color;
-            tse.fontSize = cfg.subtitle_timestamp_font_size + 'px';
-            tse.fontWeight = '400';
-            tse.fontFamily = '"Cascadia Code", "Consolas", monospace';
-            tse.textAlign = cfg.subtitle_text_align;
-            tsEl.textContent = formatPreviewTimestamp(cfg.subtitle_timestamp_format);
-        } else if (tsEl) {
-            tsEl.style.display = 'none';
-        }
+        // 容器对齐锚点 + 卡片最大宽度（与真实窗口一致）
+        const alignXMap = { left: 'flex-start', center: 'center', right: 'flex-end' };
+        const alignYMap = { top: 'flex-start', center: 'center', bottom: 'flex-end' };
+        preview.style.justifyContent = alignXMap[theme.anchorX] || 'center';
+        preview.style.alignItems = alignYMap[theme.anchorY] || 'flex-end';
 
-        // ===== 自定义元素预览 =====
-        const customEls = state.customElements || [];
-        const existingCustom = new Map();
-        box.querySelectorAll('[data-preview-custom]').forEach(n => existingCustom.set(n.dataset.previewCustom, n));
-        const seenCustom = new Set();
-        customEls.forEach(ce => {
-            const id = ce.id || 'unknown';
-            seenCustom.add(id);
-            let node = existingCustom.get(id);
-            if (!node) {
-                node = document.createElement('div');
-                node.className = 'sub-preview-element';
-                node.dataset.previewCustom = id;
-                box.appendChild(node);
-            }
-            const et = ce.element_type || 'text';
-            const vis = ce.visible !== false;
-            const st = node.style;
-            if (et === 'divider') {
-                st.display = vis ? '' : 'none';
-                st.height = '1px';
-                st.width = '100%';
-                st.background = ce.color || '#ffffff';
-                st.opacity = String(typeof ce.opacity === 'number' ? ce.opacity : 0.3);
-                st.margin = '4px 0';
-                st.fontSize = '';
-                node.textContent = '';
-            } else if (et === 'spacer') {
-                st.display = vis ? '' : 'none';
-                st.height = (typeof ce.font_size === 'number' ? ce.font_size : 12) + 'px';
-                st.background = '';
-                st.opacity = '';
-                st.margin = '';
-                node.textContent = '';
-            } else {
-                st.display = vis ? '' : 'none';
-                st.height = '';
-                st.width = '';
-                st.background = '';
-                st.margin = '';
-                st.color = ce.color || '#ffffff';
-                if (typeof ce.font_size === 'number') st.fontSize = ce.font_size + 'px';
-                if (typeof ce.font_weight === 'number') st.fontWeight = String(ce.font_weight);
-                if (typeof ce.opacity === 'number') st.opacity = String(ce.opacity);
-                st.textAlign = ce.align || 'center';
-                st.textShadow = textShadow;
-                st.fontFamily = `"${cfg.subtitle_font_family}", sans-serif`;
-                node.textContent = (ce.prefix || '') + resolvePreviewPlaceholders(ce.content || '自定义文本');
-            }
-        });
-        existingCustom.forEach((node, id) => { if (!seenCustom.has(id)) node.remove(); });
+        // 容器样式（背景/模糊/内边距/布局）
+        const b = box.style;
+        b.maxWidth = (theme.maxWidthPct != null ? theme.maxWidthPct : 100) + '%';
+        b.background = hexToRgba(theme.bgColor, theme.bgOpacity != null ? theme.bgOpacity : 0.6);
+        b.backdropFilter = `blur(${theme.blur != null ? theme.blur : 20}px)`;
+        b.webkitBackdropFilter = `blur(${theme.blur != null ? theme.blur : 20}px)`;
+        b.padding = `${theme.paddingY != null ? theme.paddingY : 12}px ${theme.paddingX != null ? theme.paddingX : 24}px`;
+        const horizontal = theme.layout === 'horizontal';
+        b.flexDirection = horizontal ? 'row' : 'column';
+        b.alignItems = horizontal ? 'center' : 'stretch';
+        b.gap = horizontal ? '16px' : '6px';
 
-        // ===== 按 elementOrder 重排预览元素 =====
-        const idMap = { speaker: 'preview-speaker', original: 'preview-original', original2: 'preview-original2', translation: 'preview-translation', timestamp: 'preview-timestamp' };
-        const order = (state.elementOrder && state.elementOrder.length > 0) ? state.elementOrder : ['speaker', 'original', 'translation', 'timestamp'];
-        order.forEach(key => {
-            let node = null;
-            if (idMap[key]) node = $('#' + idMap[key]);
-            else node = box.querySelector(`[data-preview-custom="${CSS.escape(key)}"]`);
+        // 按 elements 数组顺序重建预览（顺序即显示顺序）
+        box.innerHTML = '';
+        (win.elements || []).forEach(el => {
+            if (!el.enabled) return;
+            const node = renderPreviewElement(el, theme, textShadow);
             if (node) box.appendChild(node);
         });
 
-        // 更新所有 value-display
-        updateValueDisplay('subtitle-font-size', `${cfg.subtitle_font_size}px`);
-        updateValueDisplay('subtitle-opacity', `${Math.round(cfg.subtitle_bg_opacity * 100)}%`);
-        updateValueDisplay('subtitle-blur', `${cfg.subtitle_blur}px`);
-        updateValueDisplay('subtitle-lines', `${cfg.subtitle_max_lines} 行`);
-        updateValueDisplay('subtitle-box-max-width', `${cfg.subtitle_box_max_width}%`);
-        updateValueDisplay('subtitle-line-height', cfg.subtitle_line_height.toFixed(1));
-        updateValueDisplay('subtitle-letter-spacing', `${cfg.subtitle_letter_spacing}px`);
-        updateValueDisplay('subtitle-text-shadow-strength', String(cfg.subtitle_text_shadow_strength));
-        updateValueDisplay('subtitle-padding-x', `${cfg.subtitle_padding_x}px`);
-        updateValueDisplay('subtitle-padding-y', `${cfg.subtitle_padding_y}px`);
-        updateValueDisplay('subtitle-interim-opacity', `${Math.round(cfg.subtitle_interim_opacity * 100)}%`);
+        // 点击原文元素切换 最终/临时 预览态
+        const origEl = box.querySelector('[data-preview-kind="original"]');
+        if (origEl) {
+            origEl.title = '点击切换 最终/临时 状态预览';
+            origEl.style.cursor = 'pointer';
+            origEl.addEventListener('click', () => {
+                state.previewInterim = !state.previewInterim;
+                updateSubtitlePreview();
+            });
+        }
+
+        // 同步 value-display 文本
+        updateValueDisplay('subtitle-font-size', `${theme.fontSize || 32}px`);
+        updateValueDisplay('subtitle-opacity', `${Math.round((theme.bgOpacity != null ? theme.bgOpacity : 0.6) * 100)}%`);
+        updateValueDisplay('subtitle-blur', `${theme.blur != null ? theme.blur : 20}px`);
+        updateValueDisplay('subtitle-lines', `${theme.maxLines != null ? theme.maxLines : 3} 行`);
+        updateValueDisplay('subtitle-max-width', `${theme.maxWidthPct != null ? theme.maxWidthPct : 100}%`);
+        updateValueDisplay('subtitle-line-height', (theme.lineHeight != null ? theme.lineHeight : 1.4).toFixed(1));
+        updateValueDisplay('subtitle-letter-spacing', `${theme.letterSpacing != null ? theme.letterSpacing : 0}px`);
+        updateValueDisplay('subtitle-text-shadow-strength', String(theme.textShadowStrength != null ? theme.textShadowStrength : 4));
+        updateValueDisplay('subtitle-padding-x', `${theme.paddingX != null ? theme.paddingX : 24}px`);
+        updateValueDisplay('subtitle-padding-y', `${theme.paddingY != null ? theme.paddingY : 12}px`);
+        updateValueDisplay('subtitle-interim-opacity', `${Math.round((theme.interimOpacity != null ? theme.interimOpacity : 0.7) * 100)}%`);
+        updateValueDisplay('subtitle-translation-size', `${(theme.translation && theme.translation.size) || 24}px`);
+        updateValueDisplay('subtitle-translation-opacity', `${Math.round(((theme.translation && theme.translation.opacity) != null ? theme.translation.opacity : 0.85) * 100)}%`);
+        updateValueDisplay('subtitle-speaker-size', `${(theme.speaker && theme.speaker.size) || 16}px`);
+        updateValueDisplay('subtitle-timestamp-size', `${(theme.timestamp && theme.timestamp.size) || 14}px`);
     }
 
     function updateValueDisplay(id, text) {
@@ -705,191 +597,248 @@
         }
     }
 
-    // ===== 字幕预设模板 =====
-    const SUBTITLE_PRESETS = {
-        clean: { show_original: true, show_translation: false, show_speaker: false, show_timestamp: false, layout: 'vertical' },
-        bilingual: { show_original: true, show_translation: true, show_speaker: false, show_timestamp: false, layout: 'vertical' },
-        meeting: { show_original: true, show_translation: false, show_speaker: true, show_timestamp: true, layout: 'vertical' },
-        live: { show_original: true, show_translation: true, show_speaker: false, show_timestamp: true, layout: 'horizontal' },
+    // ===== 实时字幕 v3：窗口 / 主题 / 元素模型 =====
+
+    /// 固定元素 kind（不可删除，仅可开关/排序）
+    const FIXED_ELEMENT_KINDS = ['speaker', 'original', 'translation', 'secondary', 'timestamp'];
+
+    /// 固定元素展示名
+    const FIXED_ELEMENT_LABELS = {
+        speaker: '说话人',
+        original: '原文',
+        translation: '译文',
+        secondary: '副原文（麦克风）',
+        timestamp: '时间戳'
     };
 
-    // ===== 字幕场景管理（多窗口） =====
-
-    /// 场景样式字段列表（scene.style.* 与 flat 配置 subtitle_* 一一对应）
-    const SCENE_STYLE_FIELDS = [
-        'font_family', 'font_size', 'font_color', 'font_weight', 'italic', 'text_align',
-        'letter_spacing', 'line_height', 'text_shadow_color', 'text_shadow_strength',
-        'bg_color', 'bg_opacity', 'blur',
-        'padding_x', 'padding_y', 'max_lines', 'interim_color', 'interim_opacity',
-        'show_original', 'show_translation', 'show_speaker', 'show_timestamp', 'layout',
-        'translation_font_size', 'translation_font_color', 'translation_font_weight',
-        'translation_opacity', 'translation_prefix', 'speaker_color', 'speaker_font_size',
-        'speaker_prefix', 'timestamp_color', 'timestamp_font_size', 'timestamp_format',
-        'custom_elements', 'element_order', 'preset',
-        'container_align_x', 'container_align_y', 'box_max_width', 'show_original_secondary'
-    ];
-
-    function getCurrentScene() {
-        return (state.scenes || []).find(s => s.id === state.currentSceneId) || null;
+    /// 自定义元素展示名
+    function elementTypeLabel(kind) {
+        if (kind === 'divider') return '分隔线';
+        if (kind === 'spacer') return '间距';
+        return '文本';
     }
 
-    /// 从旧扁平字段构建默认场景（兼容旧配置）
-    function sceneFromLegacy(sub) {
-        const flat = sub || {};
+    const WEIGHT_OPTIONS = [100, 200, 300, 400, 500, 600, 700, 800, 900];
+
+    /// 新建主题（与契约第 1 节默认值一致，camelCase）
+    function defaultSubtitleTheme() {
         return {
-            id: 'default',
-            name: '默认字幕',
-            enabled: true,
-            window: {
-                x: flat.subtitle_window_x !== undefined && flat.subtitle_window_x !== null ? flat.subtitle_window_x : -1,
-                y: flat.subtitle_window_y !== undefined && flat.subtitle_window_y !== null ? flat.subtitle_window_y : -1,
-                width: flat.subtitle_window_width || 1200,
-                height: flat.subtitle_window_height || 120,
-                always_on_top: true,
-                click_through: false,
-                obs_mode: false,
-                auto_fit: true,
-            },
-            style: {
-                font_family: flat.subtitle_font_family || 'Microsoft YaHei',
-                font_size: flat.subtitle_font_size || 32,
-                font_color: flat.subtitle_font_color || '#ffffff',
-                font_weight: flat.subtitle_font_weight || 400,
-                italic: !!flat.subtitle_italic,
-                text_align: flat.subtitle_text_align || 'center',
-                letter_spacing: flat.subtitle_letter_spacing !== undefined ? flat.subtitle_letter_spacing : 0,
-                line_height: flat.subtitle_line_height !== undefined ? flat.subtitle_line_height : 1.4,
-                text_shadow_color: flat.subtitle_text_shadow_color || '#000000',
-                text_shadow_strength: flat.subtitle_text_shadow_strength !== undefined ? flat.subtitle_text_shadow_strength : 4,
-                bg_color: flat.subtitle_bg_color || '#000000',
-                bg_opacity: flat.subtitle_bg_opacity !== undefined ? flat.subtitle_bg_opacity : 0.6,
-                blur: flat.subtitle_blur || 20,
-                padding_x: flat.subtitle_padding_x || 24,
-                padding_y: flat.subtitle_padding_y || 12,
-                max_lines: flat.subtitle_max_lines || 2,
-                interim_color: flat.subtitle_interim_color || '#ffffff',
-                interim_opacity: flat.subtitle_interim_opacity !== undefined ? flat.subtitle_interim_opacity : 0.7,
-                show_original: flat.subtitle_show_original !== false,
-                show_translation: flat.subtitle_show_translation === true,
-                show_speaker: flat.subtitle_show_speaker === true,
-                show_timestamp: flat.subtitle_show_timestamp === true,
-                layout: flat.subtitle_layout || 'vertical',
-                translation_font_size: flat.subtitle_translation_font_size || 24,
-                translation_font_color: flat.subtitle_translation_font_color || '#ffffff',
-                translation_font_weight: flat.subtitle_translation_font_weight || 400,
-                translation_opacity: flat.subtitle_translation_opacity !== undefined ? flat.subtitle_translation_opacity : 0.85,
-                translation_prefix: flat.subtitle_translation_prefix || '',
-                speaker_color: flat.subtitle_speaker_color || '#818cf8',
-                speaker_font_size: flat.subtitle_speaker_font_size || 16,
-                speaker_prefix: flat.subtitle_speaker_prefix || '',
-                timestamp_color: flat.subtitle_timestamp_color || '#a1a1aa',
-                timestamp_font_size: flat.subtitle_timestamp_font_size || 14,
-                timestamp_format: flat.subtitle_timestamp_format || 'HH:MM:SS',
-                custom_elements: Array.isArray(flat.subtitle_custom_elements) ? flat.subtitle_custom_elements.map(e => ({ ...e })) : [],
-                element_order: (Array.isArray(flat.subtitle_element_order) && flat.subtitle_element_order.length > 0)
-                    ? [...flat.subtitle_element_order]
-                    : ['speaker', 'original', 'original2', 'translation', 'timestamp'],
-                preset: flat.subtitle_preset || 'clean',
-                container_align_x: 'center',
-                container_align_y: 'bottom',
-                box_max_width: 100,
-                show_original_secondary: false,
-            },
-            translation: {
-                engine: flat.subtitle_translation_engine || 'none',
-                target_lang: flat.subtitle_translation_target_lang || '英文',
-                interim: true,
-            },
+            preset: 'custom',
+            fontFamily: 'SimHei',
+            fontSize: 32,
+            fontWeight: 400,
+            italic: false,
+            textAlign: 'center',
+            letterSpacing: 0,
+            lineHeight: 1.4,
+            textShadowColor: '#000000',
+            textShadowStrength: 4,
+            interimColor: '#ffffff',
+            interimOpacity: 0.7,
+            bgColor: '#000000',
+            bgOpacity: 0.6,
+            blur: 20,
+            paddingX: 24,
+            paddingY: 12,
+            maxLines: 3,
+            layout: 'vertical',
+            anchorX: 'center',
+            anchorY: 'bottom',
+            maxWidthPct: 100,
+            fontColor: '#ffffff',
+            translation: { size: 24, weight: 400, color: '#ffffff', opacity: 0.85, prefix: '' },
+            speaker: { color: '#818cf8', size: 16, prefix: '' },
+            timestamp: { color: '#a1a1aa', size: 14, format: 'HH:MM:SS' },
+            secondary: { color: '#7dd3fc', size: 0, opacity: 0.9 }
         };
     }
 
-    /// 场景 → 旧扁平 cfg（供 updateSubtitlePreview 复用）
-    function sceneToFlat(scene) {
-        const s = (scene && scene.style) || {};
-        const flat = {};
-        SCENE_STYLE_FIELDS.forEach(f => { flat['subtitle_' + f] = s[f]; });
-        flat.subtitle_translation_enabled = !!s.show_translation;
-        flat.subtitle_bold = (s.font_weight || 400) >= 700;
-        return flat;
+    function defaultFixedElements() {
+        return [
+            { kind: 'speaker', id: 'speaker', enabled: false, label: '说话人', content: '', prefix: '', color: '', fontSize: 0, fontWeight: 0, opacity: 1, align: '' },
+            { kind: 'original', id: 'original', enabled: true, label: '原文', content: '', prefix: '', color: '', fontSize: 0, fontWeight: 0, opacity: 1, align: '' },
+            { kind: 'translation', id: 'translation', enabled: true, label: '译文', content: '', prefix: '', color: '', fontSize: 0, fontWeight: 0, opacity: 1, align: '' },
+            { kind: 'secondary', id: 'secondary', enabled: false, label: '副原文（麦克风）', content: '', prefix: '', color: '', fontSize: 0, fontWeight: 0, opacity: 1, align: '' },
+            { kind: 'timestamp', id: 'timestamp', enabled: false, label: '时间戳', content: '', prefix: '', color: '', fontSize: 0, fontWeight: 0, opacity: 1, align: '' }
+        ];
     }
 
-    /// 旧扁平 cfg → 场景 style
-    function flatToScene(scene, flat) {
-        if (!scene.style) scene.style = {};
-        SCENE_STYLE_FIELDS.forEach(f => {
-            const k = 'subtitle_' + f;
-            if (flat[k] !== undefined) scene.style[f] = flat[k];
-        });
-        return scene;
+    /// 新建默认窗口（primary）
+    function defaultSubtitleWindow() {
+        return {
+            id: 'primary',
+            name: '默认字幕',
+            enabled: true,
+            x: -1,
+            y: -1,
+            width: 1200,
+            height: 120,
+            alwaysOnTop: true,
+            clickThrough: false,
+            obsMode: false,
+            autoFit: true,
+            translation: { engine: 'none', targetLang: '英文', interim: true },
+            theme: defaultSubtitleTheme(),
+            elements: defaultFixedElements()
+        };
     }
 
-    /// 从配置加载场景列表到 state（兼容旧配置自动迁移）
-    function loadScenesIntoState(config) {
-        let scenes = (config && config.subtitle && Array.isArray(config.subtitle.subtitle_scenes))
-            ? config.subtitle.subtitle_scenes
-            : [];
-        scenes = scenes.map(sc => ({
-            ...sc,
-            style: { ...(sc.style || {}) },
-            window: { ...(sc.window || {}) },
-            translation: { ...(sc.translation || {}) },
-        }));
-        if (!scenes.length) {
-            scenes = [sceneFromLegacy(config && config.subtitle)];
-        }
-        if (!scenes.find(s => s.id === 'default')) {
-            scenes.unshift(sceneFromLegacy(config && config.subtitle));
-        }
-        state.scenes = scenes;
-        if (!state.scenes.find(s => s.id === state.currentSceneId)) {
-            state.currentSceneId = 'default';
-        }
-        renderSceneList();
+    /// 规整窗口对象（补齐缺失的嵌套结构，camelCase）
+    function normalizeWindow(w) {
+        const src = w || {};
+        const theme = normalizeTheme(src.theme);
+        const elements = Array.isArray(src.elements) && src.elements.length
+            ? src.elements.map(normalizeElement)
+            : defaultFixedElements();
+        return {
+            id: src.id || 'primary',
+            name: src.name || '默认字幕',
+            enabled: src.enabled !== false,
+            x: src.x != null ? src.x : -1,
+            y: src.y != null ? src.y : -1,
+            width: src.width || 1200,
+            height: src.height || 120,
+            alwaysOnTop: src.alwaysOnTop !== false,
+            clickThrough: src.clickThrough === true,
+            obsMode: src.obsMode === true,
+            autoFit: src.autoFit !== false,
+            translation: {
+                engine: (src.translation && src.translation.engine) || 'none',
+                targetLang: (src.translation && src.translation.targetLang) || '英文',
+                interim: !src.translation || src.translation.interim !== false
+            },
+            theme,
+            elements
+        };
     }
 
-    /// 渲染场景选择器
-    function renderSceneList() {
-        const sel = $('#subtitle-scene-select');
+    function normalizeTheme(t) {
+        const src = t || {};
+        const base = defaultSubtitleTheme();
+        return {
+            preset: src.preset || 'custom',
+            fontFamily: src.fontFamily || base.fontFamily,
+            fontSize: src.fontSize != null ? src.fontSize : base.fontSize,
+            fontWeight: src.fontWeight != null ? src.fontWeight : base.fontWeight,
+            italic: src.italic === true,
+            textAlign: src.textAlign || base.textAlign,
+            letterSpacing: src.letterSpacing != null ? src.letterSpacing : base.letterSpacing,
+            lineHeight: src.lineHeight != null ? src.lineHeight : base.lineHeight,
+            textShadowColor: src.textShadowColor || base.textShadowColor,
+            textShadowStrength: src.textShadowStrength != null ? src.textShadowStrength : base.textShadowStrength,
+            interimColor: src.interimColor || base.interimColor,
+            interimOpacity: src.interimOpacity != null ? src.interimOpacity : base.interimOpacity,
+            bgColor: src.bgColor || base.bgColor,
+            bgOpacity: src.bgOpacity != null ? src.bgOpacity : base.bgOpacity,
+            blur: src.blur != null ? src.blur : base.blur,
+            paddingX: src.paddingX != null ? src.paddingX : base.paddingX,
+            paddingY: src.paddingY != null ? src.paddingY : base.paddingY,
+            maxLines: src.maxLines != null ? src.maxLines : base.maxLines,
+            layout: src.layout || base.layout,
+            anchorX: src.anchorX || base.anchorX,
+            anchorY: src.anchorY || base.anchorY,
+            maxWidthPct: src.maxWidthPct != null ? src.maxWidthPct : base.maxWidthPct,
+            fontColor: src.fontColor || base.fontColor,
+            translation: { ...base.translation, ...(src.translation || {}) },
+            speaker: { ...base.speaker, ...(src.speaker || {}) },
+            timestamp: { ...base.timestamp, ...(src.timestamp || {}) },
+            secondary: { ...base.secondary, ...(src.secondary || {}) }
+        };
+    }
+
+    function normalizeElement(e) {
+        const src = e || {};
+        const isFixed = FIXED_ELEMENT_KINDS.includes(src.kind);
+        const label = src.label || (isFixed ? FIXED_ELEMENT_LABELS[src.kind] : elementTypeLabel(src.kind));
+        return {
+            kind: isFixed ? src.kind : (['text', 'divider', 'spacer'].includes(src.kind) ? src.kind : 'text'),
+            id: isFixed ? src.kind : (src.id || genCustomElementId()),
+            enabled: src.enabled !== false,
+            label: label || src.kind || 'text',
+            content: src.content || '',
+            prefix: src.prefix || '',
+            color: isFixed ? (src.color || '') : (src.color || '#ffffff'),
+            fontSize: src.fontSize != null ? src.fontSize : 0,
+            fontWeight: src.fontWeight != null ? src.fontWeight : 0,
+            opacity: src.opacity != null ? src.opacity : 1,
+            align: src.align || ''
+        };
+    }
+
+    function getCurrentSubtitleWindow() {
+        return (state.subtitleWindows || []).find(w => w.id === state.currentWindowId) || null;
+    }
+
+    function getCurrentTheme() {
+        const win = getCurrentSubtitleWindow();
+        return win ? win.theme : null;
+    }
+
+    /// 从配置加载窗口列表（判定新模型 windows 数组，旧配置视为空并提示，不崩溃）
+    function loadWindowsIntoState(config) {
+        const sub = (config && config.subtitle) || {};
+        let windows = null;
+        if (Array.isArray(sub.windows)) {
+            windows = sub.windows.map(normalizeWindow);
+        }
+        if (!windows || !windows.length) {
+            windows = [defaultSubtitleWindow()];
+            addLog('warn', '未检测到新版字幕窗口配置，已初始化默认字幕窗口', 'subtitle');
+        }
+        state.subtitleWindows = windows;
+        if (!state.subtitleWindows.find(w => w.id === state.currentWindowId)) {
+            state.currentWindowId = state.subtitleWindows[0].id || 'primary';
+        }
+        renderWindowList();
+    }
+
+    /// 渲染窗口下拉选择器
+    function renderWindowList() {
+        const sel = $('#subtitle-window-select');
         if (!sel) return;
-        const current = state.currentSceneId;
-        sel.innerHTML = (state.scenes || []).map(sc =>
-            `<option value="${escapeHtml(sc.id)}"${sc.id === current ? ' selected' : ''}>${escapeHtml(sc.name || sc.id)}${sc.enabled ? '' : '（已停用）'}</option>`
+        const current = state.currentWindowId;
+        sel.innerHTML = (state.subtitleWindows || []).map(w =>
+            `<option value="${escapeHtml(w.id)}"${w.id === current ? ' selected' : ''}>${escapeHtml(w.name || w.id)}${w.enabled ? '' : '（已停用）'}</option>`
         ).join('');
-        const delBtn = $('#btn-remove-subtitle-scene');
-        if (delBtn) delBtn.disabled = current === 'default';
+        const delBtn = $('#btn-remove-subtitle-window');
+        if (delBtn) delBtn.disabled = current === 'primary';
     }
 
-    /// 切换场景：当前 UI 草稿写回 state.scenes，再载入目标场景
-    function switchSubtitleScene(newId) {
-        if (!newId || newId === state.currentSceneId) return;
-        const cur = collectSceneFromUI();
-        if (cur) {
-            const idx = state.scenes.findIndex(s => s.id === cur.id);
-            if (idx >= 0) state.scenes[idx] = cur;
+    /// 切换窗口：当前 UI 草稿写回 state，再载入目标窗口
+    function switchSubtitleWindow(newId) {
+        if (!newId || newId === state.currentWindowId) return;
+        flushCurrentWindowName();
+        state.currentWindowId = newId;
+        const win = getCurrentSubtitleWindow();
+        if (win && state.config) {
+            populateSubtitleUiFromWindow(win, state.config);
         }
-        state.currentSceneId = newId;
-        const scene = getCurrentScene();
-        if (scene && state.config) {
-            populateSubtitleUiFromScene(scene, state.config);
-        }
-        renderSceneList();
+        renderWindowList();
         refreshAllIndicators();
     }
 
-    /// 同声传译设置区显隐
+    /// 同步窗口名称输入框到当前窗口对象
+    function flushCurrentWindowName() {
+        const win = getCurrentSubtitleWindow();
+        const nameInput = $('#subtitle-window-name');
+        if (win && nameInput) {
+            const name = nameInput.value.trim();
+            if (name) win.name = name;
+        }
+    }
+
+    /// 同声传译设置区显隐（引擎关闭时隐藏目标语言/中间结果）
     function updateTranslationUI() {
         const engine = ($('#subtitle-translation-engine') || {}).value || 'none';
         const enabled = engine !== 'none';
         const langGroup = $('#subtitle-translation-lang-group');
         const interimGroup = $('#subtitle-translation-interim-group');
-        const llmRows = $$('.translation-llm-row');
         if (langGroup) langGroup.style.display = enabled ? '' : 'none';
         if (interimGroup) interimGroup.style.display = enabled ? '' : 'none';
-        llmRows.forEach(row => { row.style.display = engine === 'llm' ? '' : 'none'; });
     }
 
-    /// 静默保存当前全部设置草稿（场景增删前调用，避免丢失未保存修改）
-    async function saveCurrentSceneDraft() {
+    /// 静默保存当前全部设置草稿（窗口增删前调用，避免丢失未保存修改）
+    async function saveCurrentWindowDraft() {
         if (!invoke || !state.config) return false;
         const newConfig = collectSettings();
         if (!newConfig) return false;
@@ -904,63 +853,63 @@
         }
     }
 
-    /// 后端场景变更后重新加载并选中指定场景
-    async function reloadScenesAfterBackendChange(selectId) {
+    /// 后端窗口变更后重新加载并选中指定窗口
+    async function reloadWindowsAfterBackendChange(selectId) {
         if (!invoke) return;
         const cfg = await invoke('get_config');
         state.config = cfg;
-        loadScenesIntoState(cfg);
-        state.currentSceneId = selectId || 'default';
-        const scene = getCurrentScene();
-        if (scene) populateSubtitleUiFromScene(scene, cfg);
-        renderSceneList();
+        loadWindowsIntoState(cfg);
+        state.currentWindowId = selectId || 'primary';
+        const win = getCurrentSubtitleWindow();
+        if (win) populateSubtitleUiFromWindow(win, cfg);
+        renderWindowList();
         state.settingsDirty = false;
         updateSubtitlePreview();
         refreshAllIndicators();
     }
 
-    async function addSubtitleScene() {
+    async function addSubtitleWindow() {
         if (!invoke) return;
-        await saveCurrentSceneDraft();
+        await saveCurrentWindowDraft();
         try {
-            const id = await invoke('duplicate_subtitle_scene', { sceneId: state.currentSceneId || 'default' });
-            await reloadScenesAfterBackendChange(id);
-            addLog('info', `已添加字幕场景`, 'subtitle');
+            const id = await invoke('subtitle_add_window');
+            await reloadWindowsAfterBackendChange(id);
+            addLog('info', '已添加字幕窗口', 'subtitle');
         } catch (err) {
-            console.error('Failed to add subtitle scene:', err);
-            alert('添加场景失败: ' + err);
+            console.error('Failed to add subtitle window:', err);
+            alert('添加窗口失败: ' + err);
         }
     }
 
-    async function duplicateSubtitleScene() {
+    async function duplicateSubtitleWindow() {
         if (!invoke) return;
-        await saveCurrentSceneDraft();
+        await saveCurrentWindowDraft();
         try {
-            const id = await invoke('duplicate_subtitle_scene', { sceneId: state.currentSceneId || 'default' });
-            await reloadScenesAfterBackendChange(id);
-            addLog('info', '已复制字幕场景', 'subtitle');
+            const id = await invoke('subtitle_duplicate_window', { windowId: state.currentWindowId || 'primary' });
+            await reloadWindowsAfterBackendChange(id);
+            addLog('info', '已复制字幕窗口', 'subtitle');
         } catch (err) {
-            console.error('Failed to duplicate subtitle scene:', err);
-            alert('复制场景失败: ' + err);
+            console.error('Failed to duplicate subtitle window:', err);
+            alert('复制窗口失败: ' + err);
         }
     }
 
-    async function removeSubtitleScene() {
-        if (!invoke || state.currentSceneId === 'default') return;
+    async function removeSubtitleWindow() {
+        if (!invoke || state.currentWindowId === 'primary') return;
         const { confirmed } = await showConfirmDialog(
-            '删除场景',
-            '确定删除当前场景及其字幕窗口吗？此操作不可恢复。',
+            '删除窗口',
+            '确定删除当前字幕窗口吗？此操作不可恢复。',
             '删除'
         );
         if (!confirmed) return;
-        await saveCurrentSceneDraft();
+        await saveCurrentWindowDraft();
         try {
-            await invoke('remove_subtitle_scene', { sceneId: state.currentSceneId });
-            await reloadScenesAfterBackendChange('default');
-            addLog('info', '已删除字幕场景', 'subtitle');
+            await invoke('subtitle_remove_window', { windowId: state.currentWindowId });
+            await reloadWindowsAfterBackendChange('primary');
+            addLog('info', '已删除字幕窗口', 'subtitle');
         } catch (err) {
-            console.error('Failed to remove subtitle scene:', err);
-            alert('删除场景失败: ' + err);
+            console.error('Failed to remove subtitle window:', err);
+            alert('删除窗口失败: ' + err);
         }
     }
 
@@ -997,7 +946,7 @@
             const srcBadge = seg.source === 'B' ? '<span class="tr-source-b">麦克风</span>' : '';
             const speaker = seg.speaker ? `<span class="tr-speaker">${escapeHtml(seg.speaker)}:</span>` : '';
             const trans = seg.translation ? `<span class="tr-translation">译: ${escapeHtml(seg.translation)}</span>` : '';
-            return `<div class="transcript-item"><span class="tr-time">[${formatTranscriptTime(seg.start_ms)}]</span>${srcBadge}${speaker}${escapeHtml(seg.text)}${trans}</div>`;
+            return `<div class="transcript-item"><span class="tr-time">[${formatTranscriptTime(seg.start_ms != null ? seg.start_ms : seg.startMs)}]</span>${srcBadge}${speaker}${escapeHtml(seg.text)}${trans}</div>`;
         }).join('');
         list.innerHTML = html;
         if (wasAtBottom) list.scrollTop = list.scrollHeight;
@@ -1038,170 +987,229 @@
     }
 
 
-    function escapeHtmlSimple(str) {
-        return String(str == null ? '' : str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    }
-
     function updatePresetUI() {
+        const theme = getCurrentTheme();
+        const preset = theme ? theme.preset : 'custom';
         $$('#subtitle-preset .seg-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.preset === state.subtitlePreset);
+            btn.classList.toggle('active', btn.dataset.preset === preset);
         });
-        const activeBtn = $(`#subtitle-preset .seg-btn[data-preset="${state.subtitlePreset}"]`);
+        const activeBtn = $(`#subtitle-preset .seg-btn[data-preset="${preset}"]`);
         if (activeBtn) moveSegIndicator(activeBtn);
     }
 
     function markPresetCustom() {
-        if (state.subtitlePreset !== 'custom') {
-            state.subtitlePreset = 'custom';
+        const theme = getCurrentTheme();
+        if (theme && theme.preset !== 'custom') {
+            theme.preset = 'custom';
             updatePresetUI();
         }
+        // 主题/元素被手动修改 → 标记未保存（switch/seg 控件不触发 view 级 input/change）
+        if (!state.populatingSettings) state.settingsDirty = true;
     }
 
     function applySubtitlePreset(preset) {
+        const win = getCurrentSubtitleWindow();
+        if (!win) return;
+        if (!state.populatingSettings) state.settingsDirty = true;
         if (preset === 'custom') {
-            state.subtitlePreset = 'custom';
+            win.theme.preset = 'custom';
             updatePresetUI();
             updateSubtitlePreview();
             return;
         }
-        const p = SUBTITLE_PRESETS[preset];
-        if (!p) return;
-        const setSwitch = (id, on) => {
-            const sw = $(`#${id}`);
-            if (sw) sw.dataset.on = on ? 'true' : 'false';
+        const setEnabled = (kind, on) => {
+            const el = win.elements.find(e => e.kind === kind);
+            if (el) el.enabled = on;
         };
-        setSwitch('subtitle-show-original', p.show_original);
-        setSwitch('subtitle-show-translation', p.show_translation);
-        setSwitch('subtitle-show-speaker', p.show_speaker);
-        setSwitch('subtitle-show-timestamp', p.show_timestamp);
-        state.subtitleLayout = p.layout;
-        $$('#subtitle-layout .seg-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.mode === p.layout);
-        });
-        const activeBtn = $(`#subtitle-layout .seg-btn[data-mode="${p.layout}"]`);
-        if (activeBtn) moveSegIndicator(activeBtn);
-        state.subtitlePreset = preset;
-        updatePresetUI();
-        // 预设开启了译文但翻译引擎为关闭时，自动切到 LLM 同声传译
-        const engineSel = $('#subtitle-translation-engine');
-        const showTransSw = $('#subtitle-show-translation');
-        if (engineSel && showTransSw && showTransSw.dataset.on === 'true' && engineSel.value === 'none') {
-            engineSel.value = 'llm';
-            updateTranslationUI();
+        setEnabled('original', true);
+        setEnabled('translation', preset === 'bilingual' || preset === 'live');
+        setEnabled('speaker', preset === 'meeting');
+        setEnabled('timestamp', preset === 'meeting' || preset === 'live');
+        setEnabled('secondary', false);
+        win.theme.layout = preset === 'live' ? 'horizontal' : 'vertical';
+        if (preset === 'clean') {
+            win.translation.engine = 'none';
+        } else if (preset === 'bilingual' || preset === 'live') {
+            if (win.translation.engine === 'none') win.translation.engine = 'llm';
         }
+        win.theme.preset = preset;
+        // 重新同步 UI（含预设/布局/引擎/元素开关）并刷新预览
+        if (state.config) populateSubtitleUiFromWindow(win, state.config);
         updateSubtitlePreview();
     }
 
-    // ===== 自定义元素管理 =====
+    // ===== 元素编辑器（统一列表：固定 + 自定义，顺序即显示顺序） =====
     function genCustomElementId() {
-        return 'ce_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
+        return 'c_' + Date.now().toString(36) + Math.floor(Math.random() * 1000).toString(36);
     }
 
-    function initSliderFillsInList() {
-        $$('#custom-element-list input[type="range"]').forEach(slider => {
+    function renderElementEditor() {
+        const list = $('#subtitle-element-editor');
+        const win = getCurrentSubtitleWindow();
+        if (!list || !win) return;
+        list.innerHTML = '';
+        const els = win.elements || [];
+        if (!els.length) {
+            list.innerHTML = '<div class="custom-element-empty">暂无元素，点击下方按钮添加自定义元素</div>';
+            return;
+        }
+        els.forEach((el, i) => {
+            const isFixed = FIXED_ELEMENT_KINDS.includes(el.kind);
+            const item = document.createElement('div');
+            item.className = 'element-editor-item' + (isFixed ? ' is-fixed' : ' is-custom') +
+                (state.selectedElementId === el.id ? ' selected' : '');
+            item.dataset.id = el.id;
+            item.dataset.kind = el.kind;
+
+            const typeLabel = isFixed ? FIXED_ELEMENT_LABELS[el.kind] : elementTypeLabel(el.kind);
+            const header = document.createElement('div');
+            header.className = 'ee-header';
+            header.innerHTML =
+                `<div class="switch ee-enable" data-on="${el.enabled ? 'true' : 'false'}" title="启用/停用"><div class="switch-knob"></div></div>` +
+                `<span class="ee-badge ee-badge-${el.kind}">${escapeHtml(typeLabel)}</span>` +
+                `<span class="ee-label">${escapeHtml(el.label || typeLabel)}</span>` +
+                `<div class="ee-move">` +
+                `<button class="icon-btn ee-up" type="button" title="上移"${i === 0 ? ' disabled' : ''}>▲</button>` +
+                `<button class="icon-btn ee-down" type="button" title="下移"${i === els.length - 1 ? ' disabled' : ''}>▼</button>` +
+                `</div>`;
+            item.appendChild(header);
+
+            if (!isFixed) {
+                const body = document.createElement('div');
+                body.className = 'ee-body';
+                body.innerHTML = elementEditorBodyHtml(el);
+                item.appendChild(body);
+            }
+            list.appendChild(item);
+        });
+        bindElementEditorEvents();
+        // 刷新动态渲染的滑块填充进度
+        list.querySelectorAll('input[type="range"]').forEach(slider => {
             const min = parseFloat(slider.min) || 0;
             const max = parseFloat(slider.max) || 100;
             const val = parseFloat(slider.value);
             const pct = max > min ? ((val - min) / (max - min)) * 100 : 0;
             slider.style.setProperty('--fill', pct + '%');
         });
+        updateDeleteElementButton();
     }
 
-    function renderCustomElementList() {
-        const list = $('#custom-element-list');
-        if (!list) return;
-        list.innerHTML = '';
-        const els = state.customElements || [];
-        if (els.length === 0) {
-            list.innerHTML = '<div class="custom-element-empty">暂无自定义元素，点击下方按钮添加</div>';
-            return;
+    function elementEditorBodyHtml(el) {
+        const weightOpts = WEIGHT_OPTIONS.map(w => `<option value="${w}" ${el.fontWeight === w ? 'selected' : ''}>${w}</option>`).join('');
+        if (el.kind === 'divider') {
+            return `<div class="ee-style-row">` +
+                `<label class="ee-mini-label">颜色</label>` +
+                `<input type="color" class="color-input ee-field" data-field="color" value="${escapeHtml(el.color || '#ffffff')}" title="颜色">` +
+                `<label class="ee-mini-label">透明度</label>` +
+                `<input type="range" min="0" max="100" class="slider ee-field" data-field="opacity_pct" value="${Math.round((el.opacity != null ? el.opacity : 0.3) * 100)}" title="透明度">` +
+                `</div>`;
         }
-        const weightOpts = [100, 200, 300, 400, 500, 600, 700, 800, 900];
-        els.forEach(el => {
-            const typeLabel = el.element_type === 'divider' ? '分隔线' : (el.element_type === 'spacer' ? '间距' : '文本');
-            const typeIcon = el.element_type === 'divider' ? '—' : (el.element_type === 'spacer' ? '↕' : 'T');
-            let bodyHtml = '';
-            if (el.element_type === 'text') {
-                bodyHtml =
-                    `<input type="text" class="text-input ce-field" data-field="content" placeholder="内容（支持 {time} {date}）" value="${escapeHtmlSimple(el.content || '')}">` +
-                    `<div class="ce-style-row">` +
-                    `<input type="color" class="color-input ce-field" data-field="color" value="${el.color || '#ffffff'}" title="颜色">` +
-                    `<input type="range" min="8" max="96" class="slider ce-field" data-field="font_size" value="${el.font_size || 18}" title="字号">` +
-                    `<select class="text-input ce-field" data-field="font_weight">` +
-                    weightOpts.map(w => `<option value="${w}" ${el.font_weight === w ? 'selected' : ''}>${w}</option>`).join('') +
-                    `</select>` +
-                    `<input type="range" min="0" max="100" class="slider ce-field" data-field="opacity_pct" value="${Math.round((el.opacity ?? 0.9) * 100)}" title="透明度">` +
-                    `<input type="text" class="text-input ce-field ce-prefix-input" data-field="prefix" placeholder="前缀" value="${escapeHtmlSimple(el.prefix || '')}">` +
-                    `<select class="text-input ce-field" data-field="align">` +
-                    `<option value="left" ${el.align === 'left' ? 'selected' : ''}>左</option>` +
-                    `<option value="center" ${(el.align === 'center' || !el.align) ? 'selected' : ''}>中</option>` +
-                    `<option value="right" ${el.align === 'right' ? 'selected' : ''}>右</option>` +
-                    `</select>` +
-                    `</div>`;
-            } else if (el.element_type === 'divider') {
-                bodyHtml =
-                    `<div class="ce-style-row">` +
-                    `<input type="color" class="color-input ce-field" data-field="color" value="${el.color || '#ffffff'}" title="颜色">` +
-                    `<input type="range" min="0" max="100" class="slider ce-field" data-field="opacity_pct" value="${Math.round((el.opacity ?? 0.3) * 100)}" title="透明度">` +
-                    `</div>`;
-            } else {
-                bodyHtml =
-                    `<div class="ce-style-row">` +
-                    `<input type="range" min="4" max="48" class="slider ce-field" data-field="font_size" value="${el.font_size || 12}" title="高度">` +
-                    `</div>`;
-            }
-            const item = document.createElement('div');
-            item.className = 'custom-element-item';
-            item.dataset.id = el.id;
-            item.innerHTML =
-                `<div class="ce-header">` +
-                `<span class="ce-type-badge" title="${typeLabel}">${typeIcon} ${typeLabel}</span>` +
-                `<input type="text" class="text-input ce-field ce-label-input" data-field="label" placeholder="名称" value="${escapeHtmlSimple(el.label || '')}">` +
-                `<label class="ce-visible-toggle" title="显示/隐藏"><input type="checkbox" class="ce-field" data-field="visible" ${el.visible !== false ? 'checked' : ''}><span>显示</span></label>` +
-                `<div class="ce-move-btns">` +
-                `<button class="icon-btn ce-up" type="button" title="上移">▲</button>` +
-                `<button class="icon-btn ce-down" type="button" title="下移">▼</button>` +
-                `</div>` +
-                `<button class="icon-btn ce-delete" type="button" title="删除">✕</button>` +
-                `</div>` +
-                `<div class="ce-body">${bodyHtml}</div>`;
-            list.appendChild(item);
-        });
-        // 绑定事件
-        list.querySelectorAll('.custom-element-item').forEach(item => {
+        if (el.kind === 'spacer') {
+            return `<div class="ee-style-row">` +
+                `<label class="ee-mini-label">高度 (px)</label>` +
+                `<input type="range" min="4" max="96" class="slider ee-field" data-field="fontSize" value="${el.fontSize || 12}" title="高度">` +
+                `</div>`;
+        }
+        return `<div class="ee-style-row ee-style-row-block">` +
+            `<input type="text" class="text-input ee-field" data-field="content" placeholder="内容（支持 {time} {date} {datetime} {text} {translation} {speaker}）" value="${escapeHtml(el.content || '')}">` +
+            `</div>` +
+            `<div class="ee-style-row">` +
+            `<label class="ee-mini-label">前缀</label>` +
+            `<input type="text" class="text-input ee-field ee-prefix-input" data-field="prefix" placeholder="前缀" value="${escapeHtml(el.prefix || '')}">` +
+            `<label class="ee-mini-label">颜色</label>` +
+            `<input type="color" class="color-input ee-field" data-field="color" value="${escapeHtml(el.color || '#ffffff')}" title="颜色">` +
+            `<label class="ee-mini-label">字号</label>` +
+            `<input type="range" min="8" max="96" class="slider ee-field" data-field="fontSize" value="${el.fontSize || 18}" title="字号">` +
+            `<label class="ee-mini-label">字重</label>` +
+            `<select class="text-input ee-field" data-field="fontWeight">${weightOpts}</select>` +
+            `<label class="ee-mini-label">透明度</label>` +
+            `<input type="range" min="0" max="100" class="slider ee-field" data-field="opacity_pct" value="${Math.round((el.opacity != null ? el.opacity : 0.9) * 100)}" title="透明度">` +
+            `<label class="ee-mini-label">对齐</label>` +
+            `<select class="text-input ee-field" data-field="align">` +
+            `<option value="left" ${el.align === 'left' ? 'selected' : ''}>左</option>` +
+            `<option value="center" ${(el.align === 'center' || !el.align) ? 'selected' : ''}>中</option>` +
+            `<option value="right" ${el.align === 'right' ? 'selected' : ''}>右</option>` +
+            `</select>` +
+            `</div>`;
+    }
+
+    function bindElementEditorEvents() {
+        const list = $('#subtitle-element-editor');
+        if (!list) return;
+        list.querySelectorAll('.element-editor-item').forEach(item => {
             const id = item.dataset.id;
-            item.querySelectorAll('.ce-field').forEach(input => {
+            const enableSw = item.querySelector('.ee-enable');
+            if (enableSw) enableSw.addEventListener('click', () => toggleElementEnabled(id));
+            const upBtn = item.querySelector('.ee-up');
+            if (upBtn) upBtn.addEventListener('click', () => moveElement(id, -1));
+            const downBtn = item.querySelector('.ee-down');
+            if (downBtn) downBtn.addEventListener('click', () => moveElement(id, 1));
+
+            // 自定义元素：点击头部选中（用于「删除所选自定义元素」）
+            const header = item.querySelector('.ee-header');
+            if (header && item.classList.contains('is-custom')) {
+                header.addEventListener('click', (e) => {
+                    if (e.target.closest('.ee-up, .ee-down, .ee-enable')) return;
+                    selectElement(id);
+                });
+            }
+
+            item.querySelectorAll('.ee-field').forEach(input => {
                 const field = input.dataset.field;
-                const evt = (input.type === 'checkbox' || input.tagName === 'SELECT') ? 'change' : 'input';
+                const evt = (input.tagName === 'SELECT') ? 'change' : 'input';
                 input.addEventListener(evt, () => {
-                    updateCustomElementField(id, field, input);
+                    updateElementField(id, field, input);
                     updateSubtitlePreview();
                 });
             });
-            const upBtn = item.querySelector('.ce-up');
-            if (upBtn) upBtn.addEventListener('click', () => moveCustomElement(id, -1));
-            const downBtn = item.querySelector('.ce-down');
-            if (downBtn) downBtn.addEventListener('click', () => moveCustomElement(id, 1));
-            const delBtn = item.querySelector('.ce-delete');
-            if (delBtn) delBtn.addEventListener('click', () => removeCustomElement(id));
         });
-        initSliderFillsInList();
     }
 
-    function updateCustomElementField(id, field, input) {
-        const el = (state.customElements || []).find(e => e.id === id);
+    function findElement(id) {
+        const win = getCurrentSubtitleWindow();
+        if (!win) return null;
+        return (win.elements || []).find(e => e.id === id) || null;
+    }
+
+    function toggleElementEnabled(id) {
+        const el = findElement(id);
+        if (!el) return;
+        el.enabled = !el.enabled;
+        renderElementEditor();
+        markPresetCustom();
+        updateSubtitlePreview();
+    }
+
+    function selectElement(id) {
+        state.selectedElementId = (state.selectedElementId === id) ? null : id;
+        const list = $('#subtitle-element-editor');
+        if (list) {
+            list.querySelectorAll('.element-editor-item').forEach(it =>
+                it.classList.toggle('selected', it.dataset.id === state.selectedElementId));
+        }
+        updateDeleteElementButton();
+    }
+
+    function updateDeleteElementButton() {
+        const btn = $('#btn-delete-element');
+        if (!btn) return;
+        const sel = state.selectedElementId ? findElement(state.selectedElementId) : null;
+        const isCustom = sel && !FIXED_ELEMENT_KINDS.includes(sel.kind);
+        btn.disabled = !isCustom;
+    }
+
+    function updateElementField(id, field, input) {
+        const el = findElement(id);
         if (!el) return;
         let val;
-        if (input.type === 'checkbox') {
-            val = input.checked;
-        } else if (input.type === 'range' || input.type === 'number') {
+        if (input.type === 'range' || input.type === 'number') {
             val = parseFloat(input.value);
         } else {
             val = input.value;
         }
         if (field === 'opacity_pct') {
             el.opacity = val / 100;
-        } else if (field === 'font_size' || field === 'font_weight') {
+        } else if (field === 'fontSize' || field === 'fontWeight') {
             el[field] = parseInt(val) || 0;
         } else {
             el[field] = val;
@@ -1209,166 +1217,57 @@
         markPresetCustom();
     }
 
-    function addCustomElement(type) {
-        const id = genCustomElementId();
+    function addElement(kind) {
+        const win = getCurrentSubtitleWindow();
+        if (!win) return;
         const defaults = {
-            text: { label: '自定义文本', content: '自定义文本', font_size: 18, font_weight: 400, opacity: 0.9, align: 'center' },
-            divider: { label: '分隔线', opacity: 0.3 },
-            spacer: { label: '间距', font_size: 12 },
+            text: { label: '自定义文本', content: '自定义文本', fontSize: 18, fontWeight: 400, opacity: 0.9, align: 'center' },
+            divider: { label: '分隔线', opacity: 0.3, fontSize: 0 },
+            spacer: { label: '间距', fontSize: 12, opacity: 1 }
         };
-        const d = defaults[type] || defaults.text;
+        const d = defaults[kind] || defaults.text;
         const el = {
-            id, element_type: type, label: d.label, content: d.content || '',
-            visible: true, color: '#ffffff', font_size: d.font_size || 18,
-            font_weight: d.font_weight || 400, opacity: d.opacity ?? 0.9,
-            prefix: '', align: d.align || 'center',
+            kind,
+            id: genCustomElementId(),
+            enabled: true,
+            label: d.label,
+            content: kind === 'text' ? d.content : '',
+            prefix: '',
+            color: '#ffffff',
+            fontSize: d.fontSize || 18,
+            fontWeight: d.fontWeight || 400,
+            opacity: d.opacity != null ? d.opacity : 0.9,
+            align: d.align || 'center'
         };
-        state.customElements.push(el);
-        state.elementOrder.push(id);
-        renderCustomElementList();
-        renderElementOrderList();
+        win.elements.push(el);
+        state.selectedElementId = el.id;
+        renderElementEditor();
         markPresetCustom();
         updateSubtitlePreview();
     }
 
-    function removeCustomElement(id) {
-        state.customElements = (state.customElements || []).filter(e => e.id !== id);
-        state.elementOrder = (state.elementOrder || []).filter(k => k !== id);
-        renderCustomElementList();
-        renderElementOrderList();
+    function removeSelectedElement() {
+        const win = getCurrentSubtitleWindow();
+        if (!win || !state.selectedElementId) return;
+        const el = findElement(state.selectedElementId);
+        if (!el || FIXED_ELEMENT_KINDS.includes(el.kind)) return;
+        win.elements = win.elements.filter(e => e.id !== state.selectedElementId);
+        state.selectedElementId = null;
+        renderElementEditor();
         markPresetCustom();
         updateSubtitlePreview();
     }
 
-    function syncCustomElementsOrder() {
-        const customOrder = state.elementOrder.filter(k =>
-            !(k === 'speaker' || k === 'original' || k === 'original2' || k === 'translation' || k === 'timestamp'));
-        state.customElements.sort((a, b) => {
-            const ia = customOrder.indexOf(a.id);
-            const ib = customOrder.indexOf(b.id);
-            return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
-        });
-    }
-
-    function moveCustomElement(id, dir) {
-        // 在 elementOrder 中移动
-        const idx = state.elementOrder.indexOf(id);
+    function moveElement(id, dir) {
+        const win = getCurrentSubtitleWindow();
+        if (!win) return;
+        const idx = win.elements.findIndex(e => e.id === id);
         if (idx < 0) return;
         const newIdx = idx + dir;
-        if (newIdx < 0 || newIdx >= state.elementOrder.length) return;
-        const [item] = state.elementOrder.splice(idx, 1);
-        state.elementOrder.splice(newIdx, 0, item);
-        syncCustomElementsOrder();
-        renderCustomElementList();
-        renderElementOrderList();
-        markPresetCustom();
-        updateSubtitlePreview();
-    }
-
-    // ===== 元素排序列表 =====
-    function renderElementOrderList() {
-        const list = $('#element-order-list');
-        if (!list) return;
-        list.innerHTML = '';
-        const labels = { speaker: '说话人', original: '原文', original2: '副原文', translation: '译文', timestamp: '时间戳' };
-        const order = state.elementOrder || ['speaker', 'original', 'translation', 'timestamp'];
-        order.forEach(key => {
-            let label, isCustom = false;
-            if (labels[key]) {
-                label = labels[key];
-            } else {
-                const ce = (state.customElements || []).find(e => e.id === key);
-                label = ce ? (ce.label || '自定义') : key;
-                isCustom = true;
-            }
-            const item = document.createElement('div');
-            item.className = 'element-order-item' + (isCustom ? ' is-custom' : '');
-            item.dataset.key = key;
-            item.draggable = true;
-            item.innerHTML =
-                `<span class="eo-drag-handle" title="拖拽排序">⋮⋮</span>` +
-                `<span class="eo-label">${escapeHtmlSimple(label)}</span>` +
-                `<div class="eo-move-btns">` +
-                `<button class="icon-btn eo-up" type="button" title="上移">▲</button>` +
-                `<button class="icon-btn eo-down" type="button" title="下移">▼</button>` +
-                `</div>`;
-            list.appendChild(item);
-        });
-        bindElementOrderEvents();
-    }
-
-    function bindElementOrderEvents() {
-        const list = $('#element-order-list');
-        if (!list) return;
-        list.querySelectorAll('.element-order-item').forEach(item => {
-            const key = item.dataset.key;
-            const upBtn = item.querySelector('.eo-up');
-            if (upBtn) upBtn.addEventListener('click', () => moveElementOrder(key, -1));
-            const downBtn = item.querySelector('.eo-down');
-            if (downBtn) downBtn.addEventListener('click', () => moveElementOrder(key, 1));
-        });
-        // 拖拽排序
-        let dragKey = null;
-        list.querySelectorAll('.element-order-item').forEach(item => {
-            item.addEventListener('dragstart', (e) => {
-                dragKey = item.dataset.key;
-                item.classList.add('dragging');
-                if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
-            });
-            item.addEventListener('dragend', () => {
-                item.classList.remove('dragging');
-                list.querySelectorAll('.element-order-item').forEach(n =>
-                    n.classList.remove('drop-above', 'drop-below'));
-                dragKey = null;
-            });
-            item.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-                const after = (e.clientY - item.getBoundingClientRect().top) > item.offsetHeight / 2;
-                item.classList.toggle('drop-above', !after);
-                item.classList.toggle('drop-below', after);
-            });
-            item.addEventListener('dragleave', () => {
-                item.classList.remove('drop-above', 'drop-below');
-            });
-            item.addEventListener('drop', (e) => {
-                e.preventDefault();
-                if (!dragKey || dragKey === item.dataset.key) return;
-                const after = (e.clientY - item.getBoundingClientRect().top) > item.offsetHeight / 2;
-                reorderElementOrder(dragKey, item.dataset.key, after);
-                item.classList.remove('drop-above', 'drop-below');
-            });
-        });
-    }
-
-    function moveElementOrder(key, dir) {
-        const idx = state.elementOrder.indexOf(key);
-        if (idx < 0) return;
-        const newIdx = idx + dir;
-        if (newIdx < 0 || newIdx >= state.elementOrder.length) return;
-        const [item] = state.elementOrder.splice(idx, 1);
-        state.elementOrder.splice(newIdx, 0, item);
-        syncCustomElementsOrder();
-        renderElementOrderList();
-        renderCustomElementList();
-        markPresetCustom();
-        updateSubtitlePreview();
-    }
-
-    function reorderElementOrder(srcKey, dstKey, after) {
-        const srcIdx = state.elementOrder.indexOf(srcKey);
-        if (srcIdx < 0) return;
-        const [item] = state.elementOrder.splice(srcIdx, 1);
-        let dstIdx = state.elementOrder.indexOf(dstKey);
-        if (dstIdx < 0) {
-            state.elementOrder.push(item);
-        } else {
-            if (after) dstIdx += 1;
-            state.elementOrder.splice(dstIdx, 0, item);
-        }
-        syncCustomElementsOrder();
-        renderElementOrderList();
-        renderCustomElementList();
+        if (newIdx < 0 || newIdx >= win.elements.length) return;
+        const [item] = win.elements.splice(idx, 1);
+        win.elements.splice(newIdx, 0, item);
+        renderElementEditor();
         markPresetCustom();
         updateSubtitlePreview();
     }
@@ -1403,99 +1302,42 @@
         return offsets.map(([x, y]) => `${x * intensity}px ${y * intensity}px ${intensity}px ${color}`).join(', ');
     }
 
-    function collectSubtitleSettings() {
-        const cfg = {};
-        cfg.subtitle_font_family = ($('#subtitle-font-family') || {}).value || 'Microsoft YaHei';
-        cfg.subtitle_font_size = parseInt(($('#subtitle-font-size') || {}).value || 32);
-        cfg.subtitle_font_weight = parseInt(($('#subtitle-font-weight') || {}).value || 400);
-        cfg.subtitle_bold = ($('#subtitle-bold') || {}).dataset.on === 'true';
-        cfg.subtitle_italic = ($('#subtitle-italic') || {}).dataset.on === 'true';
-        cfg.subtitle_font_color = ($('#subtitle-font-color') || {}).value || '#ffffff';
-        cfg.subtitle_text_align = state.subtitleAlign || 'center';
-        cfg.subtitle_letter_spacing = parseFloat(($('#subtitle-letter-spacing') || {}).value || 0);
-        cfg.subtitle_line_height = parseFloat(($('#subtitle-line-height') || {}).value || 1.4);
-        cfg.subtitle_text_shadow_color = ($('#subtitle-text-shadow-color') || {}).value || '#000000';
-        cfg.subtitle_text_shadow_strength = parseInt(($('#subtitle-text-shadow-strength') || {}).value || 4);
-        cfg.subtitle_bg_color = ($('#subtitle-bg-color') || {}).value || '#000000';
-        cfg.subtitle_bg_opacity = parseInt(($('#subtitle-opacity') || {}).value || 60) / 100;
-        cfg.subtitle_blur = parseInt(($('#subtitle-blur') || {}).value || 20);
-        cfg.subtitle_padding_x = parseInt(($('#subtitle-padding-x') || {}).value || 24);
-        cfg.subtitle_padding_y = parseInt(($('#subtitle-padding-y') || {}).value || 12);
-        cfg.subtitle_max_lines = parseInt(($('#subtitle-lines') || {}).value || 3);
-        cfg.subtitle_interim_color = ($('#subtitle-interim-color') || {}).value || '#ffffff';
-        cfg.subtitle_interim_opacity = parseInt(($('#subtitle-interim-opacity') || {}).value || 70) / 100;
-        // 元素级显示控制
-        cfg.subtitle_show_original = ($('#subtitle-show-original') || {}).dataset.on !== 'false';
-        cfg.subtitle_show_translation = ($('#subtitle-show-translation') || {}).dataset.on === 'true';
-        cfg.subtitle_show_speaker = ($('#subtitle-show-speaker') || {}).dataset.on === 'true';
-        cfg.subtitle_show_timestamp = ($('#subtitle-show-timestamp') || {}).dataset.on === 'true';
-        cfg.subtitle_show_original_secondary = ($('#subtitle-show-original2') || {}).dataset.on === 'true';
-        cfg.subtitle_layout = state.subtitleLayout || 'vertical';
-        // 容器对齐锚点 + 卡片最大宽度
-        cfg.subtitle_container_align_x = state.subtitleContainerAlignX || 'center';
-        cfg.subtitle_container_align_y = state.subtitleContainerAlignY || 'bottom';
-        cfg.subtitle_box_max_width = parseInt(($('#subtitle-box-max-width') || {}).value || 100);
-        // 译文样式
-        cfg.subtitle_translation_font_size = parseInt(($('#subtitle-translation-size') || {}).value || 24);
-        cfg.subtitle_translation_font_color = ($('#subtitle-translation-color') || {}).value || '#ffffff';
-        cfg.subtitle_translation_font_weight = parseInt(($('#subtitle-translation-weight') || {}).value || 400);
-        cfg.subtitle_translation_opacity = parseInt(($('#subtitle-translation-opacity') || {}).value || 85) / 100;
-        cfg.subtitle_translation_prefix = ($('#subtitle-translation-prefix') || {}).value || '';
-        // 说话人样式
-        cfg.subtitle_speaker_color = ($('#subtitle-speaker-color') || {}).value || '#818cf8';
-        cfg.subtitle_speaker_font_size = parseInt(($('#subtitle-speaker-size') || {}).value || 16);
-        cfg.subtitle_speaker_prefix = ($('#subtitle-speaker-prefix') || {}).value || '';
-        // 时间戳样式
-        cfg.subtitle_timestamp_color = ($('#subtitle-timestamp-color') || {}).value || '#a1a1aa';
-        cfg.subtitle_timestamp_font_size = parseInt(($('#subtitle-timestamp-size') || {}).value || 14);
-        cfg.subtitle_timestamp_format = ($('#subtitle-timestamp-format') || {}).value || 'HH:MM:SS';
-        // 翻译配置（同声传译）
-        const engineSel = $('#subtitle-translation-engine');
-        cfg.subtitle_translation_enabled = cfg.subtitle_show_translation && (engineSel ? engineSel.value !== 'none' : false);
-        cfg.subtitle_translation_target_lang = ($('#subtitle-translation-lang') || {}).value || '英文';
-        cfg.subtitle_translation_engine = (engineSel || {}).value || 'none';
-        // 自定义元素系统
-        cfg.subtitle_custom_elements = (state.customElements || []).map(e => ({ ...e }));
-        cfg.subtitle_element_order = (state.elementOrder && state.elementOrder.length > 0)
-            ? [...state.elementOrder]
-            : ['speaker', 'original', 'original2', 'translation', 'timestamp'];
-        cfg.subtitle_preset = state.subtitlePreset || 'custom';
-        return cfg;
-    }
+    /// 组装 AppConfig.subtitle 新模型（全局字段 + 窗口数组，state 即实时模型）
+    function collectSubtitleConfig() {
+        // 窗口名称等实时字段写回 state
+        flushCurrentWindowName();
 
-    /// 从当前 UI 收集完整场景对象（含样式/窗口/翻译配置）
-    function collectSceneFromUI() {
-        const flat = collectSubtitleSettings();
-        if (!flat) return null;
-        const scene = getCurrentScene();
-        if (!scene) return null;
-        flatToScene(scene, flat);
+        const sub = {};
 
-        // 同声传译配置
-        if (!scene.translation) scene.translation = {};
-        const engineSel = $('#subtitle-translation-engine');
-        const langSel = $('#subtitle-translation-lang');
-        const interimSw = $('#subtitle-translation-interim');
-        if (engineSel) scene.translation.engine = engineSel.value || 'none';
-        if (langSel) scene.translation.target_lang = langSel.value || '英文';
-        if (interimSw) scene.translation.interim = interimSw.dataset.on === 'true';
+        // 字幕开关热键（VK 码）
+        const hotkeyInput = $('#subtitle-hotkey');
+        if (hotkeyInput) {
+            const vk = nameToVirtualKey(hotkeyInput.value);
+            if (vk) sub.hotkey = vk;
+        }
 
-        // 窗口控制（镜像实时开关状态）
-        if (!scene.window) scene.window = {};
-        const onTopSw = $('#subtitle-always-on-top');
-        const clickSw = $('#subtitle-click-through');
-        const obsSw = $('#subtitle-obs-mode');
-        const autoFitSw = $('#subtitle-auto-fit');
-        if (onTopSw) scene.window.always_on_top = onTopSw.dataset.on === 'true';
-        if (clickSw) scene.window.click_through = clickSw.dataset.on === 'true';
-        if (obsSw) scene.window.obs_mode = obsSw.dataset.on === 'true';
-        if (autoFitSw) scene.window.auto_fit = autoFitSw.dataset.on === 'true';
+        // 音源类型
+        const sourceBtn = $('#subtitle-audio-source .seg-btn.active');
+        sub.audioSource = sourceBtn ? sourceBtn.dataset.source : 'microphone';
 
-        // 场景名称
-        const nameInput = $('#subtitle-scene-name');
-        if (nameInput && nameInput.value.trim()) scene.name = nameInput.value.trim();
+        // 音频输入设备
+        const deviceSel = $('#setting-subtitle-input-device');
+        sub.inputDevice = deviceSel ? deviceSel.value : '';
 
-        return scene;
+        // 同声传译 LLM 全局接口
+        const llmUrl = $('#subtitle-llm-url');
+        const llmKey = $('#subtitle-llm-key');
+        const llmModel = $('#subtitle-llm-model');
+        sub.translationLlm = {
+            apiUrl: llmUrl ? llmUrl.value.trim() : '',
+            apiKey: llmKey ? llmKey.value.trim() : '',
+            model: llmModel ? llmModel.value.trim() : ''
+        };
+
+        // 窗口数组（state 即实时模型，深拷贝）
+        sub.windows = (state.subtitleWindows || []).map(w => JSON.parse(JSON.stringify(w)));
+
+        return sub;
     }
 
     async function loadSettings() {
@@ -1544,7 +1386,7 @@
             const [devices, defaultName] = await invoke('list_input_devices');
             const fills = [
                 { id: 'setting-input-device', current: state.config?.basic?.input_device || '' },
-                { id: 'setting-subtitle-input-device', current: state.config?.subtitle?.subtitle_input_device || '' },
+                { id: 'setting-subtitle-input-device', current: state.config?.subtitle?.inputDevice || '' },
             ];
             for (const { id, current } of fills) {
                 const sel = $('#' + id);
@@ -1999,79 +1841,23 @@
     function setupDefaultSettings() {
         const dirEl = $('#models-dir-path');
         if (dirEl) dirEl.textContent = '运行时加载';
-        // 浏览器模式兜底：生成默认场景
-        if (!state.scenes.length) {
-            state.scenes = [sceneFromLegacy({})];
-            state.currentSceneId = 'default';
+        // 浏览器模式兜底：生成默认窗口
+        if (!state.subtitleWindows.length) {
+            state.subtitleWindows = [defaultSubtitleWindow()];
+            state.currentWindowId = 'primary';
         }
     }
 
-    /// 将当前场景的配置填充到字幕设置 UI
-    function populateSubtitleUiFromScene(scene, config) {
-        if (!scene) return;
-        const s = scene.style || {};
-        const setVal = (id, value) => {
-            const el = $(`#${id}`);
-            if (el && value !== undefined && value !== null) el.value = value;
-        };
-
-        // ===== 样式 =====
-        setVal('subtitle-font-family', s.font_family);
-        setVal('subtitle-font-size', s.font_size);
-        setVal('subtitle-font-weight', s.font_weight);
-        setVal('subtitle-font-color', s.font_color);
-        setVal('subtitle-letter-spacing', s.letter_spacing);
-        setVal('subtitle-line-height', s.line_height);
-        setVal('subtitle-text-shadow-color', s.text_shadow_color);
-        setVal('subtitle-text-shadow-strength', s.text_shadow_strength);
-        setVal('subtitle-bg-color', s.bg_color);
-        setVal('subtitle-opacity', Math.round((s.bg_opacity ?? 0.6) * 100));
-        setVal('subtitle-blur', s.blur);
-        setVal('subtitle-padding-x', s.padding_x);
-        setVal('subtitle-padding-y', s.padding_y);
-        setVal('subtitle-lines', s.max_lines);
-        setVal('subtitle-interim-color', s.interim_color);
-        setVal('subtitle-interim-opacity', Math.round((s.interim_opacity ?? 0.7) * 100));
-
-        // 元素级显示控制
-        const showOrigSw = $('#subtitle-show-original');
-        if (showOrigSw) showOrigSw.dataset.on = s.show_original !== false ? 'true' : 'false';
-        const showTransSw = $('#subtitle-show-translation');
-        if (showTransSw) showTransSw.dataset.on = s.show_translation === true ? 'true' : 'false';
-        const showSpeakerSw = $('#subtitle-show-speaker');
-        if (showSpeakerSw) showSpeakerSw.dataset.on = s.show_speaker === true ? 'true' : 'false';
-        const showTsSw = $('#subtitle-show-timestamp');
-        if (showTsSw) showTsSw.dataset.on = s.show_timestamp === true ? 'true' : 'false';
-        const showOrig2Sw = $('#subtitle-show-original2');
-        if (showOrig2Sw) showOrig2Sw.dataset.on = s.show_original_secondary === true ? 'true' : 'false';
-
-        // 译文样式
-        setVal('subtitle-translation-color', s.translation_font_color);
-        setVal('subtitle-translation-size', s.translation_font_size);
-        setVal('subtitle-translation-weight', s.translation_font_weight);
-        setVal('subtitle-translation-opacity', Math.round((s.translation_opacity ?? 0.85) * 100));
-        setVal('subtitle-translation-prefix', s.translation_prefix);
-
-        // 说话人样式
-        setVal('subtitle-speaker-color', s.speaker_color);
-        setVal('subtitle-speaker-size', s.speaker_font_size);
-        setVal('subtitle-speaker-prefix', s.speaker_prefix);
-
-        // 时间戳样式
-        setVal('subtitle-timestamp-color', s.timestamp_color);
-        setVal('subtitle-timestamp-size', s.timestamp_font_size);
-        setVal('subtitle-timestamp-format', s.timestamp_format);
-
-        // ===== 识别音源（会话级，所有场景共享） =====
+    /// 填充字幕全局设置（音源/热键/设备/LLM 接口，所有窗口共享）
+    function populateSubtitleGlobalUi(config) {
         const sub = (config && config.subtitle) || {};
         const subDeviceSel = $('#setting-subtitle-input-device');
-        if (subDeviceSel) subDeviceSel.value = sub.subtitle_input_device || '';
+        if (subDeviceSel) subDeviceSel.value = sub.inputDevice || '';
 
-        // 字幕开关热键
         const subHotkeyInput = $('#subtitle-hotkey');
-        if (subHotkeyInput) subHotkeyInput.value = virtualKeyToName(sub.subtitle_hotkey || 0x76);
+        if (subHotkeyInput) subHotkeyInput.value = virtualKeyToName(sub.hotkey || 0x76);
 
-        const audioSource = sub.subtitle_audio_source || 'microphone';
+        const audioSource = sub.audioSource || 'microphone';
         const sourceActiveBtn = $(`#subtitle-audio-source .seg-btn[data-source="${audioSource}"]`);
         $$('#subtitle-audio-source .seg-btn').forEach(btn => {
             btn.classList.toggle('active', btn === sourceActiveBtn);
@@ -2079,96 +1865,128 @@
         if (sourceActiveBtn) moveSegIndicator(sourceActiveBtn);
         updateSubtitleSourceUI(audioSource);
 
-        // 开关：加粗 / 斜体（bold 通过 font_weight>=700 体现）
-        const boldSwitch = $('#subtitle-bold');
-        const isBold = (s.font_weight || 400) >= 700;
-        if (boldSwitch) boldSwitch.dataset.on = isBold ? 'true' : 'false';
-        const italicSwitch = $('#subtitle-italic');
-        if (italicSwitch) italicSwitch.dataset.on = s.italic === true ? 'true' : 'false';
+        const llm = sub.translationLlm || {};
+        const llmUrl = $('#subtitle-llm-url');
+        const llmKey = $('#subtitle-llm-key');
+        const llmModel = $('#subtitle-llm-model');
+        if (llmUrl) llmUrl.value = llm.apiUrl || '';
+        if (llmKey) llmKey.value = llm.apiKey || '';
+        if (llmModel) llmModel.value = llm.model || '';
+    }
 
-        // 对齐
-        const align = s.text_align || 'center';
-        state.subtitleAlign = align;
+    /// 将当前窗口配置填充到字幕设置 UI（主题/元素/翻译/窗口控制）
+    function populateSubtitleUiFromWindow(win, config) {
+        if (!win) return;
+        const theme = win.theme || defaultSubtitleTheme();
+        const setVal = (id, value) => {
+            const el = $(`#${id}`);
+            if (el && value !== undefined && value !== null) el.value = value;
+        };
+
+        // 字体
+        setVal('subtitle-font-family', theme.fontFamily);
+        setVal('subtitle-font-size', theme.fontSize);
+        setVal('subtitle-font-weight', theme.fontWeight);
+        const italicSwitch = $('#subtitle-italic');
+        if (italicSwitch) italicSwitch.dataset.on = theme.italic === true ? 'true' : 'false';
+
+        // 文字
+        setVal('subtitle-font-color', theme.fontColor);
+        setVal('subtitle-text-shadow-color', theme.textShadowColor);
+        setVal('subtitle-text-shadow-strength', theme.textShadowStrength);
+        setVal('subtitle-lines', theme.maxLines);
+        const align = theme.textAlign || 'center';
         const alignActiveBtn = $(`#subtitle-text-align .seg-btn[data-mode="${align}"]`);
         $$('#subtitle-text-align .seg-btn').forEach(btn => {
             btn.classList.toggle('active', btn === alignActiveBtn);
         });
         if (alignActiveBtn) moveSegIndicator(alignActiveBtn);
 
-        // 布局方向
-        const layout = s.layout || 'vertical';
-        state.subtitleLayout = layout;
+        // 行高 / 字间距
+        setVal('subtitle-line-height', theme.lineHeight);
+        setVal('subtitle-letter-spacing', theme.letterSpacing);
+
+        // 背景
+        setVal('subtitle-bg-color', theme.bgColor);
+        setVal('subtitle-opacity', Math.round((theme.bgOpacity != null ? theme.bgOpacity : 0.6) * 100));
+        setVal('subtitle-blur', theme.blur);
+        setVal('subtitle-padding-x', theme.paddingX);
+        setVal('subtitle-padding-y', theme.paddingY);
+
+        // 临时文字
+        setVal('subtitle-interim-color', theme.interimColor);
+        setVal('subtitle-interim-opacity', Math.round((theme.interimOpacity != null ? theme.interimOpacity : 0.7) * 100));
+
+        // 布局
+        const layout = theme.layout || 'vertical';
         const layoutActiveBtn = $(`#subtitle-layout .seg-btn[data-mode="${layout}"]`);
         $$('#subtitle-layout .seg-btn').forEach(btn => {
             btn.classList.toggle('active', btn === layoutActiveBtn);
         });
         if (layoutActiveBtn) moveSegIndicator(layoutActiveBtn);
 
-        // 容器对齐锚点 + 卡片最大宽度
-        const alignX = s.container_align_x || 'center';
-        state.subtitleContainerAlignX = alignX;
-        const axBtn = $(`#subtitle-container-align-x .seg-btn[data-mode="${alignX}"]`);
-        $$('#subtitle-container-align-x .seg-btn').forEach(btn => {
+        const anchorX = theme.anchorX || 'center';
+        const axBtn = $(`#subtitle-anchor-x .seg-btn[data-mode="${anchorX}"]`);
+        $$('#subtitle-anchor-x .seg-btn').forEach(btn => {
             btn.classList.toggle('active', btn === axBtn);
         });
         if (axBtn) moveSegIndicator(axBtn);
 
-        const alignY = s.container_align_y || 'bottom';
-        state.subtitleContainerAlignY = alignY;
-        const ayBtn = $(`#subtitle-container-align-y .seg-btn[data-mode="${alignY}"]`);
-        $$('#subtitle-container-align-y .seg-btn').forEach(btn => {
+        const anchorY = theme.anchorY || 'bottom';
+        const ayBtn = $(`#subtitle-anchor-y .seg-btn[data-mode="${anchorY}"]`);
+        $$('#subtitle-anchor-y .seg-btn').forEach(btn => {
             btn.classList.toggle('active', btn === ayBtn);
         });
         if (ayBtn) moveSegIndicator(ayBtn);
 
-        setVal('subtitle-box-max-width', s.box_max_width || 100);
+        setVal('subtitle-max-width', theme.maxWidthPct != null ? theme.maxWidthPct : 100);
+
+        // 译文样式
+        const tr = theme.translation || {};
+        setVal('subtitle-translation-color', tr.color);
+        setVal('subtitle-translation-size', tr.size);
+        setVal('subtitle-translation-weight', tr.weight);
+        setVal('subtitle-translation-opacity', Math.round((tr.opacity != null ? tr.opacity : 0.85) * 100));
+        setVal('subtitle-translation-prefix', tr.prefix);
+
+        // 说话人样式
+        const spk = theme.speaker || {};
+        setVal('subtitle-speaker-color', spk.color);
+        setVal('subtitle-speaker-size', spk.size);
+        setVal('subtitle-speaker-prefix', spk.prefix);
+
+        // 时间戳样式
+        const ts = theme.timestamp || {};
+        setVal('subtitle-timestamp-color', ts.color);
+        setVal('subtitle-timestamp-size', ts.size);
+        setVal('subtitle-timestamp-format', ts.format);
 
         // 预设模板
-        state.subtitlePreset = s.preset || 'custom';
-        const presetActiveBtn = $(`#subtitle-preset .seg-btn[data-preset="${state.subtitlePreset}"]`);
-        $$('#subtitle-preset .seg-btn').forEach(btn => {
-            btn.classList.toggle('active', btn === presetActiveBtn);
-        });
-        if (presetActiveBtn) moveSegIndicator(presetActiveBtn);
+        updatePresetUI();
 
-        // 自定义元素系统
-        state.customElements = Array.isArray(s.custom_elements)
-            ? s.custom_elements.map(e => ({ ...e }))
-            : [];
-        state.elementOrder = (Array.isArray(s.element_order) && s.element_order.length > 0)
-            ? [...s.element_order]
-            : ['speaker', 'original', 'translation', 'timestamp'];
-        renderCustomElementList();
-        renderElementOrderList();
-
-        // ===== 同声传译设置 =====
-        const trans = scene.translation || {};
+        // 同声传译（当前窗口）
+        const trans = win.translation || {};
         setVal('subtitle-translation-engine', trans.engine || 'none');
-        setVal('subtitle-translation-lang', trans.target_lang || '英文');
+        setVal('subtitle-translation-lang', trans.targetLang || '英文');
         const interimSw = $('#subtitle-translation-interim');
         if (interimSw) interimSw.dataset.on = trans.interim !== false ? 'true' : 'false';
 
-        // LLM 共享接口配置
-        setVal('subtitle-translation-llm-url', sub.subtitle_translation_llm_api_url || '');
-        setVal('subtitle-translation-llm-key', sub.subtitle_translation_llm_api_key || '');
-        setVal('subtitle-translation-llm-model', sub.subtitle_translation_llm_model || '');
-
-        // ===== 窗口控制（镜像 scene.window） =====
-        const w = scene.window || {};
+        // 窗口控制
         const onTopSw = $('#subtitle-always-on-top');
-        if (onTopSw) onTopSw.dataset.on = w.always_on_top !== false ? 'true' : 'false';
+        if (onTopSw) onTopSw.dataset.on = win.alwaysOnTop !== false ? 'true' : 'false';
         const clickSw = $('#subtitle-click-through');
-        if (clickSw) clickSw.dataset.on = w.click_through === true ? 'true' : 'false';
+        if (clickSw) clickSw.dataset.on = win.clickThrough === true ? 'true' : 'false';
         const obsSw = $('#subtitle-obs-mode');
-        if (obsSw) obsSw.dataset.on = w.obs_mode === true ? 'true' : 'false';
-
+        if (obsSw) obsSw.dataset.on = win.obsMode === true ? 'true' : 'false';
         const autoFitSw = $('#subtitle-auto-fit');
-        if (autoFitSw) autoFitSw.dataset.on = w.auto_fit !== false ? 'true' : 'false';
+        if (autoFitSw) autoFitSw.dataset.on = win.autoFit !== false ? 'true' : 'false';
 
-        // 场景名称
-        const nameInput = $('#subtitle-scene-name');
-        if (nameInput) nameInput.value = scene.name || '';
+        // 窗口名称
+        const nameInput = $('#subtitle-window-name');
+        if (nameInput) nameInput.value = win.name || '';
 
+        // 元素编辑器
+        renderElementEditor();
         updateTranslationUI();
         updateSubtitlePreview();
     }
@@ -2258,9 +2076,10 @@
         }
 
         if (config.subtitle) {
-            loadScenesIntoState(config);
-            const scene = getCurrentScene();
-            populateSubtitleUiFromScene(scene, config);
+            loadWindowsIntoState(config);
+            populateSubtitleGlobalUi(config);
+            const win = getCurrentSubtitleWindow();
+            populateSubtitleUiFromWindow(win, config);
         }
 
         if (config.features) {
@@ -2626,40 +2445,8 @@
         if (sensSlider) newConfig.vad.vad_sensitivity = parseInt(sensSlider.value) / 100;
         if (silenceSlider) newConfig.vad.vad_silence_duration_ms = parseInt(silenceSlider.value);
 
-        // 字幕配置：场景化收集（当前 UI 场景 + 其它场景草稿全部写入）
-        const scene = collectSceneFromUI();
-        if (scene) {
-            if (!newConfig.subtitle) newConfig.subtitle = {};
-            const idx = state.scenes.findIndex(sc => sc.id === scene.id);
-            if (idx >= 0) state.scenes[idx] = scene;
-            else state.scenes.push(scene);
-            newConfig.subtitle.subtitle_scenes = state.scenes.map(sc => JSON.parse(JSON.stringify(sc)));
-        }
-
-        // 字幕识别音源（会话级，独立于语音输入设备）
-        const subDeviceSel = $('#setting-subtitle-input-device');
-        if (subDeviceSel) newConfig.subtitle.subtitle_input_device = subDeviceSel.value;
-
-        // 音源类型（麦克风 / 系统扬声器）
-        const sourceActiveBtn = $('#subtitle-audio-source .seg-btn.active');
-        newConfig.subtitle.subtitle_audio_source = sourceActiveBtn
-            ? sourceActiveBtn.dataset.source
-            : 'microphone';
-
-        // 同声传译 LLM 共享接口配置
-        const transLlmUrl = $('#subtitle-translation-llm-url');
-        const transLlmKey = $('#subtitle-translation-llm-key');
-        const transLlmModel = $('#subtitle-translation-llm-model');
-        if (transLlmUrl) newConfig.subtitle.subtitle_translation_llm_api_url = transLlmUrl.value.trim();
-        if (transLlmKey) newConfig.subtitle.subtitle_translation_llm_api_key = transLlmKey.value.trim();
-        if (transLlmModel) newConfig.subtitle.subtitle_translation_llm_model = transLlmModel.value.trim();
-
-        // 字幕开关热键
-        const subHotkeyInput = $('#subtitle-hotkey');
-        if (subHotkeyInput) {
-            const vk = nameToVirtualKey(subHotkeyInput.value);
-            if (vk) newConfig.subtitle.subtitle_hotkey = vk;
-        }
+        // 字幕配置：新模型（全局字段 + 窗口数组），与既有 subtitle 合并以保留未编辑字段
+        newConfig.subtitle = Object.assign({}, newConfig.subtitle, collectSubtitleConfig());
 
         // 主题
         const activeThemeBtn = $('.theme-selector .seg-btn.active');
@@ -2689,11 +2476,11 @@
             state.settingsDirty = false;
             updateModelBadge();
             updateMicHint();
-            // 如果字幕窗口正在显示，热推送新配置让样式立即生效
+            // 把最新配置应用到所有已存在的字幕窗口并让它们重拉主题
             try {
-                await invoke('push_subtitle_config');
+                await invoke('subtitle_push_theme');
             } catch (e) {
-                console.warn('Failed to push subtitle config:', e);
+                console.warn('Failed to push subtitle theme:', e);
             }
             // 重新注册字幕开关全局热键（吞键，避免浏览器快捷键干扰）
             try {
@@ -2912,6 +2699,15 @@
                 setTimeout(refreshAllIndicators, 320);
             });
         }
+
+        // 侧边栏「实时字幕」快捷开关：直接启停字幕会话（与视图内的按钮同源）
+        const sidebarSubtitleBtn = $('#sidebar-subtitle-toggle');
+        if (sidebarSubtitleBtn) {
+            sidebarSubtitleBtn.addEventListener('click', () => {
+                toggleSubtitle();
+            });
+            updateSidebarSubtitleState();
+        }
     }
 
     function initDictation() {
@@ -2997,123 +2793,158 @@
 
     function initSubtitle() {
         const toggleBtn = $('#toggle-subtitle-btn');
-        if (toggleBtn) {
-            toggleBtn.addEventListener('click', toggleSubtitle);
-        }
+        if (toggleBtn) toggleBtn.addEventListener('click', toggleSubtitle);
 
-        // 所有可触发预览更新的控件
-        const previewIds = [
-            'subtitle-font-family', 'subtitle-font-size', 'subtitle-font-weight',
-            'subtitle-font-color', 'subtitle-letter-spacing', 'subtitle-line-height',
-            'subtitle-text-shadow-color', 'subtitle-text-shadow-strength',
-            'subtitle-bg-color', 'subtitle-opacity', 'subtitle-blur',
-            'subtitle-padding-x', 'subtitle-padding-y', 'subtitle-lines',
-            'subtitle-box-max-width',
-            'subtitle-interim-color', 'subtitle-interim-opacity'
-        ];
-        previewIds.forEach(id => {
-            const el = $(`#${id}`);
-            if (el) {
-                el.addEventListener('input', updateSubtitlePreview);
-                el.addEventListener('change', updateSubtitlePreview);
-            }
-        });
-
-        // 预览文本点击切换 最终/临时(interim) 状态，方便预览 interim 样式
-        const previewText = $('#subtitle-preview-text');
-        if (previewText) {
-            previewText.addEventListener('click', () => {
-                state.previewInterim = !state.previewInterim;
-                updateSubtitlePreview();
-            });
-            previewText.title = '点击切换 最终/临时 状态预览';
-        }
-
-        // 开关：加粗 / 斜体
-        ['subtitle-bold', 'subtitle-italic'].forEach(id => {
-            const sw = $(`#${id}`);
-            if (sw) {
-                sw.addEventListener('click', () => {
-                    sw.dataset.on = sw.dataset.on === 'true' ? 'false' : 'true';
-                    // bold 开关与 font_weight 同步：后端无单独 bold 字段，通过 font_weight>=700 体现
-                    if (id === 'subtitle-bold') {
-                        const weightSelect = $('#subtitle-font-weight');
-                        if (weightSelect) {
-                            if (sw.dataset.on === 'true') {
-                                weightSelect.value = '700';
-                            } else if (parseInt(weightSelect.value) >= 700) {
-                                weightSelect.value = '400';
-                            }
-                        }
-                    }
-                    updateSubtitlePreview();
-                });
-            }
-        });
-
-        // 对齐方式 segmented control
-        $$('#subtitle-text-align .seg-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                $$('#subtitle-text-align .seg-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                state.subtitleAlign = btn.dataset.mode;
-                updateSubtitlePreview();
-                moveSegIndicator(btn);
-            });
-        });
-
-        // 元素显示开关：原文/译文/说话人/时间戳
-        ['subtitle-show-original', 'subtitle-show-translation', 'subtitle-show-speaker', 'subtitle-show-timestamp'].forEach(id => {
-            const sw = $(`#${id}`);
-            if (sw) {
-                sw.addEventListener('click', () => {
-                    sw.dataset.on = sw.dataset.on === 'true' ? 'false' : 'true';
+        // 主题分段控件：点击 → 写回当前窗口 theme → 刷新预览
+        function bindThemeSeg(segId, key) {
+            $$(`#${segId} .seg-btn`).forEach(btn => {
+                btn.addEventListener('click', () => {
+                    $$(`#${segId} .seg-btn`).forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    const theme = getCurrentTheme();
+                    if (theme) theme[key] = btn.dataset.mode;
                     markPresetCustom();
                     updateSubtitlePreview();
+                    moveSegIndicator(btn);
                 });
-            }
-        });
+            });
+        }
 
-        // 布局方向 segmented control
-        $$('#subtitle-layout .seg-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                $$('#subtitle-layout .seg-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                state.subtitleLayout = btn.dataset.mode;
+        // 子样式控件（theme.translation/speaker/timestamp 分组字段）
+        function bindNestedStyle(id, group, key, parse, display) {
+            const el = $(`#${id}`);
+            if (!el) return;
+            const apply = () => {
+                const theme = getCurrentTheme();
+                if (!theme) return;
+                if (!theme[group]) theme[group] = {};
+                theme[group][key] = parse ? parse(el.value) : el.value;
+                if (display) updateValueDisplay(id, display(el.value));
                 markPresetCustom();
                 updateSubtitlePreview();
-                moveSegIndicator(btn);
-            });
-        });
+            };
+            el.addEventListener('input', apply);
+            el.addEventListener('change', apply);
+        }
 
-        // 容器水平对齐锚点 segmented control
-        $$('#subtitle-container-align-x .seg-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                $$('#subtitle-container-align-x .seg-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                state.subtitleContainerAlignX = btn.dataset.mode;
+        // 数值型主题控件
+        [
+            { id: 'subtitle-font-size', key: 'fontSize', display: v => `${v}px` },
+            { id: 'subtitle-letter-spacing', key: 'letterSpacing', display: v => `${v}px` },
+            { id: 'subtitle-line-height', key: 'lineHeight', display: v => parseFloat(v).toFixed(1) },
+            { id: 'subtitle-text-shadow-strength', key: 'textShadowStrength', display: v => `${v}` },
+            { id: 'subtitle-blur', key: 'blur', display: v => `${v}px` },
+            { id: 'subtitle-padding-x', key: 'paddingX', display: v => `${v}px` },
+            { id: 'subtitle-padding-y', key: 'paddingY', display: v => `${v}px` },
+            { id: 'subtitle-lines', key: 'maxLines', display: v => `${v} 行` },
+            { id: 'subtitle-max-width', key: 'maxWidthPct', display: v => `${v}%` }
+        ].forEach(({ id, key, display }) => {
+            const el = $(`#${id}`);
+            if (!el) return;
+            const apply = () => {
+                const theme = getCurrentTheme();
+                if (!theme) return;
+                theme[key] = parseFloat(el.value);
+                if (display) updateValueDisplay(id, display(el.value));
+                markPresetCustom();
                 updateSubtitlePreview();
-                moveSegIndicator(btn);
-            });
+            };
+            el.addEventListener('input', apply);
+            el.addEventListener('change', apply);
         });
 
-        // 容器垂直对齐锚点 segmented control
-        $$('#subtitle-container-align-y .seg-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                $$('#subtitle-container-align-y .seg-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                state.subtitleContainerAlignY = btn.dataset.mode;
+        // 百分比型主题控件（0-100 → 0-1）
+        [
+            { id: 'subtitle-opacity', key: 'bgOpacity' },
+            { id: 'subtitle-interim-opacity', key: 'interimOpacity' }
+        ].forEach(({ id, key }) => {
+            const el = $(`#${id}`);
+            if (!el) return;
+            const apply = () => {
+                const theme = getCurrentTheme();
+                if (!theme) return;
+                theme[key] = parseInt(el.value) / 100;
+                updateValueDisplay(id, `${el.value}%`);
+                markPresetCustom();
                 updateSubtitlePreview();
-                moveSegIndicator(btn);
-            });
+            };
+            el.addEventListener('input', apply);
+            el.addEventListener('change', apply);
         });
 
-        // 音源类型 segmented control（麦克风 / 系统扬声器）
+        // 字符串/整数型主题控件
+        [
+            { id: 'subtitle-font-family', key: 'fontFamily' },
+            { id: 'subtitle-font-weight', key: 'fontWeight', parse: v => parseInt(v) || 400 },
+            { id: 'subtitle-font-color', key: 'fontColor' },
+            { id: 'subtitle-text-shadow-color', key: 'textShadowColor' },
+            { id: 'subtitle-bg-color', key: 'bgColor' },
+            { id: 'subtitle-interim-color', key: 'interimColor' }
+        ].forEach(({ id, key, parse }) => {
+            const el = $(`#${id}`);
+            if (!el) return;
+            const apply = () => {
+                const theme = getCurrentTheme();
+                if (!theme) return;
+                theme[key] = parse ? parse(el.value) : el.value;
+                markPresetCustom();
+                updateSubtitlePreview();
+            };
+            el.addEventListener('input', apply);
+            el.addEventListener('change', apply);
+        });
+
+        // 斜体开关
+        const italicSw = $('#subtitle-italic');
+        if (italicSw) {
+            italicSw.addEventListener('click', () => {
+                italicSw.dataset.on = italicSw.dataset.on === 'true' ? 'false' : 'true';
+                const theme = getCurrentTheme();
+                if (theme) theme.italic = italicSw.dataset.on === 'true';
+                markPresetCustom();
+                updateSubtitlePreview();
+            });
+        }
+
+        // 译文 / 说话人 / 时间戳 子样式
+        bindNestedStyle('subtitle-translation-color', 'translation', 'color');
+        bindNestedStyle('subtitle-translation-size', 'translation', 'size', v => parseInt(v) || 0, v => `${v}px`);
+        bindNestedStyle('subtitle-translation-weight', 'translation', 'weight', v => parseInt(v) || 400);
+        bindNestedStyle('subtitle-translation-opacity', 'translation', 'opacity', v => parseInt(v) / 100, v => `${v}%`);
+        bindNestedStyle('subtitle-translation-prefix', 'translation', 'prefix');
+        bindNestedStyle('subtitle-speaker-color', 'speaker', 'color');
+        bindNestedStyle('subtitle-speaker-size', 'speaker', 'size', v => parseInt(v) || 0, v => `${v}px`);
+        bindNestedStyle('subtitle-speaker-prefix', 'speaker', 'prefix');
+        bindNestedStyle('subtitle-timestamp-color', 'timestamp', 'color');
+        bindNestedStyle('subtitle-timestamp-size', 'timestamp', 'size', v => parseInt(v) || 0, v => `${v}px`);
+        bindNestedStyle('subtitle-timestamp-format', 'timestamp', 'format');
+
+        // 对齐 / 布局 / 锚点 segmented controls
+        bindThemeSeg('subtitle-text-align', 'textAlign');
+        bindThemeSeg('subtitle-layout', 'layout');
+        bindThemeSeg('subtitle-anchor-x', 'anchorX');
+        bindThemeSeg('subtitle-anchor-y', 'anchorY');
+
+        // 音源类型 segmented control
         $$('#subtitle-audio-source .seg-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 $$('#subtitle-audio-source .seg-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 updateSubtitleSourceUI(btn.dataset.source);
+                // 切到同传模式时自动启用「副原文（麦克风）」元素，
+                // 保证麦克风副字幕立即可见（用户仍可在元素编辑器中关闭）
+                if (btn.dataset.source === 'dual') {
+                    const win = getCurrentSubtitleWindow();
+                    if (win) {
+                        const secondary = win.elements.find(e => e.kind === 'secondary');
+                        if (secondary && !secondary.enabled) {
+                            secondary.enabled = true;
+                            renderElementEditor();
+                            updateSubtitlePreview();
+                        }
+                    }
+                }
+                if (!state.populatingSettings) state.settingsDirty = true;
                 moveSegIndicator(btn);
             });
         });
@@ -3126,62 +2957,45 @@
             });
         });
 
-        // 自定义元素：添加按钮
+        // ===== 自定义元素添加 / 删除按钮 =====
         [
-            { id: 'btn-add-custom-text', type: 'text' },
-            { id: 'btn-add-custom-divider', type: 'divider' },
-            { id: 'btn-add-custom-spacer', type: 'spacer' },
-        ].forEach(({ id, type }) => {
+            { id: 'btn-add-element-text', kind: 'text' },
+            { id: 'btn-add-element-divider', kind: 'divider' },
+            { id: 'btn-add-element-spacer', kind: 'spacer' }
+        ].forEach(({ id, kind }) => {
             const btn = $(`#${id}`);
-            if (btn) {
-                btn.addEventListener('click', () => addCustomElement(type));
-            }
+            if (btn) btn.addEventListener('click', () => addElement(kind));
         });
+        const delElementBtn = $('#btn-delete-element');
+        if (delElementBtn) delElementBtn.addEventListener('click', removeSelectedElement);
 
-        // 应用到字幕窗口按钮：保存设置并推送配置
+        // ===== 应用设置按钮：保存新模型 + 应用热键 =====
         const applyBtn = $('#btn-apply-subtitle');
         if (applyBtn) {
             applyBtn.addEventListener('click', async () => {
-                if (!invoke) return;
                 applyBtn.disabled = true;
                 applyBtn.textContent = '应用中...';
                 try {
-                    const newConfig = collectSettings();
-                    if (newConfig) {
-                        await invoke('save_config', { newConfig: newConfig });
-                        state.config = newConfig;
-                        state.settingsDirty = false;
-                    }
-                    await invoke('push_subtitle_config');
-                    try {
-                        await invoke('apply_subtitle_hotkey');
-                    } catch (e) {
-                        console.warn('Failed to apply subtitle hotkey:', e);
-                    }
-                    setStatus('ready', '字幕配置已应用');
-                    setTimeout(() => setStatus('idle', '就绪'), 2000);
-                } catch (err) {
-                    console.error('Failed to apply subtitle config:', err);
-                    setStatus('error', '应用失败');
-                    setTimeout(() => setStatus('idle', '就绪'), 2000);
+                    await saveSettings();
                 } finally {
                     applyBtn.disabled = false;
-                    applyBtn.textContent = '应用到字幕窗口';
+                    applyBtn.textContent = '应用设置';
                 }
             });
         }
 
-        // 字幕窗口控制开关（按当前场景生效）
+        // ===== 窗口控制开关（置顶/穿透/OBS 额外调用 set_window_flag，auto_fit 只走保存） =====
         const alwaysOnTopSw = $('#subtitle-always-on-top');
         if (alwaysOnTopSw) {
             alwaysOnTopSw.addEventListener('click', async () => {
-                const on = alwaysOnTopSw.dataset.on === 'true';
-                alwaysOnTopSw.dataset.on = on ? 'false' : 'true';
-                const sceneObj = getCurrentScene();
-                if (sceneObj && sceneObj.window) sceneObj.window.always_on_top = !on;
+                const on = alwaysOnTopSw.dataset.on !== 'true';
+                alwaysOnTopSw.dataset.on = on ? 'true' : 'false';
+                const win = getCurrentSubtitleWindow();
+                if (win) win.alwaysOnTop = on;
+                if (!state.populatingSettings) state.settingsDirty = true;
                 if (invoke) {
                     try {
-                        await invoke('set_subtitle_always_on_top', { sceneId: state.currentSceneId, onTop: !on });
+                        await invoke('subtitle_set_window_flag', { windowId: state.currentWindowId, flag: 'always_on_top', value: on });
                     } catch (err) {
                         console.error('Failed to set always on top:', err);
                     }
@@ -3192,13 +3006,14 @@
         const clickThroughSw = $('#subtitle-click-through');
         if (clickThroughSw) {
             clickThroughSw.addEventListener('click', async () => {
-                const on = clickThroughSw.dataset.on === 'true';
-                clickThroughSw.dataset.on = on ? 'false' : 'true';
-                const sceneObj = getCurrentScene();
-                if (sceneObj && sceneObj.window) sceneObj.window.click_through = !on;
+                const on = clickThroughSw.dataset.on !== 'true';
+                clickThroughSw.dataset.on = on ? 'true' : 'false';
+                const win = getCurrentSubtitleWindow();
+                if (win) win.clickThrough = on;
+                if (!state.populatingSettings) state.settingsDirty = true;
                 if (invoke) {
                     try {
-                        await invoke('set_subtitle_click_through', { sceneId: state.currentSceneId, clickThrough: !on });
+                        await invoke('subtitle_set_window_flag', { windowId: state.currentWindowId, flag: 'click_through', value: on });
                     } catch (err) {
                         console.error('Failed to set click through:', err);
                     }
@@ -3209,13 +3024,14 @@
         const obsModeSw = $('#subtitle-obs-mode');
         if (obsModeSw) {
             obsModeSw.addEventListener('click', async () => {
-                const on = obsModeSw.dataset.on === 'true';
-                obsModeSw.dataset.on = on ? 'false' : 'true';
-                const sceneObj = getCurrentScene();
-                if (sceneObj && sceneObj.window) sceneObj.window.obs_mode = !on;
+                const on = obsModeSw.dataset.on !== 'true';
+                obsModeSw.dataset.on = on ? 'true' : 'false';
+                const win = getCurrentSubtitleWindow();
+                if (win) win.obsMode = on;
+                if (!state.populatingSettings) state.settingsDirty = true;
                 if (invoke) {
                     try {
-                        await invoke('set_subtitle_obs_mode', { sceneId: state.currentSceneId, obsMode: !on });
+                        await invoke('subtitle_set_window_flag', { windowId: state.currentWindowId, flag: 'obs_mode', value: on });
                         setStatus('ready', 'OBS 兼容模式已切换（需重启应用生效）');
                         setTimeout(() => setStatus('idle', '就绪'), 4000);
                     } catch (err) {
@@ -3228,24 +3044,21 @@
         const autoFitSw = $('#subtitle-auto-fit');
         if (autoFitSw) {
             autoFitSw.addEventListener('click', () => {
-                autoFitSw.dataset.on = autoFitSw.dataset.on === 'true' ? 'false' : 'true';
-                const sceneObj = getCurrentScene();
-                if (sceneObj && sceneObj.window) sceneObj.window.auto_fit = autoFitSw.dataset.on === 'true';
+                const on = autoFitSw.dataset.on !== 'true';
+                autoFitSw.dataset.on = on ? 'true' : 'false';
+                const win = getCurrentSubtitleWindow();
+                if (win) win.autoFit = on;
+                if (!state.populatingSettings) state.settingsDirty = true;
             });
         }
 
-        // 显示/隐藏字幕窗口（当前场景）
+        // 显示/隐藏字幕窗口（当前窗口）
         const showBtn = $('#btn-show-subtitle-window');
         if (showBtn) {
             showBtn.addEventListener('click', async () => {
                 if (!invoke) return;
                 try {
-                    await invoke('show_subtitle_window', { sceneId: state.currentSceneId, show: true });
-                    await invoke('push_subtitle_config');
-                    // 显示窗口会重新启用被关闭停用的场景
-                    const sceneObj = getCurrentScene();
-                    if (sceneObj) sceneObj.enabled = true;
-                    renderSceneList();
+                    await invoke('subtitle_show_window', { windowId: state.currentWindowId, show: true });
                 } catch (err) {
                     console.error('Failed to show subtitle window:', err);
                 }
@@ -3256,50 +3069,61 @@
             hideBtn.addEventListener('click', async () => {
                 if (!invoke) return;
                 try {
-                    await invoke('show_subtitle_window', { sceneId: state.currentSceneId, show: false });
+                    await invoke('subtitle_show_window', { windowId: state.currentWindowId, show: false });
                 } catch (err) {
                     console.error('Failed to hide subtitle window:', err);
                 }
             });
         }
 
-        // ===== 场景管理 =====
-        const sceneSelect = $('#subtitle-scene-select');
-        if (sceneSelect) {
-            sceneSelect.addEventListener('change', () => switchSubtitleScene(sceneSelect.value));
-        }
+        // ===== 窗口管理 =====
+        const windowSelect = $('#subtitle-window-select');
+        if (windowSelect) windowSelect.addEventListener('change', () => switchSubtitleWindow(windowSelect.value));
 
-        const sceneNameInput = $('#subtitle-scene-name');
-        if (sceneNameInput) {
-            sceneNameInput.addEventListener('input', () => {
-                const sceneObj = getCurrentScene();
-                if (sceneObj) sceneObj.name = sceneNameInput.value.trim() || sceneObj.name;
+        const windowNameInput = $('#subtitle-window-name');
+        if (windowNameInput) {
+            windowNameInput.addEventListener('input', () => {
+                const win = getCurrentSubtitleWindow();
+                if (win) {
+                    const name = windowNameInput.value.trim();
+                    if (name) win.name = name;
+                }
             });
         }
 
-        const addSceneBtn = $('#btn-add-subtitle-scene');
-        if (addSceneBtn) addSceneBtn.addEventListener('click', addSubtitleScene);
+        const addWindowBtn = $('#btn-add-subtitle-window');
+        if (addWindowBtn) addWindowBtn.addEventListener('click', addSubtitleWindow);
+        const dupWindowBtn = $('#btn-duplicate-subtitle-window');
+        if (dupWindowBtn) dupWindowBtn.addEventListener('click', duplicateSubtitleWindow);
+        const rmWindowBtn = $('#btn-remove-subtitle-window');
+        if (rmWindowBtn) rmWindowBtn.addEventListener('click', removeSubtitleWindow);
 
-        const dupSceneBtn = $('#btn-duplicate-subtitle-scene');
-        if (dupSceneBtn) dupSceneBtn.addEventListener('click', duplicateSubtitleScene);
-
-        const rmSceneBtn = $('#btn-remove-subtitle-scene');
-        if (rmSceneBtn) rmSceneBtn.addEventListener('click', removeSubtitleScene);
-
-        // ===== 同声传译设置 =====
+        // ===== 同声传译设置（当前窗口） =====
         const transEngineSel = $('#subtitle-translation-engine');
         if (transEngineSel) {
             transEngineSel.addEventListener('change', () => {
+                const win = getCurrentSubtitleWindow();
+                if (win) win.translation.engine = transEngineSel.value || 'none';
                 updateTranslationUI();
+                markPresetCustom();
                 updateSubtitlePreview();
             });
         }
         const transLangSel = $('#subtitle-translation-lang');
-        if (transLangSel) transLangSel.addEventListener('change', () => updateSubtitlePreview());
+        if (transLangSel) {
+            transLangSel.addEventListener('change', () => {
+                const win = getCurrentSubtitleWindow();
+                if (win) win.translation.targetLang = transLangSel.value || '英文';
+                if (!state.populatingSettings) state.settingsDirty = true;
+            });
+        }
         const transInterimSw = $('#subtitle-translation-interim');
         if (transInterimSw) {
             transInterimSw.addEventListener('click', () => {
                 transInterimSw.dataset.on = transInterimSw.dataset.on === 'true' ? 'false' : 'true';
+                const win = getCurrentSubtitleWindow();
+                if (win) win.translation.interim = transInterimSw.dataset.on === 'true';
+                if (!state.populatingSettings) state.settingsDirty = true;
             });
         }
 
@@ -3994,11 +3818,6 @@
         listen('subtitle-session-stopped', () => {
             state.isSubtitleActive = false;
             updateSubtitleButton();
-        }).then(unlisten => {
-            state.unlisteners.push(unlisten);
-        });
-
-        listen('subtitle-text', () => {
         }).then(unlisten => {
             state.unlisteners.push(unlisten);
         });

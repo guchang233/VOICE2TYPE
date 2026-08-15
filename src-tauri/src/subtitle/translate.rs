@@ -1,17 +1,10 @@
-//! 同声传译：可插拔翻译引擎 + 增量句段翻译流水线（主动推送上屏）
+//! 同声传译：TranslationHub 管理逐窗口翻译槽，译文直接写入共享快照并触发版本信号。
 //!
-//! 设计要点：
-//! 1. `TranslationEngine` trait 定义引擎接口，`resolve_engine` 注册表按配置名解析，
-//!    未来接入阿里云/DeepL 等只需实现 trait 并注册；
-//! 2. 只翻译「已确定」（definite）文本中新增的完整句段，避免重复翻译；
-//! 3. 每个句段分配递增 seq，译文乱序返回时按 seq 顺序落地，保证字幕不跳变；
-//! 4. 「临时」（indefinite）+ 未成句尾部的译文作为「当前行」实时预览，
-//!    防抖 1 秒内合并请求；句段定稿后当前行译文进入历史；
-//! 5. 译文落地即通过 dirty 通道通知会话重发帧（不再等待下一帧 ASR）；
-//! 6. 多场景共享翻译缓存（语言+原文 → 译文），避免相同内容重复调用 LLM。
+//! 与旧流水线的差异：译文不再经「合并发射器」广播，而是落地即写入
+//! [`SharedState`]（权威快照），随后 bump 版本号触发信号；字幕窗口收到信号后拉取。
+//! 多窗口共享翻译缓存（语言+原文 → 译文），相同内容不重复调用 LLM。
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -21,24 +14,24 @@ use serde::Deserialize;
 use tokio::sync::Mutex;
 
 use crate::api::client::HTTP_CLIENT;
-use crate::config::ConfigManager;
+use crate::config::{ConfigManager, SubtitleWindow};
+use crate::subtitle::state::{
+    split_by_width, split_complete_sentences, SharedState, TranslationView, LINE_WIDTH_CHARS,
+};
 
 /// 当前行（临时）译文最小请求间隔
 const CURRENT_MIN_INTERVAL_MS: u64 = 1000;
 /// 单次翻译请求超时
 const TRANSLATE_TIMEOUT_SECS: u64 = 15;
-/// 行宽（字符数）：原文/译文长行超过该宽度自动切行滚动
-pub const LINE_WIDTH_CHARS: usize = 40;
 /// 历史行最大保留数
 const HISTORY_LIMIT: usize = 8;
 
 // ==================== 翻译引擎抽象 ====================
 
 /// 翻译引擎接口：每个实现负责把一段文本翻译成目标语言。
-/// 引擎需 `Send + Sync`（会话在异步任务间共享）。
 #[async_trait]
 pub trait TranslationEngine: Send + Sync {
-    /// 引擎标识名（与配置中的 subtitle_translation_engine 对应）
+    /// 引擎标识名（与配置中的 engine 对应）
     fn name(&self) -> &'static str;
 
     /// 翻译一段文本
@@ -187,9 +180,10 @@ fn clean_translation(raw: &str) -> String {
     s
 }
 
-// ==================== 翻译流水线 ====================
+// ==================== 翻译槽 ====================
 
-struct TranslationState {
+/// 单个窗口的翻译状态（增量句段 + 当前行预览）
+struct SlotState {
     /// 已定稿句段译文（按顺序，最多 HISTORY_LIMIT 条）
     history: VecDeque<String>,
     /// definite 文本已消费的字符数
@@ -209,7 +203,7 @@ struct TranslationState {
     last_current_at: Option<Instant>,
 }
 
-impl TranslationState {
+impl SlotState {
     fn new() -> Self {
         Self {
             history: VecDeque::new(),
@@ -223,60 +217,41 @@ impl TranslationState {
             last_current_at: None,
         }
     }
+
+    fn view(&self) -> TranslationView {
+        TranslationView {
+            history: self.history.iter().cloned().collect(),
+            current: self.current.clone(),
+        }
+    }
 }
 
-/// 每场景一个翻译流水线：句段历史 + 当前行译文 + 主动推送
-pub struct TranslationPipeline {
-    engine: Option<Arc<dyn TranslationEngine>>,
+/// 一个窗口的翻译槽
+struct Slot {
+    window_id: String,
+    engine: Arc<dyn TranslationEngine>,
     target_lang: String,
     interim_enabled: bool,
-    state: Arc<Mutex<TranslationState>>,
-    config: Arc<ConfigManager>,
-    /// 跨场景共享翻译缓存：key = "lang\u{1}text"
-    cache: Arc<Mutex<HashMap<String, String>>>,
-    /// 译文落地/变化时置脏标记（由会话合并发射器统一上屏，避免高频事件淹没消息队列）
-    dirty_flag: Arc<AtomicBool>,
+    inner: Arc<Mutex<SlotState>>,
 }
 
-impl TranslationPipeline {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        config: Arc<ConfigManager>,
-        engine: Option<Arc<dyn TranslationEngine>>,
-        target_lang: String,
-        interim_enabled: bool,
-        cache: Arc<Mutex<HashMap<String, String>>>,
-        dirty_flag: Arc<AtomicBool>,
-    ) -> Self {
-        Self {
-            engine,
-            target_lang,
-            interim_enabled,
-            state: Arc::new(Mutex::new(TranslationState::new())),
-            config,
-            cache,
-            dirty_flag,
-        }
-    }
-
-    /// 引擎是否有效
-    pub fn active(&self) -> bool {
-        self.engine.is_some()
-    }
-
+impl Slot {
     /// 处理一帧 ASR 结果：更新句段翻译与当前行译文
-    pub async fn on_frame(&self, definite: &str, indefinite: &str) {
-        if !self.active() {
-            return;
-        }
-
+    async fn on_frame(
+        &self,
+        config: &Arc<ConfigManager>,
+        cache: &Arc<Mutex<HashMap<String, String>>>,
+        state: &Arc<SharedState>,
+        definite: &str,
+        indefinite: &str,
+    ) {
         let d = definite.trim();
         let i = indefinite.trim();
 
         let mut segment_spawns: Vec<(u64, String)> = Vec::new();
         let mut current_spawn: Option<(u64, String)> = None;
         {
-            let mut st = self.state.lock().await;
+            let mut st = self.inner.lock().await;
             let d_chars: Vec<char> = d.chars().collect();
 
             // ASR 文本异常回退（definite 变短）：重置累计状态
@@ -345,29 +320,28 @@ impl TranslationPipeline {
 
         // 锁外派发任务
         for (seq, sentence) in segment_spawns {
-            self.spawn_definite(seq, sentence);
+            self.spawn_definite(config, cache, state, seq, sentence);
         }
         if let Some((gen, text)) = current_spawn {
-            self.spawn_current(gen, text);
+            self.spawn_current(config, cache, state, gen, text);
         }
     }
 
-    /// 快照当前可见译文：(历史行, 当前行)
-    pub async fn snapshot(&self) -> (Vec<String>, String) {
-        if !self.active() {
-            return (Vec::new(), String::new());
-        }
-        let st = self.state.lock().await;
-        (st.history.iter().cloned().collect(), st.current.clone())
-    }
-
-    fn spawn_definite(&self, seq: u64, sentence: String) {
-        let Some(engine) = self.engine.clone() else { return };
-        let state = self.state.clone();
-        let config = self.config.clone();
-        let cache = self.cache.clone();
+    fn spawn_definite(
+        &self,
+        config: &Arc<ConfigManager>,
+        cache: &Arc<Mutex<HashMap<String, String>>>,
+        state: &Arc<SharedState>,
+        seq: u64,
+        sentence: String,
+    ) {
+        let engine = self.engine.clone();
+        let inner = self.inner.clone();
+        let config = config.clone();
+        let cache = cache.clone();
+        let state = state.clone();
         let lang = self.target_lang.clone();
-        let dirty = self.dirty_flag.clone();
+        let window_id = self.window_id.clone();
         tokio::spawn(async move {
             let translated = translate_with_cache(&config, &cache, engine.as_ref(), &lang, &sentence)
                 .await
@@ -376,7 +350,7 @@ impl TranslationPipeline {
                     String::new()
                 });
             {
-                let mut st = state.lock().await;
+                let mut st = inner.lock().await;
                 // 过期任务（状态已重置）直接丢弃
                 if seq <= st.applied_seq {
                     return;
@@ -399,17 +373,28 @@ impl TranslationPipeline {
                     }
                 }
             }
-            dirty.store(true, Ordering::Relaxed);
+            // 写入权威快照并触发信号
+            let view = { inner.lock().await.view() };
+            state.set_translation(&window_id, view);
+            state.bump();
         });
     }
 
-    fn spawn_current(&self, gen: u64, text: String) {
-        let Some(engine) = self.engine.clone() else { return };
-        let state = self.state.clone();
-        let config = self.config.clone();
-        let cache = self.cache.clone();
+    fn spawn_current(
+        &self,
+        config: &Arc<ConfigManager>,
+        cache: &Arc<Mutex<HashMap<String, String>>>,
+        state: &Arc<SharedState>,
+        gen: u64,
+        text: String,
+    ) {
+        let engine = self.engine.clone();
+        let inner = self.inner.clone();
+        let config = config.clone();
+        let cache = cache.clone();
+        let state = state.clone();
         let lang = self.target_lang.clone();
-        let dirty = self.dirty_flag.clone();
+        let window_id = self.window_id.clone();
         tokio::spawn(async move {
             let translated = translate_with_cache(&config, &cache, engine.as_ref(), &lang, &text)
                 .await
@@ -418,111 +403,73 @@ impl TranslationPipeline {
                     String::new()
                 });
             {
-                let mut st = state.lock().await;
+                let mut st = inner.lock().await;
                 if st.current_gen == gen && !translated.is_empty() {
                     st.current = translated;
                 }
             }
-            dirty.store(true, Ordering::Relaxed);
+            let view = { inner.lock().await.view() };
+            state.set_translation(&window_id, view);
+            state.bump();
         });
     }
 }
 
-/// 切分完整句段：返回 (完整句段列表, 未完结尾部)
-pub fn split_complete_sentences(text: &str) -> (Vec<String>, String) {
-    let mut sentences = Vec::new();
-    let mut last_end = 0usize;
-    let mut tail_start = 0usize;
-    let chars: Vec<char> = text.chars().collect();
-    for (idx, &c) in chars.iter().enumerate() {
-        if matches!(c, '。' | '！' | '？' | '!' | '?' | ';' | '；' | '\n') {
-            let end = idx + 1;
-            let sentence: String = chars[last_end..end].iter().collect();
-            let trimmed = sentence.trim().to_string();
-            if is_meaningful(&trimmed) {
-                sentences.push(trimmed);
-            }
-            last_end = end;
-            tail_start = end;
-        }
-    }
-    let tail: String = chars[tail_start..].iter().collect();
-    (sentences, tail)
+// ==================== 翻译枢纽 ====================
+
+/// 逐窗口翻译管理：构建槽位、喂入 A 源帧。
+pub struct TranslationHub {
+    slots: Vec<Arc<Slot>>,
+    cache: Arc<Mutex<HashMap<String, String>>>,
+    state: Arc<SharedState>,
+    config: Arc<ConfigManager>,
 }
 
-/// 长行按行宽强制切行：大量文本自动换行滚动（顶行滚出历史）
-/// 与 split_complete_sentences 配合：先按标点断句，再按行宽切长行。
-pub fn split_by_width(text: &str, limit: usize) -> (Vec<String>, String) {
-    let chars: Vec<char> = text.chars().collect();
-    let mut lines = Vec::new();
-    let mut idx = 0usize;
-    while idx + limit <= chars.len() {
-        let mut end = idx + limit;
-        // 英文/带空格文本：在行尾区间内找最近的空格断行，避免切断单词
-        if chars[end - 1].is_alphanumeric() {
-            let start = idx + limit * 3 / 4;
-            for i in (start..end).rev() {
-                if chars[i] == ' ' {
-                    end = i;
-                    break;
-                }
-            }
+impl TranslationHub {
+    /// 从启用的窗口列表构建枢纽（engine=none 的窗口不建槽）
+    pub fn build(
+        config: Arc<ConfigManager>,
+        state: Arc<SharedState>,
+        windows: &[SubtitleWindow],
+    ) -> Self {
+        let cache: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
+        let mut slots = Vec::new();
+        for w in windows {
+            let Some(engine) = resolve_engine(&w.translation.engine) else {
+                continue;
+            };
+            log::debug!("[字幕] 窗口 {} 使用翻译引擎: {}", w.id, engine.name());
+            let slot = Arc::new(Slot {
+                window_id: w.id.clone(),
+                engine,
+                target_lang: w.translation.target_lang.clone(),
+                interim_enabled: w.translation.interim,
+                inner: Arc::new(Mutex::new(SlotState::new())),
+            });
+            // 预置空视图，保证快照中窗口存在翻译条目
+            state.set_translation(
+                &w.id,
+                slot.inner
+                    .try_lock()
+                    .map(|s| s.view())
+                    .unwrap_or_default(),
+            );
+            slots.push(slot);
         }
-        if end == idx {
-            end = idx + limit;
-        }
-        let line: String = chars[idx..end].iter().collect();
-        let trimmed = line.trim().to_string();
-        if !trimmed.is_empty() {
-            lines.push(trimmed);
-        }
-        idx = end;
-        // 跳过行间空白
-        while idx < chars.len() && chars[idx] == ' ' {
-            idx += 1;
+        Self {
+            slots,
+            cache,
+            state,
+            config,
         }
     }
-    let tail: String = chars[idx..].iter().collect();
-    (lines, tail)
-}
 
-/// 判断文本是否含有实质内容（字母/数字/CJK 等）
-fn is_meaningful(text: &str) -> bool {
-    text.chars()
-        .any(|c| c.is_alphanumeric() || (c as u32) > 0x2E80)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn split_by_width_chunks_long_cjk_text() {
-        let text = "一二三四五六七八九十".repeat(10); // 100 字
-        let (lines, tail) = split_by_width(&text, 40);
-        assert_eq!(lines.len(), 2);
-        assert_eq!(lines[0].chars().count(), 40);
-        assert_eq!(lines[1].chars().count(), 40);
-        assert_eq!(tail.chars().count(), 20);
-    }
-
-    #[test]
-    fn split_by_width_breaks_at_space_for_english() {
-        let text = "hello world this is a fairly long english sentence that keeps going";
-        let (lines, tail) = split_by_width(text, 40);
-        assert!(!lines.is_empty(), "长文本应切出至少一行");
-        for line in &lines {
-            assert!(line.chars().count() <= 40, "每行不超过宽度限制");
+    /// 喂入一帧 A 源识别结果（锁外派发各槽任务）
+    pub async fn on_frame(&self, definite: &str, indefinite: &str) {
+        for slot in &self.slots {
+            slot.on_frame(&self.config, &self.cache, &self.state, definite, indefinite)
+                .await;
         }
-        let all: String = lines.join(" ") + " " + &tail;
-        assert_eq!(all.replace(' ', ""), text.replace(' ', ""), "内容不丢失");
-    }
-
-    #[test]
-    fn split_by_width_short_text_stays_tail() {
-        let (lines, tail) = split_by_width("短文本", 40);
-        assert!(lines.is_empty());
-        assert_eq!(tail, "短文本");
     }
 }
 

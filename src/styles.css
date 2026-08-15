@@ -612,6 +612,107 @@ html, body {
     transform: rotate(180deg);
 }
 
+/* ===== 侧边栏快捷操作区（实时字幕开关） ===== */
+.sidebar-quick-actions {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.sidebar-action-btn {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    min-height: 40px;
+    width: 100%;
+    border-radius: var(--radius-md);
+    border: 1px solid transparent;
+    background: transparent;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font: inherit;
+    white-space: nowrap;
+    overflow: hidden;
+    transition: padding 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+                gap 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+                background 0.15s ease,
+                color 0.15s ease;
+}
+
+.sidebar-action-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.sidebar-action-btn svg {
+    flex-shrink: 0;
+}
+
+/* 运行中：图标与文字转成功绿，状态点亮起 */
+.sidebar-action-btn.active {
+    color: var(--text-primary);
+}
+
+.sidebar-action-btn.active svg {
+    color: var(--accent-green);
+}
+
+.sidebar-action-label {
+    flex: 1;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 500;
+    max-width: 120px;
+    overflow: hidden;
+    white-space: nowrap;
+    transform: translateX(0);
+    transition: opacity 0.2s ease 0.08s,
+                transform 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+                max-width 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar-action-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--text-tertiary);
+    transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.sidebar-action-btn.active .sidebar-action-dot {
+    background: var(--accent-green);
+    box-shadow: 0 0 6px var(--accent-green);
+}
+
+/* 收起态：与导航项一致，隐藏文字、图标居中；状态点吸到右上角 */
+#sidebar.collapsed .sidebar-action-btn {
+    padding: 10px 9px;
+    gap: 0;
+}
+
+#sidebar.collapsed .sidebar-action-label {
+    opacity: 0;
+    transform: translateX(-8px);
+    pointer-events: none;
+    max-width: 0;
+    transition: opacity 0.15s ease,
+                transform 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+                max-width 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#sidebar.collapsed .sidebar-action-dot {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+}
+
 #main-content {
     flex: 1;
     overflow: hidden;
@@ -1321,6 +1422,122 @@ html, body {
     width: 24px;
     height: 24px;
     font-size: 10px;
+}
+
+/* ===== 元素编辑器（统一列表：固定 + 自定义，顺序即显示顺序） ===== */
+.element-editor-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+.element-editor-item {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    display: flex;
+    flex-direction: column;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.element-editor-item.is-custom {
+    border-style: dashed;
+}
+.element-editor-item.selected {
+    border-color: var(--accent-blue);
+    box-shadow: var(--shadow-glow-blue);
+}
+.ee-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    user-select: none;
+}
+.element-editor-item.is-custom .ee-header {
+    cursor: pointer;
+}
+.ee-enable {
+    flex-shrink: 0;
+}
+.ee-badge {
+    font-size: 11px;
+    color: var(--text-secondary);
+    background: var(--bg-hover);
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    white-space: nowrap;
+    font-weight: 500;
+}
+.ee-badge-speaker { color: #818cf8; }
+.ee-badge-original { color: #e4e4e7; }
+.ee-badge-translation { color: #a5b4fc; }
+.ee-badge-secondary { color: #7dd3fc; }
+.ee-badge-timestamp { color: #a1a1aa; }
+.ee-badge-text { color: #e4e4e7; }
+.ee-badge-divider { color: #a1a1aa; }
+.ee-badge-spacer { color: #a1a1aa; }
+.ee-label {
+    flex: 1;
+    font-size: 13px;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.ee-move {
+    display: flex;
+    gap: 4px;
+}
+.ee-move .icon-btn {
+    width: 24px;
+    height: 24px;
+    font-size: 10px;
+}
+.ee-move .icon-btn:disabled {
+    opacity: 0.35;
+    pointer-events: none;
+}
+.ee-body {
+    padding: 10px 12px 12px;
+    border-top: 1px dashed var(--border-color);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.ee-style-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.ee-style-row-block {
+    align-items: stretch;
+}
+.ee-style-row-block .text-input {
+    flex: 1;
+    min-width: 200px;
+}
+.ee-mini-label {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    white-space: nowrap;
+}
+.ee-style-row .slider {
+    width: 80px;
+}
+.ee-style-row .color-input {
+    width: 32px;
+    height: 28px;
+    padding: 0;
+}
+.ee-style-row select.text-input {
+    width: auto;
+    min-width: 60px;
+}
+.ee-prefix-input {
+    width: 96px !important;
+    min-width: 0 !important;
+    flex: 0 0 auto !important;
 }
 
 /* 预设模板 segmented control */

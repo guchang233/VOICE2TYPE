@@ -31,6 +31,12 @@ pub struct Transcript {
     next_index: u64,
 }
 
+impl Default for Transcript {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Transcript {
     pub fn new() -> Self {
         Self {

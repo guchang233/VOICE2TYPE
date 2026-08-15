@@ -10,7 +10,7 @@ use crate::output::handler::{self, OutputHandler};
 use crate::recorder::Recorder;
 use crate::streaming::audio as stream_audio;
 use crate::streaming::session::StreamingSession;
-use crate::subtitle::SubtitleService;
+use crate::subtitle::SubtitleEngine;
 use crate::whisper_local::LocalWhisperEngine;
 
 /// 持有流式 ASR 会话与音频采集流。`cpal::Stream` 不是 `Send`/`Sync`，
@@ -66,7 +66,7 @@ pub struct AppState {
     pub whisper_engine: Arc<std::sync::Mutex<LocalWhisperEngine>>,
     /// 缓存 whisper-cli 自动检测到的语言（避免每次都做语言检测）
     cached_language: Arc<std::sync::Mutex<Option<String>>>,
-    pub subtitle: Arc<SubtitleService>,
+    pub subtitle: Arc<SubtitleEngine>,
     streaming_runtime: Arc<Mutex<StreamingRuntime>>,
     /// 取消标志：force_cancel 时置 true，识别流程在各关键点检查并提前退出。
     cancel_flag: Arc<AtomicBool>,
@@ -79,7 +79,7 @@ impl AppState {
     pub fn new(config: Arc<ConfigManager>) -> Self {
         let whisper_model_dir = config.whisper_models_dir();
         let whisper_engine = Arc::new(std::sync::Mutex::new(LocalWhisperEngine::new(whisper_model_dir)));
-        let subtitle = Arc::new(SubtitleService::new(config.clone()));
+        let subtitle = Arc::new(SubtitleEngine::new(config.clone()));
 
         // 读回持久化的 auto 检测语言，避免重启后首调再做语言检测
         let persisted_lang = config.local_whisper_detected_language();

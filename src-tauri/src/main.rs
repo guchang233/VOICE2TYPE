@@ -57,9 +57,9 @@ fn main() {
     let obs_mode = config_manager
         .get_config()
         .subtitle
-        .subtitle_scenes
+        .windows
         .iter()
-        .any(|s| s.window.obs_mode);
+        .any(|w| w.obs_mode);
     if obs_mode && std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").is_err() {
         std::env::set_var(
             "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
@@ -97,7 +97,6 @@ fn main() {
             commands::clear_history,
             commands::get_app_status,
             commands::copy_to_clipboard,
-            commands::open_subtitle_window,
             commands::start_subtitle,
             commands::stop_subtitle,
             commands::is_subtitle_running,
@@ -113,16 +112,14 @@ fn main() {
             commands::download_and_install_update,
             commands::restart_app,
             commands::get_app_version,
-            commands::set_subtitle_always_on_top,
-            commands::set_subtitle_click_through,
-            commands::show_subtitle_window,
-            commands::push_subtitle_config,
-            commands::get_subtitle_window_status,
-            commands::set_subtitle_obs_mode,
-            commands::list_subtitle_scenes,
-            commands::add_subtitle_scene,
-            commands::duplicate_subtitle_scene,
-            commands::remove_subtitle_scene,
+            commands::subtitle_snapshot,
+            commands::subtitle_theme,
+            commands::subtitle_add_window,
+            commands::subtitle_duplicate_window,
+            commands::subtitle_remove_window,
+            commands::subtitle_set_window_flag,
+            commands::subtitle_show_window,
+            commands::subtitle_push_theme,
             commands::get_subtitle_transcript,
             commands::clear_subtitle_transcript,
             commands::export_subtitle_transcript,
@@ -195,9 +192,9 @@ fn main() {
                 });
             }
 
-            // 主场景字幕窗口事件：关闭 → 停用场景；移动/缩放 → 保存位置尺寸
-            // （动态场景窗口在创建时由 subtitle 模块自行挂接同样的事件）
-            app_state.subtitle.init_default_scene_window(app_handle);
+            // 主场景字幕窗口事件：关闭 → 停用窗口；移动/缩放 → 保存位置尺寸
+            // （动态窗口在创建时由 subtitle 模块自行挂接同样的事件）
+            app_state.subtitle.init_primary_window(app_handle);
 
             // 注册字幕开关全局快捷键（吞键，避免触发浏览器快捷键；串行化切换避免竞态）
             if let Err(e) = register_subtitle_shortcut(
