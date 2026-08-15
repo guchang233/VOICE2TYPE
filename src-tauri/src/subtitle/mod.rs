@@ -75,14 +75,10 @@ impl SubtitleEngine {
         }));
     }
 
-    /// 应用启动时为主窗口（静态 subtitle 窗口）挂接事件。
-    /// 注意：**不要销毁重建窗口**——OBS 采集源绑定窗口 HWND，
-    /// 重建会让 OBS 采集源指向已销毁的 HWND 而黑屏。
-    /// OBS 兼容靠「启动时 GDI 回退环境变量（main.rs）+ 运行时不透明黑底背景」实现。
+    /// 应用启动时为主窗口（静态 subtitle 窗口）挂接事件并应用窗口属性（黑底）。
     pub fn init_primary_window(&self, app: &AppHandle) {
         if let Some(window) = app.get_webview_window("subtitle") {
             windows::attach_window_events(&window, PRIMARY_WINDOW_ID, &self.config);
-            // 若主窗口开启了 OBS 模式，立即应用不透明黑底
             if let Some(primary) = self
                 .config
                 .get_subtitle_windows()
@@ -109,13 +105,14 @@ impl SubtitleEngine {
         Ok(ThemePayload::build(win))
     }
 
-    /// 显示/隐藏指定字幕窗口（显示即视为重新启用该窗口）
+    /// 显示/隐藏指定字幕窗口（显示即视为重新启用该窗口），并同步窗口状态给主窗口 UI
     pub async fn show_window(&self, app: &AppHandle, window_id: &str, show: bool) -> Result<(), String> {
         let label = windows::window_label(window_id);
         if !show {
             if let Some(window) = app.get_webview_window(&label) {
                 let _ = window.hide();
             }
+            emit_window_state(app, window_id, false);
             return Ok(());
         }
         let win = self
@@ -130,6 +127,7 @@ impl SubtitleEngine {
             windows::apply_window_props(&window, &win);
             let _ = window.show();
             let _ = window.set_focus();
+            emit_window_state(app, window_id, true);
             // 重新显示后补发信号：窗口拉取最新主题与快照
             let version = self.state.version();
             let _ = window.emit(
@@ -150,7 +148,7 @@ impl SubtitleEngine {
         Ok(())
     }
 
-    /// 设置窗口控制开关（置顶/穿透/OBS/自适应）
+    /// 设置窗口控制开关（置顶/穿透/自适应）
     pub fn set_window_flag(&self, app: &AppHandle, window_id: &str, flag: &str, value: bool) -> Result<(), String> {
         self.config.set_subtitle_window_flag(window_id, flag, value);
         let _ = self.config.save();
@@ -166,31 +164,9 @@ impl SubtitleEngine {
                     let _ = window.set_ignore_cursor_events(value);
                 }
             }
-            "obs_mode" => {
-                // OBS 模式切换 → 立即切换窗口背景（不透明黑底/恢复透明）
-                // 并让窗口重拉主题（黑底/关闭模糊策略）。
-                // 注意：**不重建窗口**——重建会改变 HWND，导致 OBS 采集源失效变黑。
-                // BitBlt 最佳兼容仍需重启应用（GDI 回退环境变量在启动时应用）。
-                if let Some(win_cfg) = self
-                    .config
-                    .get_subtitle_windows()
-                    .iter()
-                    .find(|w| w.id == window_id)
-                    .cloned()
-                {
-                    if let Some(window) = app.get_webview_window(&label) {
-                        windows::apply_background(&window, win_cfg.obs_mode);
-                        let _ = window.set_always_on_top(true);
-                        let _ = window.emit(
-                            "subtitle-signal",
-                            SignalPayload {
-                                kind: "theme".to_string(),
-                                version: self.state.version(),
-                            },
-                        );
-                    }
-                }
-            }
+            // "obs_mode"：仅保存配置标记，不触碰窗口任何属性。
+            // 两种模式的显示完全一致（页面 CSS 近黑背景），
+            // 运行时改背景色已被证实会导致部分机器 WebView2 内容不渲染。
             _ => {}
         }
         Ok(())
@@ -270,6 +246,7 @@ impl SubtitleEngine {
             if let Some(window) = windows::ensure_window(&app, win, &config) {
                 windows::apply_window_props(&window, win);
                 let _ = window.show();
+                emit_window_state(&app, &win.id, true);
                 let _ = window.emit(
                     "subtitle-signal",
                     SignalPayload {
@@ -373,6 +350,14 @@ impl SubtitleEngine {
     pub fn is_running(&self) -> bool {
         self.running.load(Ordering::SeqCst)
     }
+}
+
+/// 广播字幕窗口显示状态（主窗口设置面板据此同步「窗口已关闭/显示中」）
+fn emit_window_state(app: &AppHandle, window_id: &str, visible: bool) {
+    let _ = app.emit(
+        "subtitle-window-state",
+        serde_json::json!({ "windowId": window_id, "visible": visible }),
+    );
 }
 
 /// 向所有可见字幕窗口发射轻量信号（kind: text/theme/session）

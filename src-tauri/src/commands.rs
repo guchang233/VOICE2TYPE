@@ -1069,7 +1069,7 @@ pub async fn subtitle_remove_window(
     config.save().map_err(|e| e.to_string())
 }
 
-/// 设置窗口控制开关（always_on_top / click_through / obs_mode / auto_fit）
+/// 设置窗口控制开关（always_on_top / click_through / auto_fit）
 #[tauri::command]
 pub fn subtitle_set_window_flag(
     app_handle: tauri::AppHandle,

@@ -2398,7 +2398,7 @@
                         <div class="subtitle-cards subtitle-cards-full">
                             <div class="subtitle-card">
                                 <h4 class="subtitle-card-title">窗口控制</h4>
-                                <p class="subtitle-tip subtitle-tip-left">字幕窗口现在是完整的普通窗口，OBS 直接做「窗口采集」即可。若 BitBlt 方式黑屏，请在 OBS 采集源里把采集方式改为「Windows 图形捕获」。开启 OBS 捕捉兼容模式会把背景换成纯黑，让采集画面更干净。</p>
+                                <p class="subtitle-tip subtitle-tip-left">字幕窗口是完整的普通窗口，OBS 直接做「窗口采集」即可。OBS 兼容模式开/关显示完全一致（均为近黑背景、视觉等同纯黑、采集干净），开关切换不会影响文字显示。窗口被手动关闭后，此处的状态会同步更新。</p>
                                 <div class="subtitle-grid subtitle-grid-window-ctrl">
                                     <div class="control-group">
                                         <label>窗口置顶</label>
@@ -2413,8 +2413,8 @@
                                         </div>
                                     </div>
                                     <div class="control-group">
-                                        <label>OBS 捕捉兼容模式（不透明黑底）</label>
-                                        <div class="switch" id="subtitle-obs-mode" data-on="false">
+                                        <label>OBS 捕捉兼容模式（纯黑背景）</label>
+                                        <div class="switch" id="subtitle-obs-mode" data-on="true">
                                             <div class="switch-knob"></div>
                                         </div>
                                     </div>
@@ -2429,6 +2429,7 @@
                                         <div class="window-ctrl-buttons">
                                             <button class="secondary-btn" id="btn-show-subtitle-window">显示字幕窗口</button>
                                             <button class="secondary-btn" id="btn-hide-subtitle-window">隐藏字幕窗口</button>
+                                            <span class="transcript-status" id="subtitle-window-status"></span>
                                         </div>
                                     </div>
                                 </div>

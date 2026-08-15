@@ -11,6 +11,7 @@
         transcriptSegments: [],
         subtitleWindows: [],
         currentWindowId: 'primary',
+        subtitleWindowVisible: {},
         selectedElementId: null,
         previewInterim: false,
         config: null,
@@ -323,6 +324,18 @@
         } else {
             btn.classList.remove('active');
             btn.innerHTML = '<span class="btn-indicator"></span>开启实时字幕';
+        }
+    }
+
+    /// 同步字幕窗口显示状态到设置面板（窗口被手动关闭/显示时后端会推送事件）
+    function updateSubtitleWindowStatus() {
+        const statusEl = $('#subtitle-window-status');
+        if (!statusEl) return;
+        const visible = state.subtitleWindowVisible[state.currentWindowId] !== false;
+        if (visible) {
+            statusEl.textContent = '';
+        } else {
+            statusEl.textContent = '窗口已关闭';
         }
     }
 
@@ -661,7 +674,7 @@
             height: 120,
             alwaysOnTop: true,
             clickThrough: false,
-            obsMode: false,
+            obsMode: true,
             autoFit: true,
             translation: { engine: 'none', targetLang: '英文', interim: true },
             theme: defaultSubtitleTheme(),
@@ -686,7 +699,7 @@
             height: src.height || 120,
             alwaysOnTop: src.alwaysOnTop !== false,
             clickThrough: src.clickThrough === true,
-            obsMode: src.obsMode === true,
+            obsMode: src.obsMode !== false,
             autoFit: src.autoFit !== false,
             translation: {
                 engine: (src.translation && src.translation.engine) || 'none',
@@ -800,6 +813,7 @@
             populateSubtitleUiFromWindow(win, state.config);
         }
         renderWindowList();
+        updateSubtitleWindowStatus();
         refreshAllIndicators();
     }
 
@@ -1963,7 +1977,7 @@
         const clickSw = $('#subtitle-click-through');
         if (clickSw) clickSw.dataset.on = win.clickThrough === true ? 'true' : 'false';
         const obsSw = $('#subtitle-obs-mode');
-        if (obsSw) obsSw.dataset.on = win.obsMode === true ? 'true' : 'false';
+        if (obsSw) obsSw.dataset.on = win.obsMode !== false ? 'true' : 'false';
         const autoFitSw = $('#subtitle-auto-fit');
         if (autoFitSw) autoFitSw.dataset.on = win.autoFit !== false ? 'true' : 'false';
 
@@ -3009,8 +3023,6 @@
                 if (invoke) {
                     try {
                         await invoke('subtitle_set_window_flag', { windowId: state.currentWindowId, flag: 'obs_mode', value: on });
-                        setStatus('ready', 'OBS 兼容模式已切换（需重启应用生效）');
-                        setTimeout(() => setStatus('idle', '就绪'), 4000);
                     } catch (err) {
                         console.error('Failed to set OBS mode:', err);
                     }
@@ -3036,6 +3048,8 @@
                 if (!invoke) return;
                 try {
                     await invoke('subtitle_show_window', { windowId: state.currentWindowId, show: true });
+                    state.subtitleWindowVisible[state.currentWindowId] = true;
+                    updateSubtitleWindowStatus();
                 } catch (err) {
                     console.error('Failed to show subtitle window:', err);
                 }
@@ -3047,6 +3061,8 @@
                 if (!invoke) return;
                 try {
                     await invoke('subtitle_show_window', { windowId: state.currentWindowId, show: false });
+                    state.subtitleWindowVisible[state.currentWindowId] = false;
+                    updateSubtitleWindowStatus();
                 } catch (err) {
                     console.error('Failed to hide subtitle window:', err);
                 }
@@ -3795,6 +3811,17 @@
         listen('subtitle-session-stopped', () => {
             state.isSubtitleActive = false;
             updateSubtitleButton();
+        }).then(unlisten => {
+            state.unlisteners.push(unlisten);
+        });
+
+        // 字幕窗口显示状态同步（后端在窗口显示/隐藏/手动关闭时推送）
+        listen('subtitle-window-state', (event) => {
+            const p = event.payload || {};
+            if (p.windowId != null) {
+                state.subtitleWindowVisible[p.windowId] = p.visible !== false;
+                updateSubtitleWindowStatus();
+            }
         }).then(unlisten => {
             state.unlisteners.push(unlisten);
         });

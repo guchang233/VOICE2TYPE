@@ -10,15 +10,14 @@
             height: 100%;
             width: 100%;
             overflow: hidden;
-            /* 完整不透明窗口：固定深色底，白字在任何情况下都清晰可见 */
-            background: #171717;
+            /* 固定近黑灰背景：OBS 开/关完全一致，白字始终可见。
+               不用纯黑 #000（部分环境下内容不渲染） */
+            background: #0b0b0b;
             font-family: "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont,
                          "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
             -webkit-user-select: none;
             user-select: none;
         }
-        /* OBS 兼容模式：纯黑底，保证采集画面干净 */
-        body.obs { background: #000; }
 
         /* 舞台：对齐锚点由 JS 按设置写入 justify-content / align-items */
         #stage {
@@ -344,6 +343,28 @@
             return n <= 0 ? [] : list.slice(-n);
         }
 
+        /// 行数硬上限：把可见行总数限制在 maxLines 内。
+        /// 当前行（定稿+临时同行渲染）永远保留；超出的**历史行**从顶部隐藏。
+        /// 解决临时→正式转换或长文本换行时总行数超出设置（出现"第三行"）的问题。
+        function trimLinesToMax(linesEl, maxLines) {
+            if (linesEl.parentElement.hidden) return;
+            const lh = parseFloat(getComputedStyle(linesEl.parentElement).lineHeight);
+            if (!lh || lh <= 0) return;
+            const lines = Array.from(linesEl.querySelectorAll('.line'));
+            let rows = 0;
+            for (let i = lines.length - 1; i >= 0; i--) {
+                const el = lines[i];
+                if (el.classList.contains('off')) continue;
+                const isCurrent = el.classList.contains('current');
+                const r = Math.max(1, Math.ceil(el.offsetHeight / lh));
+                if (!isCurrent && rows + r > maxLines) {
+                    el.classList.add('off');
+                    continue;
+                }
+                rows += r;
+            }
+        }
+
         // ===== 快照渲染 =====
         function renderSnapshot(s) {
             if (!s) return;
@@ -351,6 +372,7 @@
             const b = s.b || {};
             const tr = s.translation || {};
             const status = str(s.status, '等待语音输入...');
+            const maxLines = Math.max(1, num(theme && theme.theme ? theme.theme.maxLines : 3, 3));
 
             // 原文（A 源）
             const shownA = sliceHistory(a.history);
@@ -390,6 +412,11 @@
                 opacityOf: (i) => histOpacity(i, shownT.length)
             });
 
+            // 行数硬上限：长文本换行时从顶部裁掉多余历史行，总行数不超过 maxLines
+            trimLinesToMax(elOriginal.querySelector('.lines'), maxLines);
+            trimLinesToMax(elSecondary.querySelector('.lines'), maxLines);
+            trimLinesToMax(elTranslation.querySelector('.lines'), maxLines);
+
             // 说话人
             const speaker = (a.speaker || '').trim();
             const spPrefix = (theme && theme.theme && theme.theme.speaker) ? (theme.theme.speaker.prefix || '') : '';
@@ -405,9 +432,6 @@
             const flags = payload.flags || {};
             const t = payload.theme || {};
             const elements = Array.isArray(payload.elements) ? payload.elements : [];
-
-            // OBS 兼容模式：黑底 / 关闭模糊 / 禁止拖动
-            document.body.classList.toggle('obs', !!flags.obsMode);
 
             // 舞台对齐锚点 + 卡片最大宽度
             const alignMap = { left: 'flex-start', center: 'center', right: 'flex-end', top: 'flex-start', bottom: 'flex-end' };

@@ -551,6 +551,7 @@ pub struct SubtitleWindow {
     pub height: u32,
     pub always_on_top: bool,
     pub click_through: bool,
+    /// OBS 捕捉兼容模式（默认开启）：纯黑背景，采集画面最干净
     pub obs_mode: bool,
     pub auto_fit: bool,
     pub translation: SubtitleTranslationConfig,
@@ -570,7 +571,7 @@ impl Default for SubtitleWindow {
             height: 120,
             always_on_top: true,
             click_through: false,
-            obs_mode: false,
+            obs_mode: true,
             auto_fit: true,
             translation: SubtitleTranslationConfig::default(),
             theme: SubtitleTheme::default(),
@@ -1760,7 +1761,7 @@ impl ConfigManager {
         }
     }
 
-    /// 窗口控制开关（置顶/穿透/OBS/自适应）
+    /// 窗口控制开关（置顶/穿透/OBS 兼容/自适应）
     pub fn set_subtitle_window_flag(&self, window_id: &str, flag: &str, value: bool) {
         let mut cfg = self.config.lock().unwrap();
         if let Some(w) = cfg.subtitle.windows.iter_mut().find(|w| w.id == window_id) {

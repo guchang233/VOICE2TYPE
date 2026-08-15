@@ -128,7 +128,7 @@ fn migrate_scene(scene: &Map<String, Value>, flat: &Map<String, Value>) -> Value
     let height = u32_of(&win, &["height"], u32_of(flat, &["subtitleWindowHeight", "subtitle_window_height"], 120));
     let always_on_top = bool_of(&win, &["alwaysOnTop", "always_on_top"], true);
     let click_through = bool_of(&win, &["clickThrough", "click_through"], false);
-    let obs_mode = bool_of(&win, &["obsMode", "obs_mode"], false);
+    let obs_mode = bool_of(&win, &["obsMode", "obs_mode"], true);
     let auto_fit = bool_of(&win, &["autoFit", "auto_fit"], true);
 
     // ===== 主题 =====
