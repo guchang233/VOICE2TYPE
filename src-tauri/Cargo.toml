@@ -1,6 +1,6 @@
 [package]
 name = "voice2type"
-version = "0.1.8"
+version = "0.1.9"
 edition = "2021"
 authors = ["guchang233"]
 description = "Voice2Type - 语音输入与实时字幕"
