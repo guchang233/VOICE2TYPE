@@ -42,7 +42,19 @@
             max-width: var(--box-max-w, 100%);
             overflow: hidden;
         }
-        #box.layout-h { flex-direction: row; align-items: flex-start; gap: 16px; }
+        #box.layout-h {
+            flex-direction: row;
+            align-items: flex-start;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+        /* 水平布局：主要文本元素（原文/副原文/译文）均分宽度，左右并排 */
+        #box.layout-h #el-original,
+        #box.layout-h #el-secondary,
+        #box.layout-h #el-translation {
+            flex: 1 1 0;
+            min-width: 0;
+        }
 
         /* 元素通用样式：固定元素样式值由 JS 写入各自的 CSS 变量 */
         .el { min-width: 0; }
@@ -602,19 +614,35 @@
         function applyCustomElement(node, el) {
             const kind = el.kind || 'text';
             const st = node.style;
+            const horizontal = box.classList.contains('layout-h');
             if (kind === 'divider') {
                 st.cssText = '';
-                st.height = '1px';
-                st.width = '100%';
                 st.background = el.color || '#ffffff';
                 st.opacity = String(typeof el.opacity === 'number' ? el.opacity : 0.3);
-                st.margin = '4px 0';
+                if (horizontal) {
+                    // 水平布局：分隔线变竖线
+                    st.width = '1px';
+                    st.height = 'auto';
+                    st.alignSelf = 'stretch';
+                    st.margin = '0 4px';
+                } else {
+                    st.height = '1px';
+                    st.width = '100%';
+                    st.margin = '4px 0';
+                }
                 node.dataset.kind = 'divider';
                 node.dataset.content = '';
                 node.dataset.prefix = '';
             } else if (kind === 'spacer') {
                 st.cssText = '';
-                st.height = (typeof el.fontSize === 'number' && el.fontSize > 0 ? el.fontSize : 12) + 'px';
+                const gap = (typeof el.fontSize === 'number' && el.fontSize > 0 ? el.fontSize : 12) + 'px';
+                if (horizontal) {
+                    // 水平布局：间距变横向间隔
+                    st.width = gap;
+                    st.height = '1px';
+                } else {
+                    st.height = gap;
+                }
                 node.dataset.kind = 'spacer';
                 node.dataset.content = '';
                 node.dataset.prefix = '';

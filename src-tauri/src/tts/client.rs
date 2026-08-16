@@ -10,9 +10,9 @@
 //! 鉴权：`Authorization: Bearer <api_key>`
 
 use anyhow::{Context, Result};
-use once_cell::sync::Lazy;
 use reqwest::Client;
 use serde_json::{json, Value};
+use std::time::Duration;
 
 use crate::config::TtsConfig;
 
@@ -149,19 +149,27 @@ fn sanitize_proxy_url(url: &str) -> String {
     url.to_string()
 }
 
-/// TTS 专用 HTTP 客户端：音频合成可能较慢，超时放宽到 5 分钟。
-/// 自动检测并使用 Windows 系统代理。
-pub static TTS_HTTP_CLIENT: Lazy<Client> = Lazy::new(|| {
+/// 获取 TTS HTTP 客户端：动态检测系统代理。
+/// - 总超时 5 分钟（音频合成较慢）；连接超时 15 秒（快速失败，不挂死）
+/// - 代理走 HTTP CONNECT，域名解析在代理远端进行，不受本地 DNS 污染影响
+fn get_tts_client() -> Client {
+    let proxy_url = get_system_proxy();
+    
     let mut builder = Client::builder()
-        .timeout(std::time::Duration::from_secs(300));
-    if let Some(proxy_url) = get_system_proxy() {
-        log::info!("[tts] 检测到系统代理: {}", sanitize_proxy_url(&proxy_url));
-        if let Ok(proxy) = reqwest::Proxy::all(&proxy_url) {
-            builder = builder.proxy(proxy);
+        .timeout(Duration::from_secs(300))
+        .connect_timeout(Duration::from_secs(15));
+    match &proxy_url {
+        Some(p) => {
+            log::info!("[tts] 使用系统代理: {}", sanitize_proxy_url(p));
+            match reqwest::Proxy::all(p) {
+                Ok(proxy) => builder = builder.proxy(proxy),
+                Err(e) => log::warn!("[tts] 代理配置无效，回退直连: {}", e),
+            }
         }
+        None => log::info!("[tts] 未检测到系统代理，使用直连"),
     }
     builder.build().expect("failed to build TTS HTTP client")
-});
+}
 
 /// 音色库搜索/列表参数。
 #[derive(Debug, Clone, Default)]
@@ -239,7 +247,7 @@ impl FishTtsClient {
             text.len()
         );
 
-        let resp = TTS_HTTP_CLIENT
+        let resp = get_tts_client()
             .post(&url)
             .header("Authorization", format!("Bearer {}", cfg.fish_api_key))
             .header("Content-Type", "application/json")
@@ -276,7 +284,7 @@ impl FishTtsClient {
         }
 
         let url = format!("{}/model", self.base_url);
-        let mut req = TTS_HTTP_CLIENT
+        let mut req = get_tts_client()
             .get(&url)
             .header("Authorization", format!("Bearer {}", api_key));
 
@@ -323,7 +331,7 @@ impl FishTtsClient {
         }
         let url = format!("{}/model/{}", self.base_url, voice_id);
 
-        let resp = TTS_HTTP_CLIENT
+        let resp = get_tts_client()
             .get(&url)
             .header("Authorization", format!("Bearer {}", api_key))
             .send()

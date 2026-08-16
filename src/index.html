@@ -2095,168 +2095,176 @@
                                     </div>
                                 </div>
 
-                                <h5 class="subtitle-sub-title">字体</h5>
-                                <div class="subtitle-grid subtitle-grid-3">
-                                    <div class="control-group">
-                                        <label>字体族</label>
-                                        <select class="text-input" id="subtitle-font-family">
-                                            <option value="Microsoft YaHei">微软雅黑</option>
-                                            <option value="SimHei">黑体</option>
-                                            <option value="SimSun">宋体</option>
-                                            <option value="KaiTi">楷体</option>
-                                            <option value="FangSong">仿宋</option>
-                                            <option value="Microsoft YaHei UI">Microsoft YaHei UI</option>
-                                            <option value="Arial">Arial</option>
-                                            <option value="Segoe UI">Segoe UI</option>
-                                            <option value="PingFang SC">苹方 (PingFang SC)</option>
-                                            <option value="Hiragino Sans GB">冬青黑体</option>
-                                            <option value="Source Han Sans SC">思源黑体</option>
-                                            <option value="Source Han Serif SC">思源宋体</option>
-                                        </select>
+                                <section class="subtitle-subsection">
+                                    <h5 class="subtitle-sub-title">字体</h5>
+                                    <div class="subtitle-grid subtitle-grid-3">
+                                        <div class="control-group">
+                                            <label>字体族</label>
+                                            <select class="text-input" id="subtitle-font-family">
+                                                <option value="Microsoft YaHei">微软雅黑</option>
+                                                <option value="SimHei">黑体</option>
+                                                <option value="SimSun">宋体</option>
+                                                <option value="KaiTi">楷体</option>
+                                                <option value="FangSong">仿宋</option>
+                                                <option value="Microsoft YaHei UI">Microsoft YaHei UI</option>
+                                                <option value="Arial">Arial</option>
+                                                <option value="Segoe UI">Segoe UI</option>
+                                                <option value="PingFang SC">苹方 (PingFang SC)</option>
+                                                <option value="Hiragino Sans GB">冬青黑体</option>
+                                                <option value="Source Han Sans SC">思源黑体</option>
+                                                <option value="Source Han Serif SC">思源宋体</option>
+                                            </select>
+                                        </div>
+                                        <div class="control-group">
+                                            <label>字号</label>
+                                            <input type="range" min="12" max="96" value="32" class="slider" id="subtitle-font-size">
+                                            <span class="value-display">32px</span>
+                                        </div>
+                                        <div class="control-group">
+                                            <label>字重</label>
+                                            <select class="text-input" id="subtitle-font-weight">
+                                                <option value="100">极细 100</option>
+                                                <option value="200">特细 200</option>
+                                                <option value="300">细体 300</option>
+                                                <option value="400" selected="">常规 400</option>
+                                                <option value="500">中等 500</option>
+                                                <option value="600">半粗 600</option>
+                                                <option value="700">粗体 700</option>
+                                                <option value="800">特粗 800</option>
+                                                <option value="900">超粗 900</option>
+                                            </select>
+                                        </div>
+                                        <div class="control-group-inline">
+                                            <label class="toggle-group">
+                                                <span>斜体</span>
+                                                <div class="switch" id="subtitle-italic" data-on="false">
+                                                    <div class="switch-knob"></div>
+                                                </div>
+                                            </label>
+                                        </div>
+                                        <div class="control-group">
+                                            <label>行高</label>
+                                            <input type="range" min="0.8" max="3" step="0.1" value="1.4" class="slider" id="subtitle-line-height">
+                                            <span class="value-display">1.4</span>
+                                        </div>
+                                        <div class="control-group">
+                                            <label>字间距</label>
+                                            <input type="range" min="-2" max="20" step="0.5" value="0" class="slider" id="subtitle-letter-spacing">
+                                            <span class="value-display">0px</span>
+                                        </div>
                                     </div>
-                                    <div class="control-group">
-                                        <label>字号</label>
-                                        <input type="range" min="12" max="96" value="32" class="slider" id="subtitle-font-size">
-                                        <span class="value-display">32px</span>
+                                </section>
+
+                                <section class="subtitle-subsection">
+                                    <h5 class="subtitle-sub-title">文字</h5>
+                                    <div class="subtitle-grid subtitle-grid-3">
+                                        <div class="control-group">
+                                            <label>文字颜色</label>
+                                            <input type="color" class="color-input" id="subtitle-font-color" value="#ffffff">
+                                        </div>
+                                        <div class="control-group">
+                                            <label>对齐方式</label>
+                                            <div class="segmented-control" id="subtitle-text-align">
+                                                <button class="seg-btn" data-mode="left">左</button>
+                                                <button class="seg-btn active" data-mode="center">中</button>
+                                                <button class="seg-btn" data-mode="right">右</button>
+                                            </div>
+                                        </div>
+                                        <div class="control-group">
+                                            <label>阴影颜色</label>
+                                            <input type="color" class="color-input" id="subtitle-text-shadow-color" value="#000000">
+                                        </div>
+                                        <div class="control-group">
+                                            <label>阴影强度</label>
+                                            <input type="range" min="0" max="10" value="4" class="slider" id="subtitle-text-shadow-strength">
+                                            <span class="value-display">4</span>
+                                        </div>
+                                        <div class="control-group">
+                                            <label>显示行数（含当前行）</label>
+                                            <input type="range" min="1" max="6" value="3" class="slider" id="subtitle-lines">
+                                            <span class="value-display">3 行</span>
+                                        </div>
+                                        <div class="control-group">
+                                            <label>临时文字颜色</label>
+                                            <input type="color" class="color-input" id="subtitle-interim-color" value="#ffffff">
+                                        </div>
+                                        <div class="control-group">
+                                            <label>临时文字透明度</label>
+                                            <input type="range" min="0" max="100" value="70" class="slider" id="subtitle-interim-opacity">
+                                            <span class="value-display">70%</span>
+                                        </div>
                                     </div>
-                                    <div class="control-group">
-                                        <label>字重</label>
-                                        <select class="text-input" id="subtitle-font-weight">
-                                            <option value="100">极细 100</option>
-                                            <option value="200">特细 200</option>
-                                            <option value="300">细体 300</option>
-                                            <option value="400" selected="">常规 400</option>
-                                            <option value="500">中等 500</option>
-                                            <option value="600">半粗 600</option>
-                                            <option value="700">粗体 700</option>
-                                            <option value="800">特粗 800</option>
-                                            <option value="900">超粗 900</option>
-                                        </select>
+                                </section>
+
+                                <section class="subtitle-subsection">
+                                    <h5 class="subtitle-sub-title">背景</h5>
+                                    <div class="subtitle-grid subtitle-grid-3">
+                                        <div class="control-group">
+                                            <label>背景颜色</label>
+                                            <input type="color" class="color-input" id="subtitle-bg-color" value="#000000">
+                                        </div>
+                                        <div class="control-group">
+                                            <label>背景透明度</label>
+                                            <input type="range" min="0" max="100" value="60" class="slider" id="subtitle-opacity">
+                                            <span class="value-display">60%</span>
+                                        </div>
+                                        <div class="control-group">
+                                            <label>背景模糊</label>
+                                            <input type="range" min="0" max="40" value="20" class="slider" id="subtitle-blur">
+                                            <span class="value-display">20px</span>
+                                        </div>
+                                        <div class="control-group">
+                                            <label>内边距 X</label>
+                                            <input type="range" min="0" max="60" value="24" class="slider" id="subtitle-padding-x">
+                                            <span class="value-display">24px</span>
+                                        </div>
+                                        <div class="control-group">
+                                            <label>内边距 Y</label>
+                                            <input type="range" min="0" max="40" value="12" class="slider" id="subtitle-padding-y">
+                                            <span class="value-display">12px</span>
+                                        </div>
                                     </div>
-                                    <div class="control-group-inline">
-                                        <label class="toggle-group">
-                                            <span>斜体</span>
-                                            <div class="switch" id="subtitle-italic" data-on="false">
+                                </section>
+
+                                <section class="subtitle-subsection">
+                                    <h5 class="subtitle-sub-title">布局</h5>
+                                    <div class="subtitle-grid subtitle-grid-3">
+                                        <div class="control-group">
+                                            <label>布局方向</label>
+                                            <div class="segmented-control" id="subtitle-layout">
+                                                <button class="seg-btn active" data-mode="vertical">垂直堆叠</button>
+                                                <button class="seg-btn" data-mode="horizontal">水平排列</button>
+                                            </div>
+                                        </div>
+                                        <div class="control-group">
+                                            <label>窗口内水平位置</label>
+                                            <div class="segmented-control" id="subtitle-anchor-x">
+                                                <button class="seg-btn" data-mode="left">靠左</button>
+                                                <button class="seg-btn active" data-mode="center">居中</button>
+                                                <button class="seg-btn" data-mode="right">靠右</button>
+                                            </div>
+                                        </div>
+                                        <div class="control-group">
+                                            <label>窗口内垂直位置</label>
+                                            <div class="segmented-control" id="subtitle-anchor-y">
+                                                <button class="seg-btn" data-mode="top">顶部</button>
+                                                <button class="seg-btn" data-mode="center">居中</button>
+                                                <button class="seg-btn active" data-mode="bottom">底部</button>
+                                            </div>
+                                        </div>
+                                        <div class="control-group">
+                                            <label>卡片最大宽度</label>
+                                            <input type="range" min="30" max="100" value="100" class="slider" id="subtitle-max-width">
+                                            <span class="value-display">100%</span>
+                                        </div>
+                                        <div class="control-group switch-row">
+                                            <label title="关闭（默认）：所有文字保持在当前行连续显示；开启：完成句段跳到上方历史行">完成句段自动分行（历史行）</label>
+                                            <div class="switch" id="subtitle-auto-wrap" data-on="false">
                                                 <div class="switch-knob"></div>
                                             </div>
-                                        </label>
-                                    </div>
-                                    <div class="control-group">
-                                        <label>行高</label>
-                                        <input type="range" min="0.8" max="3" step="0.1" value="1.4" class="slider" id="subtitle-line-height">
-                                        <span class="value-display">1.4</span>
-                                    </div>
-                                    <div class="control-group">
-                                        <label>字间距</label>
-                                        <input type="range" min="-2" max="20" step="0.5" value="0" class="slider" id="subtitle-letter-spacing">
-                                        <span class="value-display">0px</span>
-                                    </div>
-                                </div>
-
-                                <h5 class="subtitle-sub-title">文字</h5>
-                                <div class="subtitle-grid subtitle-grid-3">
-                                    <div class="control-group">
-                                        <label>文字颜色</label>
-                                        <input type="color" class="color-input" id="subtitle-font-color" value="#ffffff">
-                                    </div>
-                                    <div class="control-group">
-                                        <label>对齐方式</label>
-                                        <div class="segmented-control" id="subtitle-text-align">
-                                            <button class="seg-btn" data-mode="left">左</button>
-                                            <button class="seg-btn active" data-mode="center">中</button>
-                                            <button class="seg-btn" data-mode="right">右</button>
                                         </div>
                                     </div>
-                                    <div class="control-group">
-                                        <label>阴影颜色</label>
-                                        <input type="color" class="color-input" id="subtitle-text-shadow-color" value="#000000">
-                                    </div>
-                                    <div class="control-group">
-                                        <label>阴影强度</label>
-                                        <input type="range" min="0" max="10" value="4" class="slider" id="subtitle-text-shadow-strength">
-                                        <span class="value-display">4</span>
-                                    </div>
-                                    <div class="control-group">
-                                        <label>显示行数（含当前行）</label>
-                                        <input type="range" min="1" max="6" value="3" class="slider" id="subtitle-lines">
-                                        <span class="value-display">3 行</span>
-                                    </div>
-                                    <div class="control-group">
-                                        <label>临时文字颜色</label>
-                                        <input type="color" class="color-input" id="subtitle-interim-color" value="#ffffff">
-                                    </div>
-                                    <div class="control-group">
-                                        <label>临时文字透明度</label>
-                                        <input type="range" min="0" max="100" value="70" class="slider" id="subtitle-interim-opacity">
-                                        <span class="value-display">70%</span>
-                                    </div>
-                                </div>
-
-                                <h5 class="subtitle-sub-title">背景</h5>
-                                <div class="subtitle-grid subtitle-grid-3">
-                                    <div class="control-group">
-                                        <label>背景颜色</label>
-                                        <input type="color" class="color-input" id="subtitle-bg-color" value="#000000">
-                                    </div>
-                                    <div class="control-group">
-                                        <label>背景透明度</label>
-                                        <input type="range" min="0" max="100" value="60" class="slider" id="subtitle-opacity">
-                                        <span class="value-display">60%</span>
-                                    </div>
-                                    <div class="control-group">
-                                        <label>背景模糊</label>
-                                        <input type="range" min="0" max="40" value="20" class="slider" id="subtitle-blur">
-                                        <span class="value-display">20px</span>
-                                    </div>
-                                    <div class="control-group">
-                                        <label>内边距 X</label>
-                                        <input type="range" min="0" max="60" value="24" class="slider" id="subtitle-padding-x">
-                                        <span class="value-display">24px</span>
-                                    </div>
-                                    <div class="control-group">
-                                        <label>内边距 Y</label>
-                                        <input type="range" min="0" max="40" value="12" class="slider" id="subtitle-padding-y">
-                                        <span class="value-display">12px</span>
-                                    </div>
-                                </div>
-
-                                <h5 class="subtitle-sub-title">布局</h5>
-                                <div class="subtitle-grid subtitle-grid-3">
-                                    <div class="control-group">
-                                        <label>布局方向</label>
-                                        <div class="segmented-control" id="subtitle-layout">
-                                            <button class="seg-btn active" data-mode="vertical">垂直堆叠</button>
-                                            <button class="seg-btn" data-mode="horizontal">水平排列</button>
-                                        </div>
-                                    </div>
-                                    <div class="control-group">
-                                        <label>窗口内水平位置</label>
-                                        <div class="segmented-control" id="subtitle-anchor-x">
-                                            <button class="seg-btn" data-mode="left">靠左</button>
-                                            <button class="seg-btn active" data-mode="center">居中</button>
-                                            <button class="seg-btn" data-mode="right">靠右</button>
-                                        </div>
-                                    </div>
-                                    <div class="control-group">
-                                        <label>窗口内垂直位置</label>
-                                        <div class="segmented-control" id="subtitle-anchor-y">
-                                            <button class="seg-btn" data-mode="top">顶部</button>
-                                            <button class="seg-btn" data-mode="center">居中</button>
-                                            <button class="seg-btn active" data-mode="bottom">底部</button>
-                                        </div>
-                                    </div>
-                                    <div class="control-group">
-                                        <label>卡片最大宽度</label>
-                                        <input type="range" min="30" max="100" value="100" class="slider" id="subtitle-max-width">
-                                        <span class="value-display">100%</span>
-                                    </div>
-                                    <div class="control-group switch-row">
-                                        <label title="关闭（默认）：所有文字保持在当前行连续显示；开启：完成句段跳到上方历史行">完成句段自动分行（历史行）</label>
-                                        <div class="switch" id="subtitle-auto-wrap" data-on="false">
-                                            <div class="switch-knob"></div>
-                                        </div>
-                                    </div>
-                                </div>
+                                </section>
                             </div>
                         </div>
 
@@ -2300,79 +2308,85 @@
                                 <h4 class="subtitle-card-title">元素样式（译文 / 说话人 / 时间戳）</h4>
                                 <p class="subtitle-tip subtitle-tip-left">以下样式作用于「译文」「说话人」「时间戳」固定元素；各元素的开关与顺序在下方「显示元素」中配置。</p>
 
-                                <h5 class="subtitle-sub-title">译文</h5>
-                                <div class="subtitle-grid subtitle-grid-3">
-                                    <div class="control-group">
-                                        <label>译文颜色</label>
-                                        <input type="color" class="color-input" id="subtitle-translation-color" value="#ffffff">
+                                <section class="subtitle-subsection">
+                                    <h5 class="subtitle-sub-title">译文</h5>
+                                    <div class="subtitle-grid subtitle-grid-3">
+                                        <div class="control-group">
+                                            <label>译文颜色</label>
+                                            <input type="color" class="color-input" id="subtitle-translation-color" value="#ffffff">
+                                        </div>
+                                        <div class="control-group">
+                                            <label>译文字号</label>
+                                            <input type="range" min="8" max="96" value="24" class="slider" id="subtitle-translation-size">
+                                            <span class="value-display">24px</span>
+                                        </div>
+                                        <div class="control-group">
+                                            <label>译文字重</label>
+                                            <select class="text-input" id="subtitle-translation-weight">
+                                                <option value="100">极细 100</option>
+                                                <option value="200">特细 200</option>
+                                                <option value="300">细体 300</option>
+                                                <option value="400" selected="">常规 400</option>
+                                                <option value="500">中等 500</option>
+                                                <option value="600">半粗 600</option>
+                                                <option value="700">粗体 700</option>
+                                                <option value="800">特粗 800</option>
+                                                <option value="900">超粗 900</option>
+                                            </select>
+                                        </div>
+                                        <div class="control-group">
+                                            <label>译文透明度</label>
+                                            <input type="range" min="0" max="100" value="85" class="slider" id="subtitle-translation-opacity">
+                                            <span class="value-display">85%</span>
+                                        </div>
+                                        <div class="control-group span-full">
+                                            <label>译文前缀（可选）</label>
+                                            <input type="text" class="text-input" id="subtitle-translation-prefix" placeholder="如 译: " value="">
+                                        </div>
                                     </div>
-                                    <div class="control-group">
-                                        <label>译文字号</label>
-                                        <input type="range" min="8" max="96" value="24" class="slider" id="subtitle-translation-size">
-                                        <span class="value-display">24px</span>
-                                    </div>
-                                    <div class="control-group">
-                                        <label>译文字重</label>
-                                        <select class="text-input" id="subtitle-translation-weight">
-                                            <option value="100">极细 100</option>
-                                            <option value="200">特细 200</option>
-                                            <option value="300">细体 300</option>
-                                            <option value="400" selected="">常规 400</option>
-                                            <option value="500">中等 500</option>
-                                            <option value="600">半粗 600</option>
-                                            <option value="700">粗体 700</option>
-                                            <option value="800">特粗 800</option>
-                                            <option value="900">超粗 900</option>
-                                        </select>
-                                    </div>
-                                    <div class="control-group">
-                                        <label>译文透明度</label>
-                                        <input type="range" min="0" max="100" value="85" class="slider" id="subtitle-translation-opacity">
-                                        <span class="value-display">85%</span>
-                                    </div>
-                                    <div class="control-group span-full">
-                                        <label>译文前缀（可选）</label>
-                                        <input type="text" class="text-input" id="subtitle-translation-prefix" placeholder="如 译: " value="">
-                                    </div>
-                                </div>
+                                </section>
 
-                                <h5 class="subtitle-sub-title">说话人</h5>
-                                <div class="subtitle-grid subtitle-grid-3">
-                                    <div class="control-group">
-                                        <label>说话人颜色</label>
-                                        <input type="color" class="color-input" id="subtitle-speaker-color" value="#818cf8">
+                                <section class="subtitle-subsection">
+                                    <h5 class="subtitle-sub-title">说话人</h5>
+                                    <div class="subtitle-grid subtitle-grid-3">
+                                        <div class="control-group">
+                                            <label>说话人颜色</label>
+                                            <input type="color" class="color-input" id="subtitle-speaker-color" value="#818cf8">
+                                        </div>
+                                        <div class="control-group">
+                                            <label>说话人字号</label>
+                                            <input type="range" min="8" max="48" value="16" class="slider" id="subtitle-speaker-size">
+                                            <span class="value-display">16px</span>
+                                        </div>
+                                        <div class="control-group span-full">
+                                            <label>说话人前缀（可选）</label>
+                                            <input type="text" class="text-input" id="subtitle-speaker-prefix" placeholder="如 说话人: " value="">
+                                        </div>
                                     </div>
-                                    <div class="control-group">
-                                        <label>说话人字号</label>
-                                        <input type="range" min="8" max="48" value="16" class="slider" id="subtitle-speaker-size">
-                                        <span class="value-display">16px</span>
-                                    </div>
-                                    <div class="control-group span-full">
-                                        <label>说话人前缀（可选）</label>
-                                        <input type="text" class="text-input" id="subtitle-speaker-prefix" placeholder="如 说话人: " value="">
-                                    </div>
-                                </div>
+                                </section>
 
-                                <h5 class="subtitle-sub-title">时间戳</h5>
-                                <div class="subtitle-grid subtitle-grid-3">
-                                    <div class="control-group">
-                                        <label>时间戳颜色</label>
-                                        <input type="color" class="color-input" id="subtitle-timestamp-color" value="#a1a1aa">
+                                <section class="subtitle-subsection">
+                                    <h5 class="subtitle-sub-title">时间戳</h5>
+                                    <div class="subtitle-grid subtitle-grid-3">
+                                        <div class="control-group">
+                                            <label>时间戳颜色</label>
+                                            <input type="color" class="color-input" id="subtitle-timestamp-color" value="#a1a1aa">
+                                        </div>
+                                        <div class="control-group">
+                                            <label>时间戳字号</label>
+                                            <input type="range" min="8" max="48" value="14" class="slider" id="subtitle-timestamp-size">
+                                            <span class="value-display">14px</span>
+                                        </div>
+                                        <div class="control-group">
+                                            <label>时间戳格式</label>
+                                            <select class="text-input" id="subtitle-timestamp-format">
+                                                <option value="HH:MM:SS" selected="">时:分:秒</option>
+                                                <option value="MM:SS">分:秒</option>
+                                                <option value="none">不显示</option>
+                                            </select>
+                                        </div>
                                     </div>
-                                    <div class="control-group">
-                                        <label>时间戳字号</label>
-                                        <input type="range" min="8" max="48" value="14" class="slider" id="subtitle-timestamp-size">
-                                        <span class="value-display">14px</span>
-                                    </div>
-                                    <div class="control-group">
-                                        <label>时间戳格式</label>
-                                        <select class="text-input" id="subtitle-timestamp-format">
-                                            <option value="HH:MM:SS" selected="">时:分:秒</option>
-                                            <option value="MM:SS">分:秒</option>
-                                            <option value="none">不显示</option>
-                                        </select>
-                                    </div>
-                                </div>
+                                </section>
                             </div>
                         </div>
 

@@ -1705,10 +1705,30 @@ html, body {
 }
 
 .subtitle-card .control-group label {
-    font-size: 11px;
+    font-size: 11.5px;
     color: var(--text-secondary);
     font-weight: 500;
     line-height: 1.4;
+}
+
+/* ===== 子分组容器：卡片内按功能划分的独立区块 ===== */
+.subtitle-subsection {
+    margin-top: 14px;
+    padding: 12px 14px 14px;
+    background: var(--bg-tertiary); /* 回退：不支持 color-mix 时仍保证层级 */
+    background: color-mix(in srgb, var(--bg-tertiary) 62%, transparent);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    transition: border-color 0.2s ease;
+}
+
+.subtitle-subsection:hover {
+    border-color: var(--border-strong);
+}
+
+/* 子分组内网格：比顶层网格间距略大，控件不再贴边 */
+.subtitle-subsection .subtitle-grid {
+    gap: 12px 16px;
 }
 
 /* 子分组标题（外观样式卡片内的「字体/文字/背景/布局」等小节） */
@@ -1716,13 +1736,15 @@ html, body {
     display: flex;
     align-items: center;
     gap: 8px;
-    margin: 14px 0 8px;
+    margin: 0 0 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px dashed var(--border-color);
     font-family: var(--font-display);
     font-size: 10.5px;
     font-weight: 700;
     letter-spacing: 0.8px;
     text-transform: uppercase;
-    color: var(--text-tertiary);
+    color: var(--text-tertiary-strong);
     user-select: none;
 }
 
@@ -3932,6 +3954,7 @@ textarea.text-input:focus {
     flex-direction: column;
     gap: 12px;
     min-height: 0;
+    min-width: 0;
 }
 
 #view-tts .tts-textarea-wrap {
@@ -3973,6 +3996,8 @@ textarea.text-input:focus {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 8px;
     padding: 8px 16px;
     border-top: 1px solid var(--border-color);
     font-size: 11px;
@@ -3986,6 +4011,7 @@ textarea.text-input:focus {
 
 #view-tts .tts-actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 10px;
 }
 
@@ -4063,7 +4089,9 @@ textarea.text-input:focus {
     flex-direction: column;
     gap: 12px;
     overflow-y: auto;
+    overflow-x: hidden;
     padding-right: 2px;
+    min-width: 0;
 }
 
 #view-tts .tts-section {
@@ -4467,10 +4495,45 @@ textarea.text-input:focus {
     color: var(--text-secondary);
 }
 
+@media (max-width: 1180px) {
+    .subtitle-grid-3 {
+        grid-template-columns: 1fr 1fr;
+    }
+    .subtitle-grid-window-ctrl {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 760px) {
+    .subtitle-grid-3 {
+        grid-template-columns: 1fr;
+    }
+    .subtitle-grid {
+        grid-template-columns: 1fr;
+    }
+    .subtitle-subsection {
+        margin-top: 10px;
+        padding: 10px 12px 12px;
+    }
+}
+
 @media (max-width: 900px) {
     #view-tts .tts-layout {
         grid-template-columns: 1fr;
         overflow-y: auto;
+    }
+    /* 折叠为单列时：主区按内容高度排布。
+       否则 .tts-main 的 min-height:0 + .tts-textarea-wrap 的 flex:1(flex-basis:0)
+       会让文本区行高塌陷，参数面板与文本区重叠。 */
+    #view-tts .tts-main {
+        min-height: auto;
+    }
+    #view-tts .tts-textarea-wrap {
+        flex: none;
+        min-height: auto;
+    }
+    #view-tts .tts-textarea {
+        min-height: 180px;
     }
     #view-tts .tts-params {
         overflow-y: visible;

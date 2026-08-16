@@ -544,7 +544,8 @@
         b.padding = `${theme.paddingY != null ? theme.paddingY : 12}px ${theme.paddingX != null ? theme.paddingX : 24}px`;
         const horizontal = theme.layout === 'horizontal';
         b.flexDirection = horizontal ? 'row' : 'column';
-        b.alignItems = horizontal ? 'center' : 'stretch';
+        b.alignItems = horizontal ? 'flex-start' : 'stretch';
+        b.flexWrap = horizontal ? 'wrap' : 'nowrap';
         b.gap = horizontal ? '16px' : '6px';
 
         // 按 elements 数组顺序重建预览（顺序即显示顺序）
@@ -552,7 +553,14 @@
         (win.elements || []).forEach(el => {
             if (!el.enabled) return;
             const node = renderPreviewElement(el, theme, textShadow);
-            if (node) box.appendChild(node);
+            if (node) {
+                box.appendChild(node);
+                // 水平布局：主要文本元素（原文/副原文/译文）均分宽度，与真实窗口一致
+                if (horizontal && (el.kind === 'original' || el.kind === 'secondary' || el.kind === 'translation')) {
+                    node.style.flex = '1 1 0';
+                    node.style.minWidth = '0';
+                }
+            }
         });
 
         // 点击原文元素切换 最终/临时 预览态
