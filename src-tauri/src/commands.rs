@@ -1361,3 +1361,56 @@ pub async fn tts_get_voice(
         .await
         .map_err(|e| e.to_string())
 }
+
+// ===================== 视频配音工作流 =====================
+
+/// 弹出文件选择器选择视频文件
+#[tauri::command]
+pub async fn pick_video_file(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    use tokio::sync::oneshot;
+
+    let (tx, rx) = oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title("选择视频文件")
+        .add_filter(
+            "视频文件",
+            &["mp4", "mkv", "mov", "avi", "webm", "flv", "ts", "m4v", "wmv"],
+        )
+        .pick_file(move |path| {
+            let _ = tx.send(path);
+        });
+
+    let picked = rx.await.map_err(|e| format!("对话框通道错误: {}", e))?;
+    Ok(picked.map(|p| p.to_string()))
+}
+
+/// 启动一键配音任务（同一时间仅允许一个），进度通过 `dubbing-progress` 事件推送，
+/// 转写结果通过 `dubbing-transcript` 事件实时推送。
+#[tauri::command]
+pub fn dubbing_start(
+    app: tauri::AppHandle,
+    config: tauri::State<'_, Arc<ConfigManager>>,
+    video_path: String,
+    options: Option<crate::dubbing::pipeline::DubOptions>,
+) -> Result<(), String> {
+    crate::dubbing::pipeline::spawn_job(
+        app,
+        config.inner().clone(),
+        video_path,
+        options.unwrap_or_default(),
+    )
+}
+
+/// 取消当前配音任务
+#[tauri::command]
+pub fn dubbing_cancel() {
+    crate::dubbing::pipeline::request_cancel();
+}
+
+/// 查询是否有配音任务正在进行
+#[tauri::command]
+pub fn dubbing_status() -> bool {
+    crate::dubbing::pipeline::is_running()
+}

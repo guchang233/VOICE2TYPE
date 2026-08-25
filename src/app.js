@@ -29,6 +29,21 @@
             voiceSearchTimer: null,
             loaded: false,
             synthesizing: false
+        },
+        dubbing: {
+            videoPath: null,
+            running: false,
+            steps: [
+                { key: 'prepare', label: '准备工具', status: 'pending' },
+                { key: 'extract', label: '提取音轨', status: 'pending' },
+                { key: 'asr',     label: '识别字幕', status: 'pending' },
+                { key: 'tts',     label: '语音合成', status: 'pending' },
+                { key: 'mux',     label: '合成视频', status: 'pending' }
+            ],
+            segments: [],
+            renderedCount: 0,
+            outputPath: null,
+            srtPath: null
         }
     };
 
@@ -224,6 +239,8 @@
             // 模型和引擎检测改为手动触发
         } else if (viewName === 'tts') {
             loadTtsView();
+        } else if (viewName === 'dubbing') {
+            loadDubbingView();
         }
 
         // 视图切换后刷新分段控件指示器（新视图变为可见后才能正确测量尺寸）
@@ -3862,6 +3879,24 @@
         }).then(unlisten => {
             state.unlisteners.push(unlisten);
         });
+
+        // 视频配音：阶段进度
+        listen('dubbing-progress', (event) => {
+            handleDubProgress(event.payload);
+        }).then(unlisten => {
+            state.unlisteners.push(unlisten);
+        });
+
+        // 视频配音：实时转写预览（后端只推送增量分段）
+        listen('dubbing-transcript', (event) => {
+            const p = event.payload || {};
+            if (Array.isArray(p.added)) {
+                state.dubbing.segments.push(...p.added);
+                renderDubTranscript();
+            }
+        }).then(unlisten => {
+            state.unlisteners.push(unlisten);
+        });
     }
 
     // ====== 语音合成（TTS / Fish Audio）======
@@ -4229,6 +4264,309 @@
     }
 
     /// 初始化 TTS 视图事件
+    // ====== 视频配音（一键字幕识别 + TTS 配音）======
+
+    function fmtDubTime(ms) {
+        const total = Math.max(0, Math.floor(ms / 1000));
+        const h = Math.floor(total / 3600);
+        const m = Math.floor((total % 3600) / 60);
+        const s = total % 60;
+        return h > 0
+            ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+            : `${m}:${String(s).padStart(2, '0')}`;
+    }
+
+    function setDubStatus(text, cls) {
+        const el = $('#dub-status');
+        if (!el) return;
+        el.textContent = text;
+        el.classList.remove('running', 'error', 'done');
+        if (cls) el.classList.add(cls);
+    }
+
+    function renderDubSteps() {
+        const list = $('#dub-steps');
+        if (!list) return;
+        list.innerHTML = '';
+        state.dubbing.steps.forEach(step => {
+            const li = document.createElement('li');
+            li.className = 'dub-step ' + step.status;
+            const icons = {
+                pending: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle></svg>',
+                running: '<svg class="dub-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M21 12a9 9 0 1 1-9-9"></path></svg>',
+                done: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><polyline points="20 6 9 17 4 12"></polyline></svg>',
+                error: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>'
+            };
+            li.innerHTML = `<span class="dub-step-icon">${icons[step.status] || icons.pending}</span><span>${step.label}</span>`;
+            list.appendChild(li);
+        });
+    }
+
+    function renderDubTranscript(reset = false) {
+        const list = $('#dub-transcript-list');
+        const empty = $('#dub-transcript-empty');
+        if (!list || !empty) return;
+        const segs = state.dubbing.segments;
+        empty.style.display = segs.length ? 'none' : '';
+
+        if (reset) {
+            list.innerHTML = '';
+            state.dubbing.renderedCount = 0;
+        }
+
+        // 增量追加：只渲染新增分段，超出上限时裁剪最旧节点，避免长视频卡顿
+        const MAX_NODES = 200;
+        if (segs.length > state.dubbing.renderedCount) {
+            const frag = document.createDocumentFragment();
+            segs.slice(state.dubbing.renderedCount).forEach(seg => {
+                const li = document.createElement('li');
+                li.className = 'dub-transcript-item';
+                const t = document.createElement('span');
+                t.className = 'dub-t';
+                t.textContent = fmtDubTime(seg.start_ms);
+                const x = document.createElement('span');
+                x.className = 'dub-x';
+                x.textContent = seg.text || '';
+                li.appendChild(t);
+                li.appendChild(x);
+                frag.appendChild(li);
+            });
+            list.appendChild(frag);
+            state.dubbing.renderedCount = segs.length;
+            while (list.children.length > MAX_NODES) {
+                list.removeChild(list.firstChild);
+            }
+            list.scrollTop = list.scrollHeight;
+        }
+    }
+
+    function updateDubButtons() {
+        const startBtn = $('#btn-dub-start');
+        const cancelBtn = $('#btn-dub-cancel');
+        const openBtn = $('#btn-dub-open-dir');
+        if (!startBtn) return;
+        startBtn.disabled = state.dubbing.running || !state.dubbing.videoPath;
+        cancelBtn.style.display = state.dubbing.running ? '' : 'none';
+        openBtn.style.display = state.dubbing.outputPath ? '' : 'none';
+    }
+
+    async function loadDubbingView() {
+        renderDubSteps();
+        renderDubTranscript();
+        updateDubButtons();
+        if (!invoke) return;
+        // 与后端任务状态同步（页面刷新后恢复运行中状态）
+        try {
+            const busy = await invoke('dubbing_status');
+            if (busy && !state.dubbing.running) {
+                state.dubbing.running = true;
+                const cur = state.dubbing.steps.find(s => s.status === 'pending');
+                if (cur) cur.status = 'running';
+                renderDubSteps();
+                setDubStatus('处理中', 'running');
+            } else if (!busy && state.dubbing.running) {
+                state.dubbing.running = false;
+            }
+        } catch (e) { console.error(e); }
+        updateDubButtons();
+        if (!state.config) {
+            try { state.config = await invoke('get_config'); } catch (e) { console.error(e); }
+        }
+        renderDubEngineBadges();
+    }
+
+    function renderDubEngineBadges() {
+        const cfg = state.config;
+        const asrBadge = $('#dub-asr-badge');
+        const ttsBadge = $('#dub-tts-badge');
+        const hint = $('#dub-engine-hint');
+        if (!asrBadge || !cfg) return;
+
+        const modelSel = (cfg.model_selection && cfg.model_selection.batch_model) || cfg.basic?.model_name || '';
+        let asrText = modelSel || '-';
+        let warn = '';
+        if (modelSel === 'local-whisper' || /本地/.test(asrText)) {
+            asrBadge.textContent = '不支持：本地 Whisper';
+            asrBadge.classList.add('warn');
+            warn = '视频配音需要云端识别模型，请到「设置 → 整段识别」切换（推荐 Groq Whisper Large v3，支持逐段时间戳）。';
+        } else {
+            asrBadge.textContent = asrText;
+            asrBadge.classList.remove('warn');
+        }
+        if (/groq|whisper-large/i.test(modelSel)) asrText = 'Groq · Whisper Large v3';
+
+        if (ttsBadge) {
+            const voice = cfg.tts?.reference_title || '默认音色';
+            const hasKey = !!cfg.tts?.fish_api_key;
+            ttsBadge.textContent = hasKey ? `${cfg.tts.model} · ${voice}` : '未配置 Fish Audio Key';
+            ttsBadge.classList.toggle('warn', !hasKey);
+            if (!hasKey) warn = warn || '请先在「语音合成」页填写 Fish Audio API Key。';
+        }
+        if (hint) hint.textContent = warn || '识别使用「设置 → 整段识别」的云端模型；长视频将自动分段上传，输出保存到视频同目录。';
+    }
+
+    async function pickDubVideo() {
+        if (!invoke || state.dubbing.running) return;
+        try {
+            const path = await invoke('pick_video_file');
+            if (!path) return;
+            state.dubbing.videoPath = path;
+            const nameEl = $('#dub-file-name');
+            if (nameEl) nameEl.textContent = path.split(/[\\/]/).pop();
+            resetDubProgress(false);
+            updateDubButtons();
+        } catch (e) {
+            setDubStatus('选择失败', 'error');
+        }
+    }
+
+    function resetDubProgress(clearFile) {
+        state.dubbing.steps.forEach(s => { s.status = 'pending'; });
+        state.dubbing.segments = [];
+        state.dubbing.outputPath = null;
+        state.dubbing.srtPath = null;
+        renderDubSteps();
+        renderDubTranscript(true);
+        setDubStatus(state.dubbing.running ? '处理中' : '就绪');
+        const bar = $('#dub-progress-bar');
+        const text = $('#dub-progress-text');
+        const msg = $('#dub-message');
+        const result = $('#dub-result');
+        if (bar) bar.style.width = '0%';
+        if (text) text.textContent = '0%';
+        if (msg) msg.textContent = clearFile ? '选择视频后点击「一键配音」' : '点击「一键配音」开始处理';
+        if (result) result.style.display = 'none';
+        if (clearFile) {
+            state.dubbing.videoPath = null;
+            const nameEl = $('#dub-file-name');
+            if (nameEl) nameEl.textContent = '未选择视频';
+        }
+        updateDubButtons();
+    }
+
+    async function startDubbing() {
+        if (!invoke || state.dubbing.running || !state.dubbing.videoPath) return;
+        try {
+            await invoke('dubbing_start', {
+                videoPath: state.dubbing.videoPath,
+                options: {}
+            });
+            state.dubbing.running = true;
+            state.dubbing.steps.forEach(s => { s.status = 'pending'; });
+            state.dubbing.segments = [];
+            state.dubbing.outputPath = null;
+            state.dubbing.srtPath = null;
+            renderDubSteps();
+            renderDubTranscript(true);
+            const bar = $('#dub-progress-bar');
+            const text = $('#dub-progress-text');
+            const msg = $('#dub-message');
+            if (bar) bar.style.width = '1%';
+            if (text) text.textContent = '';
+            if (msg) msg.textContent = '任务已启动，正在准备工具...';
+            setDubStatus('处理中', 'running');
+            updateDubButtons();
+        } catch (e) {
+            state.dubbing.running = false;
+            updateDubButtons();
+            setDubStatus('启动失败', 'error');
+            const msg = $('#dub-message');
+            if (msg) msg.textContent = String(e);
+        }
+    }
+
+    async function cancelDubbing() {
+        if (!invoke) return;
+        try { await invoke('dubbing_cancel'); } catch (e) { console.error(e); }
+    }
+
+    async function openDubFolder() {
+        if (!invoke || !state.dubbing.outputPath) return;
+        const dir = state.dubbing.outputPath.replace(/[\\/][^\\/]+$/, '');
+        try { await invoke('open_directory', { path: dir }); } catch (e) { console.error(e); }
+    }
+
+    function handleDubProgress(p) {
+        if (!p) return;
+        const bar = $('#dub-progress-bar');
+        const text = $('#dub-progress-text');
+        const msg = $('#dub-message');
+
+        if (p.status === 'done') {
+            state.dubbing.running = false;
+            state.dubbing.steps.forEach(s => { s.status = 'done'; });
+            renderDubSteps();
+            setDubStatus('完成', 'done');
+            if (bar) bar.style.width = '100%';
+            if (text) text.textContent = '100%';
+            if (msg) msg.textContent = p.message || '配音视频已生成';
+            const result = p.result || {};
+            state.dubbing.outputPath = result.output || null;
+            state.dubbing.srtPath = result.subtitle || null;
+            const wrap = $('#dub-result');
+            const video = $('#dub-video');
+            const meta = $('#dub-result-meta');
+            if (wrap && video && state.dubbing.outputPath) {
+                video.src = toAssetUrl(state.dubbing.outputPath);
+                wrap.style.display = '';
+            }
+            if (meta) {
+                const failTxt = result.failed_segments > 0 ? `，${result.failed_segments} 段合成失败已跳过` : '';
+                meta.textContent = `共 ${result.segments} 段字幕${failTxt} · 字幕文件: ${state.dubbing.srtPath || '-'}`;
+            }
+            updateDubButtons();
+            return;
+        }
+
+        if (p.status === 'error') {
+            state.dubbing.running = false;
+            const active = state.dubbing.steps.find(s => s.status === 'running');
+            if (active) active.status = 'error';
+            renderDubSteps();
+            setDubStatus('失败', 'error');
+            if (msg) msg.textContent = p.message || '任务失败';
+            updateDubButtons();
+            return;
+        }
+
+        if (p.status === 'cancelled') {
+            state.dubbing.running = false;
+            state.dubbing.steps.forEach(s => { if (s.status !== 'done') s.status = 'pending'; });
+            renderDubSteps();
+            setDubStatus('已取消');
+            if (msg) msg.textContent = '任务已取消';
+            updateDubButtons();
+            return;
+        }
+
+        // running：更新对应阶段状态（前序阶段标为完成）
+        if (p.stage) {
+            const idx = state.dubbing.steps.findIndex(s => s.key === p.stage);
+            if (idx >= 0) {
+                state.dubbing.steps.forEach((s, i) => {
+                    if (i < idx) s.status = 'done';
+                    else if (i === idx) s.status = 'running';
+                });
+                renderDubSteps();
+            }
+        }
+        if (typeof p.percent === 'number' && bar) bar.style.width = p.percent + '%';
+        if (typeof p.percent === 'number' && text) text.textContent = p.percent + '%';
+        if (msg && p.message) msg.textContent = p.message;
+    }
+
+    function initDubbing() {
+        renderDubSteps();
+        const pickBtn = $('#btn-dub-pick');
+        if (pickBtn) pickBtn.addEventListener('click', pickDubVideo);
+        const startBtn = $('#btn-dub-start');
+        if (startBtn) startBtn.addEventListener('click', startDubbing);
+        const cancelBtn = $('#btn-dub-cancel');
+        if (cancelBtn) cancelBtn.addEventListener('click', cancelDubbing);
+        const openBtn = $('#btn-dub-open-dir');
+        if (openBtn) openBtn.addEventListener('click', openDubFolder);
+    }
+
     function initTts() {
         const text = $('#tts-text');
         if (text) {
@@ -4340,6 +4678,7 @@
         initSettingsDirtyTracking();
         initAudioQualityInteractions();
         initTts();
+        initDubbing();
 
         // 禁用 WebView 默认右键菜单（刷新、检查、另存为等），
         // 历史记录项的 contextmenu 监听器已自行处理 preventDefault，不受影响。

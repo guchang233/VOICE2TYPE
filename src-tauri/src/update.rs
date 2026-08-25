@@ -256,6 +256,21 @@ pub fn download_file<F>(url: &str, path: &PathBuf, on_progress: F) -> Result<()>
 where
     F: Fn(u64, u64),
 {
+    download_file_checked(url, path, on_progress, true)
+}
+
+/// 下载任意文件（不执行 EXE 魔数检查），用于 zip 等资源包。
+pub fn download_file_any<F>(url: &str, path: &PathBuf, on_progress: F) -> Result<()>
+where
+    F: Fn(u64, u64),
+{
+    download_file_checked(url, path, on_progress, false)
+}
+
+fn download_file_checked<F>(url: &str, path: &PathBuf, on_progress: F, expect_exe: bool) -> Result<()>
+where
+    F: Fn(u64, u64),
+{
     // 构建下载源列表：直连 + 各加速镜像
     let mut sources = vec![url.to_string()];
     for mirror in GITHUB_MIRRORS.iter().skip(1) {
@@ -266,7 +281,7 @@ where
 
     for try_url in &sources {
         log::info!("尝试下载: {}", try_url);
-        match download_single(try_url, path, &on_progress) {
+        match download_single(try_url, path, &on_progress, expect_exe) {
             Ok(()) => {
                 if try_url != url {
                     log::info!("镜像下载成功: {}", try_url);
@@ -286,7 +301,7 @@ where
 }
 
 /// 从单个 URL 下载文件到指定路径
-fn download_single<F>(url: &str, path: &PathBuf, on_progress: F) -> Result<()>
+fn download_single<F>(url: &str, path: &PathBuf, on_progress: &F, expect_exe: bool) -> Result<()>
 where
     F: Fn(u64, u64),
 {
@@ -319,7 +334,7 @@ where
         }
 
         if first_chunk {
-            if n >= 2 {
+            if expect_exe && n >= 2 {
                 if buffer[0] != 0x4D || buffer[1] != 0x5A {
                     // 'M' 'Z'
                     // Close and delete the file

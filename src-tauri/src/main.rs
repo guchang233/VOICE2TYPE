@@ -7,6 +7,7 @@ mod asr;
 mod audio;
 mod commands;
 mod config;
+mod dubbing;
 mod history;
 mod indicator;
 mod notify;
@@ -111,6 +112,10 @@ fn main() {
             commands::tts_export,
             commands::tts_list_voices,
             commands::tts_get_voice,
+            commands::pick_video_file,
+            commands::dubbing_start,
+            commands::dubbing_cancel,
+            commands::dubbing_status,
         ])
         .setup(move |app| {
             let app_handle = app.handle();

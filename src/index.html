@@ -1940,6 +1940,10 @@
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>
                     <span class="nav-label">语音合成</span>
                 </div>
+                <div class="nav-item" data-view="dubbing">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="2" width="20" height="20" rx="2.18"></rect><line x1="7" y1="2" x2="7" y2="22"></line><line x1="17" y1="2" x2="17" y2="22"></line><line x1="2" y1="12" x2="22" y2="12"></line><line x1="2" y1="7" x2="22" y2="7"></line><line x1="2" y1="17" x2="22" y2="17"></line></svg>
+                    <span class="nav-label">视频配音</span>
+                </div>
                 <div class="nav-item" data-view="history">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
                     <span class="nav-label">历史记录</span>
@@ -2644,6 +2648,99 @@
                                 <button class="ghost-btn" id="btn-tts-voice-prev" disabled>上一页</button>
                                 <span id="tts-voice-page-info">1 / 1</span>
                                 <button class="ghost-btn" id="btn-tts-voice-next">下一页</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="view" id="view-dubbing">
+                    <div class="view-header">
+                        <h2>视频配音</h2>
+                        <div class="view-header-actions">
+                            <span class="tts-status" id="dub-status">就绪</span>
+                        </div>
+                    </div>
+                    <div class="dub-layout">
+                        <div class="dub-main">
+                            <div class="settings-section tts-section">
+                                <div class="section-header">
+                                    <h3>视频文件</h3>
+                                    <svg class="section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                </div>
+                                <div class="section-body">
+                                    <div class="dub-file-card">
+                                        <button class="solid-btn" id="btn-dub-pick">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                                            选择视频
+                                        </button>
+                                        <div class="dub-file-info">
+                                            <div class="dub-file-name" id="dub-file-name">未选择视频</div>
+                                            <div class="dub-file-sub">支持 mp4 / mkv / mov / avi / webm 等，输出保存到视频同目录</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="settings-section tts-section">
+                                <div class="section-header">
+                                    <h3>处理进度</h3>
+                                    <svg class="section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                </div>
+                                <div class="section-body">
+                                    <ul class="dub-steps" id="dub-steps"></ul>
+                                    <div class="progress-bar-container dub-progress-wrap">
+                                        <div class="progress-bar" id="dub-progress-bar" style="width: 0%"></div>
+                                    </div>
+                                    <div class="dub-message-row">
+                                        <span class="progress-text" id="dub-progress-text">0%</span>
+                                        <span class="dub-message" id="dub-message">选择视频后点击「一键配音」</span>
+                                    </div>
+                                    <div class="tts-actions dub-actions">
+                                        <button class="solid-btn" id="btn-dub-start" disabled>
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                                            一键配音
+                                        </button>
+                                        <button class="ghost-btn" id="btn-dub-cancel" style="display:none">取消</button>
+                                        <button class="ghost-btn" id="btn-dub-open-dir" style="display:none">打开输出目录</button>
+                                    </div>
+                                    <div class="dub-result" id="dub-result" style="display:none">
+                                        <video id="dub-video" controls style="width:100%; border-radius:10px; background:#000;"></video>
+                                        <div class="dub-result-meta" id="dub-result-meta"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="dub-params">
+                            <div class="settings-section tts-section">
+                                <div class="section-header">
+                                    <h3>引擎状态</h3>
+                                    <svg class="section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                </div>
+                                <div class="section-body">
+                                    <div class="dub-engine-row">
+                                        <span>字幕识别</span>
+                                        <span class="dub-badge" id="dub-asr-badge">-</span>
+                                    </div>
+                                    <div class="dub-engine-row">
+                                        <span>语音合成</span>
+                                        <span class="dub-badge" id="dub-tts-badge">-</span>
+                                    </div>
+                                    <p class="dub-hint" id="dub-engine-hint">识别使用「设置 → 整段识别」的云端模型，配音音色与「语音合成」页一致。</p>
+                                </div>
+                            </div>
+
+                            <div class="settings-section tts-section">
+                                <div class="section-header">
+                                    <h3>字幕预览</h3>
+                                    <svg class="section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                </div>
+                                <div class="section-body">
+                                    <div class="dub-transcript" id="dub-transcript">
+                                        <div class="dub-transcript-empty" id="dub-transcript-empty">开始任务后在此显示识别结果</div>
+                                        <ul class="dub-transcript-list" id="dub-transcript-list"></ul>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>

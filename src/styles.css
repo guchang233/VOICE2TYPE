@@ -4539,3 +4539,252 @@ textarea.text-input:focus {
         overflow-y: visible;
     }
 }
+
+/* ====== 视频配音 ====== */
+
+.dub-layout {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 16px;
+    align-items: start;
+}
+
+.dub-main,
+.dub-params {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+}
+
+.dub-file-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 4px;
+}
+
+.dub-file-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.dub-file-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dub-file-sub {
+    margin-top: 3px;
+    font-size: 11px;
+    color: var(--text-tertiary);
+}
+
+.dub-steps {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 12px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    row-gap: 8px;
+}
+
+.dub-step {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    color: var(--text-tertiary);
+    transition: color 0.2s ease;
+}
+
+/* 节点链：相邻节点之间的连线 */
+.dub-step:not(:last-child)::after {
+    content: "";
+    width: 20px;
+    height: 1.5px;
+    background: var(--border-color);
+    margin: 0 9px;
+    transition: background 0.25s ease;
+}
+.dub-step.done:not(:last-child)::after {
+    background: var(--accent-green);
+}
+.dub-step.running:not(:last-child)::after {
+    background: var(--accent-blue);
+}
+
+.dub-step .dub-step-icon {
+    display: inline-flex;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 1.5px solid var(--border-color);
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-secondary);
+}
+
+.dub-step.running {
+    color: var(--accent-blue);
+}
+.dub-step.running .dub-step-icon {
+    border-color: var(--accent-blue);
+}
+
+.dub-step.done {
+    color: var(--accent-green);
+}
+.dub-step.done .dub-step-icon {
+    border-color: var(--accent-green);
+    background: transparent;
+}
+
+.dub-step.error {
+    color: var(--accent-red);
+}
+.dub-step.error .dub-step-icon {
+    border-color: var(--accent-red);
+}
+
+.dub-spin {
+    animation: dub-rotate 0.9s linear infinite;
+}
+
+@keyframes dub-rotate {
+    to { transform: rotate(360deg); }
+}
+
+.dub-progress-wrap {
+    margin-bottom: 6px;
+}
+
+.dub-message-row {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    justify-content: space-between;
+}
+
+.dub-progress-text {
+    flex-shrink: 0;
+}
+
+.dub-message {
+    font-size: 12px;
+    color: var(--text-secondary);
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dub-actions {
+    margin-top: 12px;
+}
+
+.dub-result {
+    margin-top: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.dub-result-meta {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    word-break: break-all;
+}
+
+.dub-engine-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    padding: 5px 0;
+}
+
+.dub-badge {
+    font-size: 11px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent-blue) 14%, transparent);
+    color: var(--accent-blue);
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dub-badge.warn {
+    background: color-mix(in srgb, var(--accent-yellow) 16%, transparent);
+    color: var(--accent-yellow);
+}
+
+.dub-hint {
+    margin-top: 10px;
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--text-tertiary);
+}
+
+#dub-status.running { color: var(--accent-blue); }
+#dub-status.error { color: var(--accent-red); }
+#dub-status.done { color: var(--accent-green); }
+
+.dub-transcript {
+    max-height: 420px;
+    overflow-y: auto;
+}
+
+.dub-transcript-empty {
+    font-size: 12px;
+    color: var(--text-tertiary);
+    text-align: center;
+    padding: 22px 0;
+}
+
+.dub-transcript-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.dub-transcript-item {
+    display: flex;
+    gap: 8px;
+    font-size: 12px;
+    line-height: 1.55;
+    padding: 6px 8px;
+    border-radius: 8px;
+    background: var(--bg-secondary);
+}
+
+.dub-transcript-item .dub-t {
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-tertiary);
+    padding-top: 1px;
+}
+
+.dub-transcript-item .dub-x {
+    color: var(--text-primary);
+    word-break: break-word;
+}
+
+@media (max-width: 900px) {
+    #view-dubbing .dub-layout {
+        grid-template-columns: 1fr;
+    }
+}
