@@ -160,7 +160,10 @@ pub fn spawn_job(
     CANCEL_DUBBING.store(false, Ordering::SeqCst);
 
     let app2 = app.clone();
-    tokio::spawn(async move {
+    // 注意：dubbing_start 是同步命令，运行在主线程事件循环中，
+    // 必须用 tauri::async_runtime::spawn（自带全局 runtime 句柄），
+    // 直接 tokio::spawn 会因缺少 runtime 上下文而 panic
+    tauri::async_runtime::spawn(async move {
         let result = run_job(&app2, config, video_path, options).await;
         DUBBING_RUNNING.store(false, Ordering::SeqCst);
         match result {
@@ -260,14 +263,14 @@ async fn run_job(
 
     let asr_app = app.clone();
     let asr_config = config.clone();
-    let asr_node = tokio::spawn(asr_node(
+    let asr_node = tauri::async_runtime::spawn(asr_node(
         chunk_rx, batch_tx, asr_app, asr_config, est_chunks,
     ));
 
     let tts_app = app.clone();
     let tts_cfg = config.tts_config();
     let track_wav = temp_dir.join("dub_track.wav");
-    let tts_node = tokio::spawn(tts_node(batch_rx, track_wav.clone(), tts_cfg, tts_app));
+    let tts_node = tauri::async_runtime::spawn(tts_node(batch_rx, track_wav.clone(), tts_cfg, tts_app));
 
     // 提取节点（本地 ffmpeg，速度快）：产出分块后按序喂给识别节点
     let extract_result = {
