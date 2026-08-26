@@ -108,6 +108,13 @@ pub async fn run_session(
     let hub_work = hub.clone();
     let transcript_work = transcript.clone();
 
+    // 错误熔断：识别服务连接死亡后（如服务端会话超时）音频泵会按节拍持续产出错误，
+    // 若只记日志不处理，字幕文字会永远冻结在最后一帧且日志刷屏。
+    // 连续 N 次错误即写入错误状态并自动结束会话，避免僵死状态。
+    const MAX_CONSEC_ASR_ERRORS: usize = 8;
+    let mut consec_err_a = 0usize;
+    let mut consec_err_b = 0usize;
+
     loop {
         tokio::select! {
             _ = stop_rx.recv() => { break; }
@@ -117,10 +124,23 @@ pub async fn run_session(
             msg_a = source_a.results.recv() => {
                 match msg_a {
                     Some(Ok(resp)) => {
+                        consec_err_a = 0;
                         handle_frame(Source::A, resp, &app_work, &state_work, &hub_work, &transcript_work).await;
                         state_work.bump();
                     }
-                    Some(Err(e)) => log::error!("[字幕] A 源识别错误: {}", e),
+                    Some(Err(e)) => {
+                        consec_err_a += 1;
+                        log::error!(
+                            "[字幕] A 源识别错误（{}/{}）: {}",
+                            consec_err_a,
+                            MAX_CONSEC_ASR_ERRORS,
+                            e
+                        );
+                        if consec_err_a >= MAX_CONSEC_ASR_ERRORS {
+                            trip_asr_breaker(&state_work, "主音源", &e.to_string()).await;
+                            break;
+                        }
+                    }
                     None => {}
                 }
             }
@@ -132,10 +152,23 @@ pub async fn run_session(
             } => {
                 match msg_b {
                     Some(Ok(resp)) => {
+                        consec_err_b = 0;
                         handle_frame(Source::B, resp, &app_work, &state_work, &hub_work, &transcript_work).await;
                         state_work.bump();
                     }
-                    Some(Err(e)) => log::error!("[字幕] B 源识别错误: {}", e),
+                    Some(Err(e)) => {
+                        consec_err_b += 1;
+                        log::error!(
+                            "[字幕] B 源识别错误（{}/{}）: {}",
+                            consec_err_b,
+                            MAX_CONSEC_ASR_ERRORS,
+                            e
+                        );
+                        if consec_err_b >= MAX_CONSEC_ASR_ERRORS {
+                            trip_asr_breaker(&state_work, "副音源（麦克风）", &e.to_string()).await;
+                            break;
+                        }
+                    }
                     None => {}
                 }
             }
@@ -163,6 +196,24 @@ pub async fn run_session(
     std::thread::sleep(Duration::from_millis(200));
 
     Ok(())
+}
+
+/// ASR 连续错误熔断：把错误状态写入快照（字幕窗口会拉取并展示），
+/// 短暂停留让用户看到提示后再结束会话（后续收尾流程会隐藏窗口并同步主界面）。
+async fn trip_asr_breaker(state: &Arc<SharedState>, source_name: &str, err: &str) {
+    let brief: String = err.chars().take(120).collect();
+    log::error!("[字幕] {} 识别连接持续失败，熔断停止会话: {}", source_name, brief);
+    {
+        let mut snap = state.write();
+        snap.status = format!(
+            "识别服务连接中断（{}），字幕已停止，请重新开启：{}",
+            source_name, brief
+        );
+        snap.running = false;
+    }
+    state.bump();
+    // 留出窗口拉取并展示错误信息的时间，再进入收尾隐藏流程
+    tokio::time::sleep(Duration::from_secs(3)).await;
 }
 
 /// 处理一帧 ASR 结果：更新快照、记录转录、喂入翻译枢纽

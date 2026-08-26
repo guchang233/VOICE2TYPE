@@ -146,13 +146,15 @@
         if (typeof invoke !== 'function') return;
 
         // ===== 窗口身份：label 决定拉取哪个窗口的主题与快照 =====
+        // 必须在首次拉取前完成解析，否则非主窗口会先拉到主窗口的内容（竞态）
         let windowId = 'primary';
-        try {
-            tauri.window.getCurrentWindow().then((w) => {
+        async function resolveWindowId() {
+            try {
+                const w = await tauri.window.getCurrentWindow();
                 const label = (w && w.label) || 'subtitle';
                 windowId = label === 'subtitle' ? 'primary' : label.replace(/^subtitle-w-/, '');
-            }).catch(() => {});
-        } catch (e) {}
+            } catch (e) {}
+        }
 
         // ===== 静态元素 =====
         const box = document.getElementById('box');
@@ -244,6 +246,15 @@
                 renderSnapshot(snap);
             } catch (e) {
                 console.error('拉取字幕快照失败:', e);
+                // 首次拉取失败时在窗口内展示原因，避免用户只看到黑窗无从排查
+                if (!snap) {
+                    viewOriginal.update({
+                        history: [], def: '', ind: '',
+                        placeholder: '字幕初始化失败：' + String(e),
+                        placeholderFinal: true,
+                        opacityOf: () => 1
+                    });
+                }
             }
         }
 
@@ -574,6 +585,10 @@
         }
 
         // ===== 元素系统：固定元素开关 + 自定义元素 DOM（数组顺序即显示顺序） =====
+        function elNodeId(el) {
+            return FIXED_ELEMENTS[el.kind] ? (el.id || el.kind) : (el.id || 'c_unknown');
+        }
+
         function syncElements(elements) {
             const existing = new Map();
             box.querySelectorAll('[data-el-id]').forEach((node) => {
@@ -603,9 +618,12 @@
                 box.appendChild(node);
             });
 
-            // 移除已删除的自定义元素
+            // 移除已删除的元素：只清理本次配置中不存在的节点。
+            // 固定元素（原文/译文等）绝不能 remove，否则下一次主题应用会把它们
+            // 全部从 DOM 剥离，字幕区变成黑块（且在每次应用间交替出现/消失）。
+            const wanted = new Set(elements.map(elNodeId));
             existing.forEach((node, id) => {
-                if (!elements.some((el) => !FIXED_ELEMENTS[el.kind] && (el.id || 'c_unknown') === id)) {
+                if (!wanted.has(id)) {
                     node.remove();
                 }
             });
@@ -767,8 +785,8 @@
         });
 
         // 完整窗口：拖动/缩放走系统标题栏与边框，无需任何自定义逻辑。
-        // 初始拉取
-        pullAll();
+        // 初始拉取：先解析窗口身份，避免跨窗口拉取竞态
+        resolveWindowId().then(pullAll);
     })();
     </script>
 </body>

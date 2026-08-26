@@ -19,6 +19,11 @@ use tauri::{
 
 use crate::config::{ConfigManager, SubtitleWindow, PRIMARY_WINDOW_ID};
 
+// 字幕窗口的软件渲染（--disable-gpu）由 main() 通过进程级环境变量
+// WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS 统一注入。
+// 不能用 per-window 的 additional_browser_args：它会让 wry 另建 WebView2 环境，
+// 多环境共享同一用户数据目录会报 ERROR_INVALID_STATE(0x8007139F) 导致窗口创建失败。
+
 /// 窗口几何保存节流：每个窗口每 800ms 最多触发一次持久化
 static LAST_GEO_SAVE: Lazy<StdMutex<HashMap<String, Instant>>> =
     Lazy::new(|| StdMutex::new(HashMap::new()));
@@ -129,7 +134,8 @@ fn debounce_save_geometry(window: &WebviewWindow, window_id: &str, config: &Arc<
 /// 为字幕窗口挂接事件：
 /// - 关闭（标题栏 X）→ 隐藏窗口 + 广播窗口状态 + 调用 `on_close`（停止会话，
 ///   让主界面按钮回到「开启实时字幕」）——窗口状态与会话状态强关联；
-/// - 移动/缩放 → 保存几何。
+/// - 移动/缩放 → 保存几何，并补发一次拉取信号：拖动/缩放后 WebView 可能未重绘，
+///   页面收到信号重新拉取快照并重渲染文字，强制触发重绘（内容丢失的双保险）。
 pub fn attach_window_events(
     window: &WebviewWindow,
     window_id: &str,
@@ -139,6 +145,7 @@ pub fn attach_window_events(
     use tauri::Emitter;
 
     let win = window.clone();
+    let win_signal = window.clone();
     let id = window_id.to_string();
     let config = config.clone();
 
@@ -158,6 +165,11 @@ pub fn attach_window_events(
         }
         tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
             debounce_save_geometry(&win, &id, &config);
+            // 页面内部已对拉取做 rAF 合流，高频事件不会引发渲染风暴
+            let _ = win_signal.emit(
+                "subtitle-signal",
+                serde_json::json!({ "type": "text", "version": 0 }),
+            );
         }
         _ => {}
     });

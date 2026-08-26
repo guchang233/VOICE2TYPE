@@ -47,6 +47,27 @@ pub fn request_uncheck_log_menu() {
 }
 
 fn main() {
+    // WebView2 软件渲染（必须在任何 WebView 创建前设置）：
+    // GPU 合成下字幕窗口在部分机器上移动/缩放后内容丢失（黑框/空白），
+    // 且 OBS 窗口采集（BitBlt）抓不到 GPU 合成层。禁用 GPU 后全窗口走软件渲染，
+    // 换取渲染与采集的确定性（本应用界面轻量，开销可忽略）。
+    // 采用进程级环境变量而非 per-window additional_browser_args：后者会让 wry
+    // 另建 WebView2 环境，多环境共享用户数据目录会报 ERROR_INVALID_STATE(0x8007139F)
+    // 导致窗口创建失败；环境变量由 WebView2 运行时在创建环境时读取并与编程参数合并。
+    #[cfg(target_os = "windows")]
+    {
+        let existing = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").unwrap_or_default();
+        let inject = "--disable-gpu --disable-gpu-compositing";
+        if !existing.contains("--disable-gpu") {
+            let merged = if existing.trim().is_empty() {
+                inject.to_string()
+            } else {
+                format!("{} {}", existing.trim(), inject)
+            };
+            std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", merged);
+        }
+    }
+
     logger::init_logger();
 
     let config_manager = Arc::new(ConfigManager::new());

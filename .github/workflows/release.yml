@@ -25,6 +25,10 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          # 拉取完整历史与标签：后续 CHANGELOG 步骤需要 git describe/log 做标签间对比，
+          # 默认 fetch-depth: 1 的浅克隆会导致 git describe/log 失败（v0.2.0 构建因此挂掉）
+          fetch-depth: 0
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -117,17 +121,21 @@ jobs:
           except Exception:
               prev_tag = ""
 
-          # 获取 commit 列表
-          if prev_tag:
-              commits = subprocess.check_output(
-                  ["git", "log", f"{prev_tag}..{tag}", "--pretty=format:%s", "--no-merges"],
-                  text=True
-              ).strip().split("\n")
-          else:
-              commits = subprocess.check_output(
-                  ["git", "log", tag, "--pretty=format:%s", "--no-merges"],
-                  text=True
-              ).strip().split("\n")
+          # 获取 commit 列表（历史不可用时降级为空列表，不阻断发布）
+          try:
+              if prev_tag:
+                  commits = subprocess.check_output(
+                      ["git", "log", f"{prev_tag}..{tag}", "--pretty=format:%s", "--no-merges"],
+                      text=True
+                  ).strip().split("\n")
+              else:
+                  commits = subprocess.check_output(
+                      ["git", "log", tag, "--pretty=format:%s", "--no-merges"],
+                      text=True
+                  ).strip().split("\n")
+          except Exception as e:
+              print(f"获取 commit 列表失败，降级为空: {e}")
+              commits = []
 
           # 按 conventional commits 分类
           categories = {

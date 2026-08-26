@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Voice2Type",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "identifier": "com.guchang233.voice2type",
   "build": {
     "frontendDist": "../src"
@@ -66,8 +66,8 @@
         "installMode": "currentUser"
       }
     },
-    "shortDescription": "Voice2Type - 语音输入与实时字幕",
-    "longDescription": "高精度语音识别与实时字幕工具，支持云端API和本地模型"
+    "shortDescription": "Voice2Type - 语音输入、实时字幕与视频配音",
+    "longDescription": "高精度语音识别、实时字幕与一键视频配音工具，支持云端 API 和本地模型"
   },
   "plugins": {}
 }
