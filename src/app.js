@@ -2792,6 +2792,24 @@
                 state.triggerMode = btn.dataset.mode;
                 updateMicHint();
                 moveSegIndicator(btn);
+                // 立即持久化到后端：否则只有点「保存设置」才会写入，
+                // 重启后会回退默认「按住」（与 dictation-mode 一致的即时保存策略）
+                if (invoke) {
+                    (async () => {
+                        if (!state.config) {
+                            try { state.config = await invoke('get_config'); } catch (e) { return; }
+                        }
+                        const cfg = JSON.parse(JSON.stringify(state.config));
+                        if (!cfg.advanced) cfg.advanced = {};
+                        cfg.advanced.trigger_mode = state.triggerMode;
+                        try {
+                            await invoke('save_config', { newConfig: cfg });
+                            state.config = cfg;
+                        } catch (err) {
+                            console.error('Failed to save trigger mode:', err);
+                        }
+                    })();
+                }
             });
         });
 
