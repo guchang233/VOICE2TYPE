@@ -2044,9 +2044,11 @@
             const sfKey = $('#setting-sf-key');
             const groqKey = $('#setting-groq-key');
             const doubaoKey = $('#setting-doubao-key');
+            const dashscopeKey = $('#setting-dashscope-key');
             if (sfKey) sfKey.value = config.model.siliconflow_api_key || '';
             if (groqKey) groqKey.value = config.model.groq_api_key || '';
             if (doubaoKey) doubaoKey.value = config.model.doubao_api_key || '';
+            if (dashscopeKey) dashscopeKey.value = config.model.dashscope_api_key || '';
 
             // 自定义模型提供商配置
             const customUrl = $('#setting-custom-api-url');
@@ -2388,9 +2390,11 @@
         const sfKey = $('#setting-sf-key');
         const groqKey = $('#setting-groq-key');
         const doubaoKey = $('#setting-doubao-key');
+        const dashscopeKey = $('#setting-dashscope-key');
         if (sfKey) newConfig.model.siliconflow_api_key = sfKey.value;
         if (groqKey) newConfig.model.groq_api_key = groqKey.value;
         if (doubaoKey) newConfig.model.doubao_api_key = doubaoKey.value;
+        if (dashscopeKey) newConfig.model.dashscope_api_key = dashscopeKey.value;
 
         // 自定义模型提供商配置
         const customUrl = $('#setting-custom-api-url');
@@ -4382,27 +4386,43 @@
         const hint = $('#dub-engine-hint');
         if (!asrBadge || !cfg) return;
 
-        const modelSel = (cfg.model_selection && cfg.model_selection.batch_model) || cfg.basic?.model_name || '';
-        let asrText = modelSel || '-';
+        const provider = (cfg.dubbing && cfg.dubbing.asr_provider) || 'ali-dashscope';
+        const providerSel = $('#dub-asr-provider');
+        if (providerSel) providerSel.value = provider;
         let warn = '';
-        if (modelSel === 'local-whisper' || /本地/.test(asrText)) {
-            asrBadge.textContent = '不支持：本地 Whisper';
-            asrBadge.classList.add('warn');
-            warn = '视频配音需要云端识别模型，请到「设置 → 整段识别」切换（推荐 Groq Whisper Large v3，支持逐段时间戳）。';
+
+        if (provider === 'ali-dashscope') {
+            const hasKey = !!(cfg.model && cfg.model.dashscope_api_key);
+            asrBadge.textContent = hasKey ? '阿里云 · qwen3-asr-flash-filetrans' : '阿里云（未配置 Key）';
+            asrBadge.classList.toggle('warn', !hasKey);
+            if (!hasKey) {
+                warn = '未配置阿里云百炼 Key：请到「设置 → API 密钥」填写，运行时将自动回退为整段识别配置。';
+            }
         } else {
-            asrBadge.textContent = asrText;
-            asrBadge.classList.remove('warn');
+            const modelSel = (cfg.model_selection && cfg.model_selection.batch_model) || (cfg.basic && cfg.basic.model_name) || '';
+            if (modelSel === 'local-whisper') {
+                asrBadge.textContent = '不支持：本地 Whisper';
+                asrBadge.classList.add('warn');
+                warn = '视频配音需要云端识别模型，请到「设置 → 整段识别」切换（推荐 Groq Whisper Large v3）。';
+            } else {
+                asrBadge.textContent = /groq|whisper-large/i.test(modelSel) ? 'Groq · Whisper Large v3' : modelSel || '-';
+                asrBadge.classList.remove('warn');
+            }
         }
-        if (/groq|whisper-large/i.test(modelSel)) asrText = 'Groq · Whisper Large v3';
 
         if (ttsBadge) {
-            const voice = cfg.tts?.reference_title || '默认音色';
-            const hasKey = !!cfg.tts?.fish_api_key;
+            const voice = (cfg.tts && cfg.tts.reference_title) || '默认音色';
+            const hasKey = !!(cfg.tts && cfg.tts.fish_api_key);
             ttsBadge.textContent = hasKey ? `${cfg.tts.model} · ${voice}` : '未配置 Fish Audio Key';
             ttsBadge.classList.toggle('warn', !hasKey);
             if (!hasKey) warn = warn || '请先在「语音合成」页填写 Fish Audio API Key。';
         }
-        if (hint) hint.textContent = warn || '识别使用「设置 → 整段识别」的云端模型；长视频将自动分段上传，输出保存到视频同目录。';
+        if (hint) {
+            hint.textContent = warn
+                || (provider === 'ali-dashscope'
+                    ? '阿里云引擎支持最长 12 小时音频与句级时间戳；配音音色与「语音合成」页一致。'
+                    : '长视频将自动分段上传，输出保存到视频同目录。');
+        }
     }
 
     async function pickDubVideo() {
@@ -4447,9 +4467,10 @@
     async function startDubbing() {
         if (!invoke || state.dubbing.running || !state.dubbing.videoPath) return;
         try {
+            const provider = (state.config && state.config.dubbing && state.config.dubbing.asr_provider) || 'ali-dashscope';
             await invoke('dubbing_start', {
                 videoPath: state.dubbing.videoPath,
-                options: {}
+                options: { asrProvider: provider }
             });
             state.dubbing.running = true;
             state.dubbing.steps.forEach(s => { s.status = 'pending'; });
@@ -4565,6 +4586,20 @@
         if (cancelBtn) cancelBtn.addEventListener('click', cancelDubbing);
         const openBtn = $('#btn-dub-open-dir');
         if (openBtn) openBtn.addEventListener('click', openDubFolder);
+        // 识别引擎切换：持久化到配置（配置未就绪时按需拉取，避免静默丢失）
+        const provSel = $('#dub-asr-provider');
+        if (provSel) {
+            provSel.addEventListener('change', async () => {
+                if (!invoke) return;
+                if (!state.config) {
+                    try { state.config = await invoke('get_config'); } catch (e) { console.error(e); return; }
+                }
+                state.config.dubbing = state.config.dubbing || {};
+                state.config.dubbing.asr_provider = provSel.value;
+                try { await invoke('save_config', { newConfig: state.config }); } catch (e) { console.error(e); }
+                renderDubEngineBadges();
+            });
+        }
     }
 
     function initTts() {

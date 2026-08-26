@@ -2718,15 +2718,22 @@
                                     <svg class="section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
                                 </div>
                                 <div class="section-body">
+                                    <label class="field-row">
+                                        <span>识别引擎</span>
+                                        <select id="dub-asr-provider" class="tts-select">
+                                            <option value="ali-dashscope">阿里云 Qwen ASR（默认）</option>
+                                            <option value="global-compat">跟随整段识别配置</option>
+                                        </select>
+                                    </label>
                                     <div class="dub-engine-row">
-                                        <span>字幕识别</span>
+                                        <span>当前引擎</span>
                                         <span class="dub-badge" id="dub-asr-badge">-</span>
                                     </div>
                                     <div class="dub-engine-row">
                                         <span>语音合成</span>
                                         <span class="dub-badge" id="dub-tts-badge">-</span>
                                     </div>
-                                    <p class="dub-hint" id="dub-engine-hint">识别使用「设置 → 整段识别」的云端模型，配音音色与「语音合成」页一致。</p>
+                                    <p class="dub-hint" id="dub-engine-hint"></p>
                                 </div>
                             </div>
 
@@ -3022,6 +3029,18 @@
                                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
                                         </button>
                                         <button class="toggle-eye-btn" data-target="setting-doubao-key" title="显示/隐藏">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="setting-row">
+                                    <label>阿里云百炼 Key</label>
+                                    <div class="input-with-btn">
+                                        <input type="password" class="text-input" id="setting-dashscope-key" placeholder="sk-...">
+                                        <button class="apply-link-btn" data-url="https://bailian.console.aliyun.com/?apiKey=1" title="申请阿里云百炼 Key">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                                        </button>
+                                        <button class="toggle-eye-btn" data-target="setting-dashscope-key" title="显示/隐藏">
                                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                                         </button>
                                     </div>

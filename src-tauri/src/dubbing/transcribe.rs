@@ -39,7 +39,7 @@ pub async fn transcribe_file(path: &Path, config: &ConfigManager) -> Result<Vec<
         match post_transcribe(&target, "verbose_json", audio, &file_name, config).await {
             Ok(body) => {
                 if let Some(mut segs) = parse_verbose_json(&body).filter(|s| !s.is_empty()) {
-                    finalize(&mut segs);
+                    finalize_segments(&mut segs);
                     return Ok(segs);
                 }
                 // 有些服务 verbose_json 不带 segments，尝试 srt
@@ -63,7 +63,7 @@ pub async fn transcribe_file(path: &Path, config: &ConfigManager) -> Result<Vec<
             "无法从识别结果中解析出带时间戳的分段，当前提供商可能不支持时间戳输出，建议切换为 Groq (Whisper Large v3)"
         ));
     }
-    finalize(&mut segs);
+    finalize_segments(&mut segs);
     Ok(segs)
 }
 
@@ -232,8 +232,9 @@ fn parse_srt_timestamp(s: &str) -> Option<u64> {
     Some(ms)
 }
 
-/// 收尾处理：修正异常区间、过滤噪声、合并过近的碎片段
-fn finalize(segs: &mut Vec<DubSegment>) {
+/// 收尾处理：修正异常区间、过滤噪声、合并过近的碎片段。
+/// 供本模块与阿里云 ASR 通道共用。
+pub(crate) fn finalize_segments(segs: &mut Vec<DubSegment>) {
     segs.retain_mut(|s| {
         if s.end_ms <= s.start_ms {
             s.end_ms = s.start_ms + 200;
@@ -369,7 +370,7 @@ mod tests {
                 text: "世界".into(),
             },
         ];
-        finalize(&mut segs);
+        finalize_segments(&mut segs);
         assert_eq!(segs.len(), 2);
         assert_eq!(segs[0].text, "你 好");
         assert_eq!(segs[0].index, 0);

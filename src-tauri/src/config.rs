@@ -9,6 +9,11 @@ pub const MODEL_WHISPER: &str = "whisper-large-v3";
 pub const MODEL_LOCAL_WHISPER: &str = "local-whisper";
 pub const MODEL_CUSTOM: &str = "custom";
 
+/// 视频配音默认 ASR 引擎标识（阿里云百炼录音文件转写）
+pub const DUBBING_ASR_ALI: &str = "ali-dashscope";
+/// 视频配音备用引擎：跟随「设置 → 整段识别」的云端配置
+pub const DUBBING_ASR_GLOBAL: &str = "global-compat";
+
 pub const STREAM_MODEL_DOUBAO: &str = "doubao";
 
 pub const STREAMING_ASR_URI: &str = "/api/v3/sauc/bigmodel";
@@ -163,6 +168,9 @@ pub struct ModelConfig {
     pub siliconflow_api_key: String,
     pub groq_api_key: String,
     pub doubao_api_key: String,
+    /// 阿里云百炼 API Key（视频配音 ASR 使用，https://bailian.console.aliyun.com 获取）
+    #[serde(default)]
+    pub dashscope_api_key: String,
     pub custom_api_key: String,
     pub custom_api_url: String,
     pub custom_model_name: String,
@@ -190,6 +198,7 @@ impl Default for ModelConfig {
             siliconflow_api_key: String::new(),
             groq_api_key: String::new(),
             doubao_api_key: String::new(),
+            dashscope_api_key: String::new(),
             custom_api_key: String::new(),
             custom_api_url: SILICONFLOW_TRANSCRIPTIONS_URL.to_string(),
             custom_model_name: "自定义模型".to_string(),
@@ -936,6 +945,22 @@ impl Default for ModelSelectionConfig {
     }
 }
 
+/// 视频配音工作流配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DubbingConfig {
+    /// 配音字幕识别引擎：`ali-dashscope`（阿里云百炼，默认）或 `global-compat`（跟随整段识别配置）
+    pub asr_provider: String,
+}
+
+impl Default for DubbingConfig {
+    fn default() -> Self {
+        Self {
+            asr_provider: DUBBING_ASR_ALI.to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
@@ -951,6 +976,7 @@ pub struct AppConfig {
     pub model_selection: ModelSelectionConfig,
     pub llm_post: LlmPostProcessConfig,
     pub tts: TtsConfig,
+    pub dubbing: DubbingConfig,
     pub theme: String,
 
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1009,6 +1035,7 @@ impl Default for AppConfig {
             vad: VadConfig::default(),
             model_selection: ModelSelectionConfig::default(),
             llm_post: LlmPostProcessConfig::default(),
+            dubbing: DubbingConfig::default(),
             tts: TtsConfig::default(),
             theme: "auto".to_string(),
             model_name: None,
@@ -1383,6 +1410,14 @@ impl ConfigManager {
 
     pub fn set_doubao_api_key(&self, key: String) {
         self.config.lock().unwrap().model.doubao_api_key = key;
+    }
+
+    pub fn get_dashscope_api_key(&self) -> String {
+        self.config.lock().unwrap().model.dashscope_api_key.clone()
+    }
+
+    pub fn set_dashscope_api_key(&self, key: String) {
+        self.config.lock().unwrap().model.dashscope_api_key = key;
     }
 
     pub fn streaming_hotkey(&self) -> u32 {

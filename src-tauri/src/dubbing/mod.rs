@@ -7,6 +7,7 @@
 //! - [`tts_segments`]：逐段 TTS 合成、时长贴合重试、时间轴 PCM 流式拼装
 //! - [`pipeline`]：整体状态机编排 + `dubbing-progress` 进度事件 + 取消
 
+pub mod asr_ali;
 pub mod ffmpeg;
 pub mod pipeline;
 pub mod transcribe;

@@ -36,11 +36,43 @@ const CHUNK_CHANNEL_CAP: usize = 2;
 /// 识别 → 合成 通道容量（在途分段批次数）
 const BATCH_CHANNEL_CAP: usize = 4;
 
-/// 配音任务选项（一期保持精简：输出目录可选，其余复用全局 ASR/TTS 配置）
+/// 配音任务选项（输出目录可选；ASR 引擎默认阿里云百炼）
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct DubOptions {
     #[serde(default)]
     pub output_dir: Option<String>,
+    /// 字幕识别引擎：`ali-dashscope`（默认）/ `global-compat`（跟随整段识别配置）
+    #[serde(default)]
+    pub asr_provider: Option<String>,
+}
+
+/// 识别节点使用的 ASR 后端
+#[derive(Debug, Clone)]
+enum AsrBackend {
+    /// 阿里云百炼录音文件转写（句级毫秒时间戳，支持超长音频）
+    AliDashScope { api_key: String },
+    /// OpenAI 兼容 /v1/audio/transcriptions（verbose_json → srt 回退）
+    GlobalCompat,
+}
+
+/// 解析配音 ASR 引擎：默认阿里云；未配置百炼 Key 时回退全局配置并记录提示
+fn resolve_asr_backend(config: &ConfigManager, provider: Option<&str>) -> Result<AsrBackend> {
+    let provider = provider.unwrap_or_default();
+    let ali_key = config.get_dashscope_api_key();
+    match provider {
+        crate::config::DUBBING_ASR_GLOBAL => Ok(AsrBackend::GlobalCompat),
+        // 默认（空值或显式 ali-dashscope）：优先阿里云，Key 缺失则回退
+        _ => {
+            if !ali_key.is_empty() {
+                Ok(AsrBackend::AliDashScope { api_key: ali_key })
+            } else if provider.is_empty() || provider == crate::config::DUBBING_ASR_ALI {
+                log::warn!("[dubbing] 未配置阿里云百炼 Key，回退为全局整段识别配置");
+                Ok(AsrBackend::GlobalCompat)
+            } else {
+                Err(anyhow!("未知配音引擎: {}", provider))
+            }
+        }
+    }
 }
 
 /// 提取 → 识别 节点间的分块消息
@@ -258,19 +290,34 @@ async fn run_job(
 
     // 先启动识别/合成节点（阻塞等待上游消息），再由提取节点喂数据，
     // 使「识别第 N+1 块」与「合成第 N 批」重叠执行
+    let asr_backend = resolve_asr_backend(&config, options.asr_provider.as_deref())?;
+    log::info!(
+        "[dubbing] ASR 引擎: {}",
+        match &asr_backend {
+            AsrBackend::AliDashScope { .. } => "阿里云百炼 (qwen3-asr-flash-filetrans)",
+            AsrBackend::GlobalCompat => "全局整段识别配置",
+        }
+    );
+
     let (chunk_tx, chunk_rx) = mpsc::channel::<ChunkMsg>(CHUNK_CHANNEL_CAP);
     let (batch_tx, batch_rx) = mpsc::channel::<BatchMsg>(BATCH_CHANNEL_CAP);
 
     let asr_app = app.clone();
     let asr_config = config.clone();
     let asr_node = tauri::async_runtime::spawn(asr_node(
-        chunk_rx, batch_tx, asr_app, asr_config, est_chunks,
+        chunk_rx,
+        batch_tx,
+        asr_app,
+        asr_config,
+        asr_backend,
+        est_chunks,
     ));
 
     let tts_app = app.clone();
     let tts_cfg = config.tts_config();
     let track_wav = temp_dir.join("dub_track.wav");
-    let tts_node = tauri::async_runtime::spawn(tts_node(batch_rx, track_wav.clone(), tts_cfg, tts_app));
+    let tts_node =
+        tauri::async_runtime::spawn(tts_node(batch_rx, track_wav.clone(), tts_cfg, tts_app));
 
     // 提取节点（本地 ffmpeg，速度快）：产出分块后按序喂给识别节点
     let extract_result = {
@@ -385,6 +432,7 @@ async fn asr_node(
     tx: mpsc::Sender<BatchMsg>,
     app: tauri::AppHandle,
     config: Arc<ConfigManager>,
+    backend: AsrBackend,
     est_chunks: usize,
 ) -> Result<usize> {
     let mut processed: usize = 0;
@@ -406,7 +454,19 @@ async fn asr_node(
             None,
         );
 
-        let mut part = transcribe::transcribe_file(&msg.path, &config).await?;
+        let chunk_name = format!("chunk_{:04}.mp3", msg.index);
+        let mut part = match &backend {
+            AsrBackend::AliDashScope { api_key } => {
+                crate::dubbing::asr_ali::transcribe_chunk(
+                    &msg.path,
+                    api_key,
+                    &chunk_name,
+                    is_cancelled,
+                )
+                .await?
+            }
+            AsrBackend::GlobalCompat => transcribe::transcribe_file(&msg.path, &config).await?,
+        };
 
         // 分块内相对时间 → 全局绝对时间
         let offset_ms = (msg.index as u64) * CHUNK_SECONDS * 1000;
