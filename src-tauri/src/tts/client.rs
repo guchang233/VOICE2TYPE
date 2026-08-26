@@ -19,9 +19,6 @@ use crate::config::TtsConfig;
 /// Fish Audio API 基础地址（Bearer token 鉴权）
 const BASE_URL: &str = "https://api.fish.audio";
 
-/// 未选择音色时使用的默认系统音色（Fish Audio 官方公开测试音色）
-const DEFAULT_VOICE_ID: &str = "00a1b221-6137-4b73-ad62-b0cbce134167";
-
 /// 读取 Windows 系统代理设置（从注册表）。
 /// reqwest 默认只读环境变量，不读 Windows 注册表，需手动配置。
 fn get_system_proxy() -> Option<String> {
@@ -41,10 +38,9 @@ fn get_system_proxy() -> Option<String> {
             RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_CURRENT_USER, KEY_READ,
             REG_DWORD, REG_SZ, REG_VALUE_TYPE,
         };
-        let subkey: Vec<u16> =
-            "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\0"
-                .encode_utf16()
-                .collect();
+        let subkey: Vec<u16> = "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\0"
+            .encode_utf16()
+            .collect();
         unsafe {
             let mut hkey: HKEY = HKEY::default();
             if RegOpenKeyExW(
@@ -154,7 +150,7 @@ fn sanitize_proxy_url(url: &str) -> String {
 /// - 代理走 HTTP CONNECT，域名解析在代理远端进行，不受本地 DNS 污染影响
 fn get_tts_client() -> Client {
     let proxy_url = get_system_proxy();
-    
+
     let mut builder = Client::builder()
         .timeout(Duration::from_secs(300))
         .connect_timeout(Duration::from_secs(15));
@@ -198,7 +194,9 @@ impl FishTtsClient {
     /// 文本转语音：调用 `POST /v1/tts`，返回音频二进制字节。
     ///
     /// `model` 通过请求头 `model` 传递（不是 body 字段），这是 Fish Audio 的约定。
-    /// `reference_id` 始终包含在 body 中（未选择音色时使用默认系统音色）。
+    /// 未选择音色时**省略** `reference_id` 字段（由模型侧默认音色兜底）；
+    /// 不再填充硬编码的系统音色 ID——该 ID 已在 Fish Audio 服务端失效，
+    /// 强制填充会导致所有未选音色的请求报 `Reference not found`。
     pub async fn synthesize(&self, text: &str, cfg: &TtsConfig) -> Result<Vec<u8>> {
         if cfg.fish_api_key.is_empty() {
             anyhow::bail!("Fish Audio API Key 未配置");
@@ -208,13 +206,6 @@ impl FishTtsClient {
         }
 
         let url = format!("{}/v1/tts", self.base_url);
-
-        // 未选择音色时使用默认系统音色
-        let reference_id = if cfg.reference_id.is_empty() {
-            DEFAULT_VOICE_ID
-        } else {
-            cfg.reference_id.as_str()
-        };
 
         // 构建请求体
         let mut body = json!({
@@ -229,8 +220,12 @@ impl FishTtsClient {
             },
             "latency": cfg.latency,
             "chunk_length": cfg.chunk_length,
-            "reference_id": reference_id,
         });
+
+        // 仅在显式选择音色时携带 reference_id
+        if !cfg.reference_id.is_empty() {
+            body["reference_id"] = json!(cfg.reference_id);
+        }
 
         if cfg.format == "mp3" {
             body["mp3_bitrate"] = json!(cfg.mp3_bitrate);
@@ -243,7 +238,11 @@ impl FishTtsClient {
             "[tts] 请求合成: model={}, format={}, voice={}, text_len={}",
             cfg.model,
             cfg.format,
-            reference_id,
+            if cfg.reference_id.is_empty() {
+                "<模型默认>"
+            } else {
+                &cfg.reference_id
+            },
             text.len()
         );
 
@@ -267,11 +266,7 @@ impl FishTtsClient {
             anyhow::bail!("Fish Audio TTS 错误 {}: {}", status, err_text);
         }
 
-        let bytes = resp
-            .bytes()
-            .await
-            .context("读取音频响应失败")?
-            .to_vec();
+        let bytes = resp.bytes().await.context("读取音频响应失败")?.to_vec();
 
         log::info!("[tts] 合成成功，音频大小 {} 字节", bytes.len());
         Ok(bytes)
@@ -317,10 +312,7 @@ impl FishTtsClient {
             anyhow::bail!("Fish Audio 音色库错误 {}: {}", status, err_text);
         }
 
-        let json: Value = resp
-            .json()
-            .await
-            .context("解析音色库响应失败")?;
+        let json: Value = resp.json().await.context("解析音色库响应失败")?;
         Ok(json)
     }
 

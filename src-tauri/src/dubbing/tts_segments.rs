@@ -32,6 +32,42 @@ pub fn wav_tts_config(base: &TtsConfig) -> TtsConfig {
     cfg
 }
 
+/// 判断是否为音色失效类错误（Fish Audio: Reference not found）
+fn is_reference_error(msg: &str) -> bool {
+    let lower = msg.to_lowercase();
+    lower.contains("reference not found")
+        || lower.contains("reference_id")
+            && (lower.contains("not found") || lower.contains("invalid"))
+}
+
+fn brief_err(msg: &str) -> String {
+    msg.chars().take(120).collect()
+}
+
+/// 单次合成（含音色失效自动回退：显式选择的音色报 Reference not found 时，
+/// 清除 reference_id 改用模型默认音色重试一次）
+async fn synth_with_fallback(
+    client: &FishTtsClient,
+    cfg: &TtsConfig,
+    text: &str,
+    speed: f32,
+) -> Result<Vec<u8>> {
+    let mut c = cfg.clone();
+    c.speed = speed;
+    match client.synthesize(text, &c).await {
+        Ok(bytes) => Ok(bytes),
+        Err(e) if is_reference_error(&e.to_string()) && !c.reference_id.is_empty() => {
+            log::warn!(
+                "[dubbing] 所选音色不可用（{}），本段回退默认音色",
+                brief_err(&e.to_string())
+            );
+            c.reference_id = String::new();
+            client.synthesize(text, &c).await
+        }
+        Err(e) => Err(e),
+    }
+}
+
 /// 合成单个分段并尽量贴合目标时长。
 /// 超长时按比例提高 `prosody.speed` 重试一次（Fish 语速范围 0.5–2.0）。
 pub async fn synthesize_segment(
@@ -45,9 +81,7 @@ pub async fn synthesize_segment(
     let mut best: Option<SegmentAudio> = None;
 
     for _ in 0..2 {
-        let mut c = cfg.clone();
-        c.speed = attempt_speed;
-        let bytes = client.synthesize(text, &c).await?;
+        let bytes = synth_with_fallback(client, cfg, text, attempt_speed).await?;
         let audio = decode_wav_to_track(&bytes)?;
         let duration = audio.duration_ms;
 
@@ -83,17 +117,26 @@ pub fn decode_wav_to_track(bytes: &[u8]) -> Result<SegmentAudio> {
     let cursor = std::io::Cursor::new(bytes);
     let reader = hound::WavReader::new(cursor).context("TTS 返回的不是有效 WAV")?;
     let spec = reader.spec();
+    let spec_desc = format!(
+        "{:?}/{}bit/{}Hz/{}ch",
+        spec.sample_format, spec.bits_per_sample, spec.sample_rate, spec.channels
+    );
 
     let src_rate = spec.sample_rate as f64;
     let channels = spec.channels as usize;
 
-    // 统一转为 f32 单声道
+    // 统一转为 f32 单声道。
+    // 注意：Fish Audio 流式返回的 WAV 头部 data 块大小字段不可靠（常为 0xFFFFFF00），
+    // hound 按头部长度读到 EOF 会报 IoError，因此把「样本流提前结束」视为正常结束。
     let mut mono: Vec<f64> = Vec::with_capacity(reader.duration() as usize / channels.max(1));
     let mut frame: Vec<f64> = Vec::with_capacity(channels);
     match spec.sample_format {
         hound::SampleFormat::Float => {
             for s in reader.into_samples::<f32>() {
-                let v = s.context("读取 WAV 浮点样本失败")? as f64;
+                let v = match s {
+                    Ok(v) => v as f64,
+                    Err(_) => break, // 数据真实结束（头部尺寸字段不可信）
+                };
                 frame.push(v);
                 if frame.len() == channels {
                     mono.push(frame.iter().sum::<f64>() / channels as f64);
@@ -104,7 +147,10 @@ pub fn decode_wav_to_track(bytes: &[u8]) -> Result<SegmentAudio> {
         hound::SampleFormat::Int => {
             let max_val = (1i64 << (spec.bits_per_sample.saturating_sub(1))) as f64;
             for s in reader.into_samples::<i32>() {
-                let v = s.context("读取 WAV 整型样本失败")? as f64 / max_val;
+                let v = match s {
+                    Ok(v) => v as f64 / max_val,
+                    Err(_) => break, // 同上
+                };
                 frame.push(v);
                 if frame.len() == channels {
                     mono.push(frame.iter().sum::<f64>() / channels as f64);
@@ -112,6 +158,9 @@ pub fn decode_wav_to_track(bytes: &[u8]) -> Result<SegmentAudio> {
                 }
             }
         }
+    }
+    if mono.is_empty() {
+        return Err(anyhow!("WAV 解码结果为空（{}）", spec_desc));
     }
     if !frame.is_empty() {
         // 尾部残缺帧：按已有声道均值补入
@@ -216,6 +265,16 @@ fn samples_to_ms(samples: u64) -> u64 {
 mod tests {
     use super::*;
 
+    #[test]
+    fn detects_reference_errors() {
+        assert!(is_reference_error(
+            r#"Fish Audio TTS 错误 400 Bad Request: {"message":"Reference not found","status":400}"#
+        ));
+        assert!(is_reference_error("reference_id invalid"));
+        assert!(!is_reference_error("Fish Audio TTS 错误 401 Unauthorized"));
+        assert!(!is_reference_error("network timeout"));
+    }
+
     /// 构造指定时长/采样率/声道的正弦波 WAV 字节
     fn make_wav(rate: u32, channels: u16, dur_ms: usize) -> Vec<u8> {
         let spec = hound::WavSpec {
@@ -294,5 +353,43 @@ mod tests {
             w.finish(400).unwrap();
         }
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// 真实 API 集成验证。需要有效 Key，手动运行：
+    /// FISH_KEY=sk-xxx cargo test --release -- --ignored --nocapture tts_fallback_e2e
+    #[tokio::test]
+    #[ignore]
+    async fn tts_fallback_e2e() {
+        let key = std::env::var("FISH_KEY").expect("设置 FISH_KEY 环境变量");
+        let client = FishTtsClient::new();
+
+        // 场景 A（用户实际遇到的情况）：未选择音色 → 不携带 reference_id，直接成功
+        let mut cfg = crate::config::TtsConfig::default();
+        cfg.fish_api_key = key.clone();
+        cfg.format = "wav".into();
+        let a = synthesize_segment(&client, &cfg, "你好，世界。", 10_000, 1.0).await;
+        match a {
+            Ok(audio) => println!(
+                "场景A（无音色）成功：{} 样本，{}ms",
+                audio.samples.len(),
+                audio.duration_ms
+            ),
+            Err(e) => panic!("场景A 失败: {}", e),
+        }
+
+        // 场景 B：显式失效音色 → 自动清除 reference_id 回退默认音色后成功
+        let mut cfg_b = crate::config::TtsConfig::default();
+        cfg_b.fish_api_key = key;
+        cfg_b.format = "wav".into();
+        cfg_b.reference_id = "00a1b221-6137-4b73-ad62-b0cbce134167".into();
+        let b = synthesize_segment(&client, &cfg_b, "你好，世界。", 10_000, 1.0).await;
+        match b {
+            Ok(audio) => println!(
+                "场景B（失效音色回退）成功：{} 样本，{}ms",
+                audio.samples.len(),
+                audio.duration_ms
+            ),
+            Err(e) => panic!("场景B 失败（回退未生效）: {}", e),
+        }
     }
 }

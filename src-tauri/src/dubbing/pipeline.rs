@@ -516,6 +516,10 @@ async fn tts_node(
     let mut ok = 0usize;
     let mut failed = 0usize;
     let mut est_total = 0usize;
+    // 连续失败计数：开局即连续失败通常意味着配置性问题（音色失效/Key 错误），
+    // 快速中止比产出全静音视频更友好
+    let mut consec_fail = 0usize;
+    const MAX_INITIAL_CONSEC_FAILS: usize = 3;
 
     while let Some(batch) = rx.recv().await {
         est_total = est_total.max(batch.cumulative);
@@ -547,10 +551,19 @@ async fn tts_node(
                 Ok(audio) => {
                     writer.write_at(seg.start_ms, &audio)?;
                     ok += 1;
+                    consec_fail = 0;
                 }
                 Err(e) => {
                     log::warn!("[dubbing] 第 {} 段合成失败，保留静音: {}", seg.index + 1, e);
                     failed += 1;
+                    consec_fail += 1;
+                    if ok == 0 && consec_fail >= MAX_INITIAL_CONSEC_FAILS {
+                        return Err(anyhow!(
+                            "前 {} 段语音合成全部失败（最后错误：{}）。请检查「语音合成」页的音色选择与 Fish Audio API Key 后重试",
+                            consec_fail,
+                            brief_msg(&e.to_string())
+                        ));
+                    }
                 }
             }
         }
@@ -566,6 +579,10 @@ async fn tts_node(
 }
 
 // ===================== 辅助 =====================
+
+fn brief_msg(msg: &str) -> String {
+    msg.chars().take(160).collect()
+}
 
 /// 收集提取节点产出的分块路径（按序）
 fn collect_chunk_paths(dir: &std::path::Path) -> Result<Vec<PathBuf>> {
