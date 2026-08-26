@@ -105,37 +105,39 @@ jobs:
       - name: Generate CHANGELOG entry
         shell: bash
         run: |
+          export PYTHONIOENCODING=utf-8
           python << 'PYEOF'
-          import subprocess, re
+          import subprocess, re, sys
           from datetime import datetime
+
+          # 全程强制 UTF-8：Windows runner 默认 GBK 控制台/解码会使含中文的
+          # git 输出与 print 报 Unicode 编解码错误（v0.2.1 构建因此失败）
+          try:
+              sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+          except Exception:
+              pass
+
+          def git_out(args):
+              return subprocess.check_output(
+                  args, text=True, encoding="utf-8", errors="replace"
+              )
 
           tag = "${{ steps.tag.outputs.name }}"
           version = tag.lstrip("v")
 
-          # 获取上一个 tag
+          # 获取上一个 tag（脚本内输出均用 ASCII，避免控制台编码问题）
           try:
-              prev_tag = subprocess.check_output(
-                  ["git", "describe", "--tags", "--abbrev=0", tag + "^"],
-                  text=True, stderr=subprocess.DEVNULL
-              ).strip()
+              prev_tag = git_out(["git", "describe", "--tags", "--abbrev=0", tag + "^"]).strip()
           except Exception:
               prev_tag = ""
 
           # 获取 commit 列表（历史不可用时降级为空列表，不阻断发布）
+          commits = []
           try:
-              if prev_tag:
-                  commits = subprocess.check_output(
-                      ["git", "log", f"{prev_tag}..{tag}", "--pretty=format:%s", "--no-merges"],
-                      text=True
-                  ).strip().split("\n")
-              else:
-                  commits = subprocess.check_output(
-                      ["git", "log", tag, "--pretty=format:%s", "--no-merges"],
-                      text=True
-                  ).strip().split("\n")
+              rng = f"{prev_tag}..{tag}" if prev_tag else tag
+              commits = git_out(["git", "log", rng, "--pretty=format:%s", "--no-merges"]).strip().split("\n")
           except Exception as e:
-              print(f"获取 commit 列表失败，降级为空: {e}")
-              commits = []
+              print(f"commit list unavailable, degrade to empty: {e}")
 
           # 按 conventional commits 分类
           categories = {
