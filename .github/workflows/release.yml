@@ -157,17 +157,21 @@ jobs:
 
           entry = "\n".join(lines)
 
-          # 插入到 CHANGELOG.md（在第一个 "## [" 之前）
+          # 插入到 CHANGELOG.md（在第一个 "## [" 之前）；
+          # 若仓库内已存在该版本的手写条目则跳过，避免重复章节（幂等）
           with open("CHANGELOG.md", "r", encoding="utf-8") as f:
               content = f.read()
-          parts = content.split("## [", 1)
-          if len(parts) == 2:
-              new_content = parts[0] + entry + "## [" + parts[1]
+          if f"## [{version}]" in content:
+              print(f"CHANGELOG.md already has an entry for {version}, skip")
           else:
-              new_content = content + "\n" + entry
-          with open("CHANGELOG.md", "w", encoding="utf-8") as f:
-              f.write(new_content)
-          print(f"Updated CHANGELOG.md for {version}")
+              parts = content.split("## [", 1)
+              if len(parts) == 2:
+                  new_content = parts[0] + entry + "## [" + parts[1]
+              else:
+                  new_content = content + "\n" + entry
+              with open("CHANGELOG.md", "w", encoding="utf-8") as f:
+                  f.write(new_content)
+              print(f"Updated CHANGELOG.md for {version}")
           PYEOF
 
       - name: Update update.json for jsDelivr CDN

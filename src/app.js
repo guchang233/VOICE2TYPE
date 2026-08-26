@@ -33,15 +33,12 @@
         dubbing: {
             videoPath: null,
             running: false,
-            steps: [
-                { key: 'prepare', label: '准备工具', status: 'pending' },
-                { key: 'extract', label: '提取音轨', status: 'pending' },
-                { key: 'asr',     label: '识别字幕', status: 'pending' },
-                { key: 'tts',     label: '语音合成', status: 'pending' },
-                { key: 'mux',     label: '合成视频', status: 'pending' }
-            ],
             segments: [],
-            renderedCount: 0,
+            edited: false,
+            nodePos: {},
+            nodeStatus: {},
+            outputDir: '',
+            lastMeta: '',
             outputPath: null,
             srtPath: null
         }
@@ -2641,10 +2638,16 @@
         }
     }
 
+    /// 转义 HTML 文本与属性值中的特殊字符（含引号），
+    /// 统一用于内容插值与属性插值，防止 XSS / 属性截断；
+    /// 严格场景（用户可控的属性值）另可用 escapeAttr。
     function escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+        return String(text == null ? '' : text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 
     /// 转义 HTML 属性值（额外转义引号，防止属性注入型 XSS）
@@ -3916,21 +3919,28 @@
         return 'http://asset.localhost/' + encodeURIComponent(path);
     }
 
-    /// 加载 TTS 视图：确保配置就绪并填充 UI
-    async function loadTtsView() {
-        if (!invoke) return;
+    /// 确保 TTS 配置已加载并回填到 UI 控件（幂等），返回是否就绪。
+    /// 所有读取控件的操作前必须先调用，防止在配置异步回填完成前
+    /// 读到空输入框，把已配置的 API Key 误判/覆盖为空。
+    async function ensureTtsUiLoaded() {
+        if (state.tts.loaded) return true;
+        if (!invoke) return false;
         if (!state.config) {
             try {
                 state.config = await invoke('get_config');
             } catch (e) {
                 console.error('Failed to load config for TTS:', e);
-                return;
+                return false;
             }
         }
         populateTtsUi(state.config.tts || {});
-        if (!state.tts.loaded) {
-            state.tts.loaded = true;
-        }
+        state.tts.loaded = true;
+        return true;
+    }
+
+    /// 加载 TTS 视图：确保配置就绪并填充 UI
+    async function loadTtsView() {
+        await ensureTtsUiLoaded();
     }
 
     /// 将 TTS 配置填充到 UI 控件
@@ -3994,7 +4004,8 @@
         if (chunk) $('#tts-chunk-val').textContent = chunk.value;
     }
 
-    /// 从 UI 收集 TTS 配置并写入 state.config.tts
+    /// 从 UI 收集 TTS 配置并写入 state.config.tts。
+    /// 前置条件：调用方须先 await ensureTtsUiLoaded()，确保控件已回填配置值。
     function collectTtsConfig() {
         if (!state.config) state.config = {};
         if (!state.config.tts) state.config.tts = {};
@@ -4003,7 +4014,17 @@
         const getNum = (id, dflt) => { const el = $('#' + id); return el ? parseFloat(el.value) : dflt; };
         const getChk = (id) => { const el = $('#' + id); return el ? el.checked : false; };
 
-        t.fish_api_key = get('tts-api-key') ?? t.fish_api_key ?? '';
+        // API Key：控件有值才写入；为空且 UI 尚未回填时保留内存已有值，
+        // 防止异步加载窗口内用空输入框覆盖已配置的 Key 并被持久化丢失；
+        // 已回填且为空才是用户有意清除。
+        const keyEl = $('#tts-api-key');
+        if (keyEl && keyEl.value.trim()) {
+            t.fish_api_key = keyEl.value.trim();
+        } else if (state.tts.loaded) {
+            t.fish_api_key = '';
+        } else {
+            t.fish_api_key = t.fish_api_key || '';
+        }
         t.model = get('tts-model') || 's2.1-pro-free';
         t.format = get('tts-format') || 'mp3';
         t.mp3_bitrate = parseInt(get('tts-mp3-bitrate') || '128', 10);
@@ -4049,6 +4070,8 @@
             setTimeout(() => setTtsStatus('', '就绪'), 2000);
             return;
         }
+        // 先确保配置已回填，防止异步窗口内读空输入框误判未配置 Key
+        await ensureTtsUiLoaded();
         const tts = collectTtsConfig();
         if (!tts.fish_api_key) {
             setTtsStatus('error', '请先填写 API Key');
@@ -4169,13 +4192,24 @@
 
     async function loadVoices() {
         if (!invoke) return;
+        const grid = $('#tts-voice-grid');
+        const showGridMsg = (msg) => {
+            if (grid) grid.innerHTML = '<div class="tts-voice-loading">' + escapeHtml(msg) + '</div>';
+        };
+
+        // 先确保配置已加载回填，避免异步窗口内读到空输入框误判未配置
+        if (!(await ensureTtsUiLoaded())) {
+            showGridMsg('配置加载失败，请重试');
+            return;
+        }
         const tts = collectTtsConfig();
         if (!tts.fish_api_key) {
+            // 提示直接展示在模态框内（配音节点入口看不到 TTS 页状态栏）
+            showGridMsg('请先在「语音合成」页填写 Fish Audio API Key');
             setTtsStatus('error', '请先填写 API Key');
             return;
         }
-        const grid = $('#tts-voice-grid');
-        if (grid) grid.innerHTML = '<div class="tts-voice-loading">加载中...</div>';
+        showGridMsg('加载中...');
 
         const title = ($('#tts-voice-search-input') || {}).value || '';
         const language = ($('#tts-voice-lang-filter') || {}).value || '';
@@ -4197,7 +4231,8 @@
             updateVoicePager();
         } catch (e) {
             console.error('Failed to load voices:', e);
-            if (grid) grid.innerHTML = '<div class="tts-voice-loading">加载失败：' + escapeHtml(String(e)) + '</div>';
+            showGridMsg('加载失败：' + String(e));
+            updateVoicePager();
         }
     }
 
@@ -4243,6 +4278,7 @@
         state.config.tts.reference_title = title || '';
         populateTtsUi(state.config.tts);
         saveTtsConfigDebounced();
+        renderDubEngineBadges();
         setTtsStatus('ok', '已选择音色');
         setTimeout(() => setTtsStatus('', '就绪'), 1500);
     }
@@ -4254,6 +4290,7 @@
         state.config.tts.reference_title = '';
         populateTtsUi(state.config.tts);
         saveTtsConfigDebounced();
+        renderDubEngineBadges();
     }
 
     function updateVoicePager() {
@@ -4267,8 +4304,85 @@
         if (next) next.disabled = state.tts.voicePage >= totalPages;
     }
 
-    /// 初始化 TTS 视图事件
-    // ====== 视频配音（一键字幕识别 + TTS 配音）======
+    // ====== 视频配音：节点画布工作流 ======
+
+    const DUB_NODE_DEFS = [
+        { id: 'src', title: '视频输入', sub: 'INPUT', ports: ['out'], x: 24, y: 40,
+          body: () => `
+            <div class="dub-src-name" id="dub-src-name">未选择视频</div>
+            <button class="dub-mini-btn primary" id="btn-dub-pick">选择视频文件</button>
+            <p class="dub-hint-line">mp4 / mkv / mov / avi / webm 等</p>` },
+        { id: 'extract', title: '音频提取', sub: 'FFMPEG', ports: ['in', 'out'], x: 330, y: 40,
+          body: () => `
+            <label class="dub-field"><span>分块时长(秒)</span>
+              <input type="number" class="dub-input" id="dub-chunk-secs" value="600" min="60" max="3600" step="30">
+            </label>
+            <p class="dub-hint-line">长视频按时长分块后逐块上传识别</p>` },
+        { id: 'asr', title: '字幕识别', sub: 'ASR', ports: ['in', 'out'], x: 636, y: 40,
+          body: () => `
+            <label class="dub-field"><span>引擎</span>
+              <select class="dub-select" id="dub-asr-provider">
+                <option value="ali-dashscope">阿里云 Qwen</option>
+                <option value="global-compat">整段识别配置</option>
+              </select>
+            </label>
+            <div id="dub-asr-ali-panel">
+              <label class="dub-field"><span>语种提示</span>
+                <select class="dub-select" id="dub-asr-lang">
+                  <option value="">自动检测</option>
+                  <option value="zh">中文</option><option value="yue">粤语</option>
+                  <option value="en">English</option><option value="ja">日本語</option>
+                  <option value="ko">한국어</option><option value="de">Deutsch</option>
+                  <option value="fr">Français</option><option value="es">Español</option>
+                  <option value="ru">Русский</option>
+                </select>
+              </label>
+              <label class="dub-field dub-chk"><input type="checkbox" id="dub-asr-words" checked> 词级时间戳（精确分段）</label>
+              <label class="dub-field dub-chk"><input type="checkbox" id="dub-asr-itn" checked> 数字转写 ITN</label>
+            </div>
+            <p class="dub-hint-line" id="dub-asr-hint"></p>` },
+        { id: 'edit', title: '字幕编辑·分段', sub: 'SUBTITLES', ports: ['in', 'out'], x: 942, y: 40,
+          body: () => `
+            <div class="dub-field"><span id="dub-edit-stat">未识别</span></div>
+            <button class="dub-mini-btn" id="btn-dub-open-editor">打开字幕编辑器</button>
+            <p class="dub-hint-line">改文本/调时间/合并/拆分，可按词级时间戳重分段</p>` },
+        { id: 'tts', title: '语音合成', sub: 'FISH AUDIO', ports: ['in', 'out'], x: 1248, y: 40,
+          body: () => `
+            <label class="dub-field"><span>模型</span>
+              <select class="dub-select" id="dub-tts-model">
+                <option value="s2.1-pro-free">S2.1 Pro Free</option>
+                <option value="s2.1-pro">S2.1 Pro</option>
+                <option value="s2-pro">S2 Pro</option>
+                <option value="s1">S1（情感）</option>
+              </select>
+            </label>
+            <div class="dub-field"><span>音色</span><span class="dub-badge-sm" id="dub-tts-voice-badge">-</span></div>
+            <button class="dub-mini-btn" id="btn-dub-voice-lib">更换音色…</button>
+            <label class="dub-field"><span>语速 ×<b id="dub-tts-speed-v">1.00</b></span>
+              <input type="range" id="dub-tts-speed" min="0.5" max="2" step="0.05" value="1">
+            </label>
+            <label class="dub-field"><span>音量 <b id="dub-tts-vol-v">0</b>dB</span>
+              <input type="range" id="dub-tts-volume" min="-10" max="10" step="1" value="0">
+            </label>
+            <label class="dub-field"><span>温度</span><input type="number" class="dub-input" id="dub-tts-temp" min="0" max="1" step="0.05" value="0.7"></label>
+            <label class="dub-field"><span>top_p</span><input type="number" class="dub-input" id="dub-tts-top-p" min="0" max="1" step="0.05" value="0.7"></label>
+            <label class="dub-field"><span>延迟模式</span>
+              <select class="dub-select" id="dub-tts-latency">
+                <option value="normal">normal</option><option value="balanced">balanced</option><option value="low">low</option>
+              </select>
+            </label>
+            <label class="dub-field dub-chk"><input type="checkbox" id="dub-tts-normalize" checked> 文本归一化</label>` },
+        { id: 'out', title: '混流输出', sub: 'MUX', ports: ['in'], x: 1554, y: 40,
+          body: () => `
+            <label class="dub-field"><span>输出目录</span></label>
+            <div class="dub-dir-row">
+              <input type="text" class="dub-input" id="dub-out-dir" placeholder="留空=视频同目录">
+              <button class="dub-mini-btn" id="btn-dub-pick-dir" title="选择文件夹">浏览…</button>
+            </div>
+            <button class="dub-mini-btn" id="btn-dub-open-dir" style="display:none">打开输出目录</button>
+            <video id="dub-video" controls style="display:none;width:100%;border-radius:8px;background:#000;margin-top:4px"></video>
+            <p class="dub-hint-line" id="dub-out-meta"></p>` },
+    ];
 
     function fmtDubTime(ms) {
         const total = Math.max(0, Math.floor(ms / 1000));
@@ -4288,141 +4402,502 @@
         if (cls) el.classList.add(cls);
     }
 
-    function renderDubSteps() {
-        const list = $('#dub-steps');
-        if (!list) return;
-        list.innerHTML = '';
-        state.dubbing.steps.forEach(step => {
-            const li = document.createElement('li');
-            li.className = 'dub-step ' + step.status;
-            const icons = {
-                pending: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle></svg>',
-                running: '<svg class="dub-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M21 12a9 9 0 1 1-9-9"></path></svg>',
-                done: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><polyline points="20 6 9 17 4 12"></polyline></svg>',
-                error: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>'
-            };
-            li.innerHTML = `<span class="dub-step-icon">${icons[step.status] || icons.pending}</span><span>${step.label}</span>`;
-            list.appendChild(li);
+    // ---- 节点渲染与连线 ----
+
+    function dubNodeEl(id) {
+        return document.querySelector(`.dub-node[data-id="${id}"]`);
+    }
+
+    function buildDubNodes() {
+        const canvas = $('#dub-canvas');
+        if (!canvas) return;
+        // 先加载持久化的节点位置，避免先在默认位置闪现再跳变
+        try {
+            const saved = JSON.parse(localStorage.getItem('v2t-dub-node-pos') || '{}');
+            Object.entries(saved).forEach(([id, p]) => {
+                if (p && typeof p.x === 'number' && typeof p.y === 'number') state.dubbing.nodePos[id] = p;
+            });
+        } catch (e) { /* 忽略本地缓存损坏 */ }
+        canvas.innerHTML = '';
+        DUB_NODE_DEFS.forEach(def => {
+            const pos = state.dubbing.nodePos[def.id] || { x: def.x, y: def.y };
+            const el = document.createElement('div');
+            el.className = 'dub-node';
+            el.dataset.id = def.id;
+            // 重建后恢复当前运行状态样式（状态存于内存，不随 DOM 重建丢失）
+            const st = state.dubbing.nodeStatus[def.id];
+            if (st && st !== 'pending') el.classList.add('status-' + st);
+            el.style.left = pos.x + 'px';
+            el.style.top = pos.y + 'px';
+            const ports = def.ports.map(p => `<span class="dub-port port-${p}"></span>`).join('');
+            el.innerHTML = `
+                ${ports}
+                <div class="dub-node-head">
+                    <span class="dub-node-dot"></span>
+                    <span class="dub-node-title">${def.title}</span>
+                    <span class="dub-node-sub">${def.sub}</span>
+                    <span class="dub-node-fold">−</span>
+                </div>
+                <div class="dub-node-body">${def.body ? def.body() : ''}</div>`;
+            canvas.appendChild(el);
+        });
+
+        // 折叠按钮
+        $$('.dub-node-fold').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const node = btn.closest('.dub-node');
+                node.classList.toggle('collapsed');
+                btn.textContent = node.classList.contains('collapsed') ? '+' : '−';
+                requestAnimationFrame(drawDubWires);
+            });
+        });
+        // 拖拽移动（仅标题栏）
+        $$('.dub-node-head').forEach(head => {
+            head.addEventListener('pointerdown', (e) => {
+                if (e.target.closest('.dub-node-fold')) return;
+                e.preventDefault();
+                const node = head.closest('.dub-node');
+                const startX = e.clientX, startY = e.clientY;
+                const ox = parseInt(node.style.left, 10), oy = parseInt(node.style.top, 10);
+                const move = (ev) => {
+                    node.style.left = Math.max(0, ox + ev.clientX - startX) + 'px';
+                    node.style.top = Math.max(0, oy + ev.clientY - startY) + 'px';
+                    drawDubWires();
+                };
+                const up = () => {
+                    window.removeEventListener('pointermove', move);
+                    window.removeEventListener('pointerup', up);
+                    state.dubbing.nodePos[node.dataset.id] =
+                        { x: parseInt(node.style.left, 10), y: parseInt(node.style.top, 10) };
+                    try { localStorage.setItem('v2t-dub-node-pos', JSON.stringify(state.dubbing.nodePos)); } catch (err) {}
+                };
+                window.addEventListener('pointermove', move);
+                window.addEventListener('pointerup', up);
+            });
         });
     }
 
-    function renderDubTranscript(reset = false) {
-        const list = $('#dub-transcript-list');
-        const empty = $('#dub-transcript-empty');
-        if (!list || !empty) return;
-        const segs = state.dubbing.segments;
-        empty.style.display = segs.length ? 'none' : '';
-
-        if (reset) {
-            list.innerHTML = '';
-            state.dubbing.renderedCount = 0;
+    function drawDubWires() {
+        const svg = $('#dub-wires');
+        const canvas = $('#dub-canvas');
+        if (!svg || !canvas || !canvas.offsetParent) return;
+        // SVG 绝对定位在滚动容器的滚动原点、随内容一起滚动，
+        // 故撑满整个画布内容尺寸并直接用内容坐标绘制，任意滚动位置连线都正确
+        const w = canvas.scrollWidth, h = canvas.scrollHeight;
+        if (svg.style.width !== w + 'px') svg.style.width = w + 'px';
+        if (svg.style.height !== h + 'px') svg.style.height = h + 'px';
+        const chain = ['src', 'extract', 'asr', 'edit', 'tts', 'out'];
+        let html = '';
+        for (let i = 0; i < chain.length - 1; i++) {
+            const a = dubNodeEl(chain[i]), b = dubNodeEl(chain[i + 1]);
+            if (!a || !b) continue;
+            const st = state.dubbing.nodeStatus[chain[i + 1]] || 'pending';
+            // 端口：out 在右缘、in 在左缘，垂直取头部中心（画布内容坐标）
+            const ax = a.offsetLeft + a.offsetWidth - 3;
+            const ay = a.offsetTop + 21;
+            const bx = b.offsetLeft + 3;
+            const by = b.offsetTop + 21;
+            const dx = Math.max(46, Math.abs(bx - ax) * 0.45);
+            const color = st === 'running' ? getCssVar('--accent-blue')
+                : st === 'done' ? getCssVar('--accent-green')
+                : st === 'error' ? getCssVar('--accent-red') : getCssVar('--border-color');
+            html += `<path d="M ${ax} ${ay} C ${ax + dx} ${ay}, ${bx - dx} ${by}, ${bx} ${by}"
+                fill="none" stroke="${color}" stroke-width="2" opacity="0.9"/>`;
+            html += `<circle cx="${bx}" cy="${by}" r="3.4" fill="${color}"/>`;
         }
-
-        // 增量追加：只渲染新增分段，超出上限时裁剪最旧节点，避免长视频卡顿
-        const MAX_NODES = 200;
-        if (segs.length > state.dubbing.renderedCount) {
-            const frag = document.createDocumentFragment();
-            segs.slice(state.dubbing.renderedCount).forEach(seg => {
-                const li = document.createElement('li');
-                li.className = 'dub-transcript-item';
-                const t = document.createElement('span');
-                t.className = 'dub-t';
-                t.textContent = fmtDubTime(seg.start_ms);
-                const x = document.createElement('span');
-                x.className = 'dub-x';
-                x.textContent = seg.text || '';
-                li.appendChild(t);
-                li.appendChild(x);
-                frag.appendChild(li);
-            });
-            list.appendChild(frag);
-            state.dubbing.renderedCount = segs.length;
-            while (list.children.length > MAX_NODES) {
-                list.removeChild(list.firstChild);
-            }
-            list.scrollTop = list.scrollHeight;
-        }
+        svg.removeAttribute('viewBox');
+        svg.removeAttribute('preserveAspectRatio');
+        svg.innerHTML = html;
     }
 
-    function updateDubButtons() {
-        const startBtn = $('#btn-dub-start');
-        const cancelBtn = $('#btn-dub-cancel');
-        const openBtn = $('#btn-dub-open-dir');
-        if (!startBtn) return;
-        startBtn.disabled = state.dubbing.running || !state.dubbing.videoPath;
-        cancelBtn.style.display = state.dubbing.running ? '' : 'none';
-        openBtn.style.display = state.dubbing.outputPath ? '' : 'none';
+    function getCssVar(name) {
+        return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#888';
     }
+
+    function setDubNodeStatus(id, status) {
+        state.dubbing.nodeStatus[id] = status;
+        const el = dubNodeEl(id);
+        if (el) {
+            el.classList.remove('status-running', 'status-done', 'status-error');
+            if (status !== 'pending') el.classList.add('status-' + status);
+        }
+        drawDubWires();
+    }
+
+    function resetDubNodeStatuses(ids) {
+        ids.forEach(id => setDubNodeStatus(id, 'pending'));
+    }
+
+    // ---- 视图加载与配置回填 ----
 
     async function loadDubbingView() {
-        renderDubSteps();
-        renderDubTranscript();
+        buildDubNodes();
+        restoreDubUiAfterBuild();
+        renderDubEditor();
         updateDubButtons();
+        requestAnimationFrame(drawDubWires);
         if (!invoke) return;
-        // 与后端任务状态同步（页面刷新后恢复运行中状态）
         try {
             const busy = await invoke('dubbing_status');
             if (busy && !state.dubbing.running) {
                 state.dubbing.running = true;
-                const cur = state.dubbing.steps.find(s => s.status === 'pending');
-                if (cur) cur.status = 'running';
-                renderDubSteps();
+                ['extract', 'asr'].forEach(id => setDubNodeStatus(id, 'running'));
                 setDubStatus('处理中', 'running');
             } else if (!busy && state.dubbing.running) {
                 state.dubbing.running = false;
             }
         } catch (e) { console.error(e); }
-        updateDubButtons();
         if (!state.config) {
             try { state.config = await invoke('get_config'); } catch (e) { console.error(e); }
         }
+        populateDubNodesFromConfig();
+        syncDubAsrPanel();
         renderDubEngineBadges();
+        requestAnimationFrame(drawDubWires);
+    }
+
+    /// 节点重建后恢复内存中的界面状态：视频名、输出目录输入、成品预览、输出元信息
+    function restoreDubUiAfterBuild() {
+        if (state.dubbing.videoPath) {
+            const nameEl = $('#dub-src-name');
+            if (nameEl) nameEl.textContent = state.dubbing.videoPath.split(/[\\/]/).pop();
+            if ((state.dubbing.nodeStatus['src'] || 'pending') === 'pending') setDubNodeStatus('src', 'done');
+        }
+        const outDir = $('#dub-out-dir');
+        if (outDir && state.dubbing.outputDir) outDir.value = state.dubbing.outputDir;
+        if (state.dubbing.outputPath) {
+            const video = $('#dub-video');
+            if (video) {
+                video.src = toAssetUrl(state.dubbing.outputPath);
+                video.style.display = '';
+            }
+            const meta = $('#dub-out-meta');
+            if (meta && state.dubbing.lastMeta) meta.textContent = state.dubbing.lastMeta;
+        }
+    }
+
+    function populateDubNodesFromConfig() {
+        const cfg = state.config;
+        if (!cfg) return;
+        const tts = cfg.tts || {};
+        const setV = (id, v) => { const el = $('#' + id); if (el !== null && el !== undefined && el.value !== undefined) el.value = v; };
+        setV('dub-tts-model', tts.model || 's2.1-pro-free');
+        setV('dub-tts-speed', tts.speed ?? 1);
+        setV('dub-tts-volume', tts.volume ?? 0);
+        setV('dub-tts-temp', tts.temperature ?? 0.7);
+        setV('dub-tts-top-p', tts.top_p ?? 0.7);
+        setV('dub-tts-latency', tts.latency || 'normal');
+        const nrm = $('#dub-tts-normalize'); if (nrm) nrm.checked = tts.normalize !== false;
+        const provSel = $('#dub-asr-provider');
+        if (provSel) provSel.value = (cfg.dubbing && cfg.dubbing.asr_provider) || 'ali-dashscope';
+        updateDubSpeedLabels();
+    }
+
+    function updateDubSpeedLabels() {
+        const s = $('#dub-tts-speed'), sv = $('#dub-tts-speed-v');
+        if (s && sv) sv.textContent = Number(s.value).toFixed(2);
+        const v = $('#dub-tts-volume'), vv = $('#dub-tts-vol-v');
+        if (v && vv) vv.textContent = v.value;
+    }
+
+    function syncDubAsrPanel() {
+        const sel = $('#dub-asr-provider');
+        const panel = $('#dub-asr-ali-panel');
+        const hint = $('#dub-asr-hint');
+        if (!sel || !panel) return;
+        panel.style.display = sel.value === 'ali-dashscope' ? '' : 'none';
+        if (hint) {
+            hint.textContent = sel.value === 'ali-dashscope'
+                ? ((state.config?.model?.dashscope_api_key)
+                    ? 'qwen3-asr-flash-filetrans · 句/词级时间戳'
+                    : '⚠ 未配置阿里云百炼 Key，将回退为整段识别配置')
+                : '使用「设置 → 整段识别」的云端模型（需支持时间戳）';
+        }
     }
 
     function renderDubEngineBadges() {
         const cfg = state.config;
-        const asrBadge = $('#dub-asr-badge');
-        const ttsBadge = $('#dub-tts-badge');
-        const hint = $('#dub-engine-hint');
-        if (!asrBadge || !cfg) return;
-
-        const provider = (cfg.dubbing && cfg.dubbing.asr_provider) || 'ali-dashscope';
-        const providerSel = $('#dub-asr-provider');
-        if (providerSel) providerSel.value = provider;
-        let warn = '';
-
-        if (provider === 'ali-dashscope') {
-            const hasKey = !!(cfg.model && cfg.model.dashscope_api_key);
-            asrBadge.textContent = hasKey ? '阿里云 · qwen3-asr-flash-filetrans' : '阿里云（未配置 Key）';
-            asrBadge.classList.toggle('warn', !hasKey);
-            if (!hasKey) {
-                warn = '未配置阿里云百炼 Key：请到「设置 → API 密钥」填写，运行时将自动回退为整段识别配置。';
-            }
-        } else {
-            const modelSel = (cfg.model_selection && cfg.model_selection.batch_model) || (cfg.basic && cfg.basic.model_name) || '';
-            if (modelSel === 'local-whisper') {
-                asrBadge.textContent = '不支持：本地 Whisper';
-                asrBadge.classList.add('warn');
-                warn = '视频配音需要云端识别模型，请到「设置 → 整段识别」切换（推荐 Groq Whisper Large v3）。';
-            } else {
-                asrBadge.textContent = /groq|whisper-large/i.test(modelSel) ? 'Groq · Whisper Large v3' : modelSel || '-';
-                asrBadge.classList.remove('warn');
-            }
-        }
-
-        if (ttsBadge) {
-            const voice = (cfg.tts && cfg.tts.reference_title) || '默认音色';
+        if (!cfg) return;
+        const voiceBadge = $('#dub-tts-voice-badge');
+        if (voiceBadge) {
             const hasKey = !!(cfg.tts && cfg.tts.fish_api_key);
-            ttsBadge.textContent = hasKey ? `${cfg.tts.model} · ${voice}` : '未配置 Fish Audio Key';
-            ttsBadge.classList.toggle('warn', !hasKey);
-            if (!hasKey) warn = warn || '请先在「语音合成」页填写 Fish Audio API Key。';
+            const title = (cfg.tts && cfg.tts.reference_title) || '默认音色';
+            voiceBadge.textContent = hasKey ? title : '未配 Key';
+            voiceBadge.classList.toggle('warn', !hasKey);
         }
-        if (hint) {
-            hint.textContent = warn
-                || (provider === 'ali-dashscope'
-                    ? '阿里云引擎支持最长 12 小时音频与句级时间戳；配音音色与「语音合成」页一致。'
-                    : '长视频将自动分段上传，输出保存到视频同目录。');
+    }
+
+    // ---- 字幕编辑器 ----
+
+    /// 实时转写预览：增量到达时刷新编辑器（若已展开）与编辑节点统计
+    function renderDubTranscript() {
+        const panel = $('#dub-editor');
+        if (panel && !panel.hidden) renderDubEditor();
+        const stat = $('#dub-edit-stat');
+        if (stat) stat.textContent = state.dubbing.segments.length ? `${state.dubbing.segments.length} 段` : '未识别';
+    }
+
+    function renderDubEditor() {
+        const list = $('#dub-editor-list');
+        const stat = $('#dub-edit-stat');
+        const estat = $('#dub-editor-stat');
+        if (!list) return;
+        const segs = state.dubbing.segments;
+        if (stat) stat.textContent = segs.length ? `${segs.length} 段` : '未识别';
+        if (estat) estat.textContent = segs.length
+            ? `共 ${segs.length} 段 · ${segs.reduce((n, s) => n + s.text.length, 0)} 字`
+            : '';
+        list.innerHTML = '';
+        const frag = document.createDocumentFragment();
+        segs.forEach((seg, i) => {
+            const row = document.createElement('div');
+            row.className = 'dub-row';
+            row.dataset.idx = i;
+            row.innerHTML = `
+                <span class="dub-row-idx">${i + 1}</span>
+                <div class="dub-row-time">
+                    <input type="number" data-f="start_ms" value="${seg.start_ms}" step="100" title="开始(ms)">
+                    <input type="number" data-f="end_ms" value="${seg.end_ms}" step="100" title="结束(ms)">
+                </div>
+                <textarea class="dub-row-text" data-f="text">${escapeHtml(seg.text)}</textarea>
+                <div class="dub-row-side">
+                    ${seg.words && seg.words.length ? '<span class="dub-row-wordtag">词级</span>' : ''}
+                    <div class="dub-row-ops">
+                        <button class="dub-row-op" data-op="merge" title="并入上一段">↑</button>
+                        <button class="dub-row-op" data-op="split" title="拆分本段">✂</button>
+                        <button class="dub-row-op del" data-op="del" title="删除">✕</button>
+                    </div>
+                </div>`;
+            row.querySelectorAll('[data-f]').forEach(inp => {
+                inp.addEventListener('change', () => {
+                    const f = inp.dataset.f;
+                    if (f === 'text') seg.text = inp.value;
+                    else seg[f] = Math.max(0, parseInt(inp.value, 10) || 0);
+                    markDubEdited();
+                });
+            });
+            row.querySelector('[data-op="merge"]').addEventListener('click', () => mergeDubSeg(i));
+            row.querySelector('[data-op="split"]').addEventListener('click', () => splitDubSeg(i));
+            row.querySelector('[data-op="del"]').addEventListener('click', () => delDubSeg(i));
+            frag.appendChild(row);
+        });
+        list.appendChild(frag);
+        list.scrollTop = list.scrollHeight;
+    }
+
+    function markDubEdited() {
+        state.dubbing.edited = true;
+        updateDubButtons();
+    }
+
+    function renumberDubSegments() {
+        state.dubbing.segments.forEach((s, i) => { s.index = i; });
+    }
+
+    function mergeDubSeg(i) {
+        const segs = state.dubbing.segments;
+        if (i <= 0) return;
+        const prev = segs[i - 1], cur = segs[i];
+        prev.end_ms = cur.end_ms;
+        prev.text = prev.text.replace(/\s+$/, '') + cur.text.replace(/^\s+/, '');
+        if (prev.words || cur.words) prev.words = [...(prev.words || []), ...(cur.words || [])];
+        segs.splice(i, 1);
+        afterDubEdit(true);
+    }
+
+    function splitDubSeg(i) {
+        const segs = state.dubbing.segments;
+        const seg = segs[i];
+        if (!seg || seg.text.length < 2) return;
+        let a, b;
+        if (seg.words && seg.words.length > 1) {
+            const mid = Math.floor(seg.words.length / 2);
+            const wa = seg.words.slice(0, mid), wb = seg.words.slice(mid);
+            a = { index: 0, start_ms: seg.start_ms, end_ms: wa[wa.length - 1].end_ms,
+                  text: wa.map(w => w.text).join('').trim(), words: wa };
+            b = { index: 0, start_ms: wb[0].begin_ms, end_ms: seg.end_ms,
+                  text: wb.map(w => w.text).join('').trim(), words: wb };
+        } else {
+            const mid = Math.ceil(seg.text.length / 2);
+            const ratio = mid / seg.text.length;
+            const splitMs = seg.start_ms + Math.round((seg.end_ms - seg.start_ms) * ratio);
+            a = { index: 0, start_ms: seg.start_ms, end_ms: splitMs,
+                  text: seg.text.slice(0, mid).trim(), words: null };
+            b = { index: 0, start_ms: splitMs, end_ms: seg.end_ms,
+                  text: seg.text.slice(mid).trim(), words: null };
         }
+        segs.splice(i, 1, a, b);
+        afterDubEdit(true);
+    }
+
+    /// 在指定字符位置拆分分段（右键菜单）：有词级时间戳时对齐到最近词边界
+    function splitDubSegAt(i, charPos) {
+        const segs = state.dubbing.segments;
+        const seg = segs[i];
+        if (!seg || charPos <= 0 || charPos >= seg.text.length) return;
+        let a, b;
+        if (seg.words && seg.words.length > 1) {
+            // 按词累计字符数，找到覆盖 charPos 的词边界（保证两侧非空）
+            let acc = 0, splitIdx = -1;
+            for (let k = 0; k < seg.words.length; k++) {
+                acc += seg.words[k].text.length;
+                if (acc >= charPos) { splitIdx = k + 1; break; }
+            }
+            splitIdx = Math.max(1, Math.min(splitIdx === -1 ? seg.words.length - 1 : splitIdx, seg.words.length - 1));
+            const wa = seg.words.slice(0, splitIdx), wb = seg.words.slice(splitIdx);
+            a = { index: 0, start_ms: seg.start_ms, end_ms: wa[wa.length - 1].end_ms,
+                  text: wa.map(w => w.text).join('').trim(), words: wa };
+            b = { index: 0, start_ms: wb[0].begin_ms, end_ms: seg.end_ms,
+                  text: wb.map(w => w.text).join('').trim(), words: wb };
+        } else {
+            const ratio = charPos / seg.text.length;
+            const splitMs = seg.start_ms + Math.round((seg.end_ms - seg.start_ms) * ratio);
+            a = { index: 0, start_ms: seg.start_ms, end_ms: splitMs,
+                  text: seg.text.slice(0, charPos).trim(), words: null };
+            b = { index: 0, start_ms: splitMs, end_ms: seg.end_ms,
+                  text: seg.text.slice(charPos).trim(), words: null };
+        }
+        segs.splice(i, 1, a, b);
+        afterDubEdit(true);
+    }
+
+    function delDubSeg(i) {
+        state.dubbing.segments.splice(i, 1);
+        afterDubEdit(true);
+    }
+
+    function addDubSegment() {
+        const last = state.dubbing.segments[state.dubbing.segments.length - 1];
+        const start = last ? last.end_ms + 100 : 0;
+        state.dubbing.segments.push({ index: 0, start_ms: start, end_ms: start + 2000, text: '', words: null });
+        afterDubEdit(true);
+        const rows = $$('#dub-editor-list .dub-row');
+        const lastRow = rows[rows.length - 1];
+        if (lastRow) lastRow.querySelector('.dub-row-text').focus();
+    }
+
+    /// 按词级时间戳/字符比例重新分段
+    function resegmentDub(maxChars, minDurMs) {
+        const out = [];
+        const isEndPunct = (t) => /[。！？；!?;.…"”]$/.test(t);
+
+        for (const seg of state.dubbing.segments) {
+            const text = (seg.text || '').trim();
+            if (!text) continue;
+
+            if (seg.words && seg.words.length > 1) {
+                // 词级精确分段：贪心打包到 maxChars 或句尾标点
+                let pack = [], chars = 0;
+                const flush = () => {
+                    if (!pack.length) return;
+                    out.push({
+                        index: 0,
+                        start_ms: pack[0].begin_ms,
+                        end_ms: pack[pack.length - 1].end_ms,
+                        text: pack.map(w => w.text).join('').trim(),
+                        words: pack,
+                    });
+                    pack = []; chars = 0;
+                };
+                for (const w of seg.words) {
+                    pack.push(w);
+                    chars += w.text.length;
+                    const tail = pack.map(x => x.text).join('');
+                    if (chars >= maxChars || isEndPunct(tail)) flush();
+                }
+                flush();
+            } else {
+                // 无词级：按字符比例近似切分
+                const charsArr = [...text];
+                const total = charsArr.length;
+                const parts = Math.max(1, Math.ceil(total / maxChars));
+                if (parts === 1) { out.push({ ...seg }); continue; }
+                const per = Math.ceil(total / parts);
+                const dur = seg.end_ms - seg.start_ms;
+                for (let p = 0; p < parts; p++) {
+                    const piece = charsArr.slice(p * per, (p + 1) * per).join('').trim();
+                    if (!piece) continue;
+                    const s = seg.start_ms + Math.round(dur * (p * per) / total);
+                    const e = seg.start_ms + Math.round(dur * Math.min(total, (p + 1) * per) / total);
+                    out.push({ index: 0, start_ms: s, end_ms: Math.max(e, s + 200), text: piece, words: null });
+                }
+            }
+        }
+
+        // 合并过短段（低于最短时长且非句尾），避免语速飞起
+        const merged = [];
+        for (const seg of out) {
+            const prev = merged[merged.length - 1];
+            const tooShort = minDurMs > 0
+                && (seg.end_ms - seg.start_ms) < minDurMs
+                && !isEndPunct(seg.text.slice(-1));
+            if (prev && tooShort) {
+                prev.end_ms = seg.end_ms;
+                prev.text += seg.text;
+                if (prev.words || seg.words) prev.words = [...(prev.words || []), ...(seg.words || [])];
+            } else {
+                merged.push(seg);
+            }
+        }
+        state.dubbing.segments = merged;
+        afterDubEdit(true);
+        showDubToast(`重分段完成：${merged.length} 段`);
+    }
+
+    function afterDubEdit(rerender) {
+        renumberDubSegments();
+        markDubEdited();
+        if (rerender) renderDubEditor();
+        drawDubWires();
+    }
+
+    function openDubEditor() {
+        const panel = $('#dub-editor');
+        if (panel) {
+            panel.hidden = false;
+            renderDubEditor();
+            panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+        updateDubButtons();
+    }
+
+    // ---- 执行控制 ----
+
+    function collectPrepareOptions() {
+        const provider = $('#dub-asr-provider') ? $('#dub-asr-provider').value : 'ali-dashscope';
+        const chunkSecs = parseInt($('#dub-chunk-secs')?.value, 10) || 600;
+        return {
+            asr_provider: provider,
+            ali_enable_words: !!$('#dub-asr-words')?.checked,
+            ali_enable_itn: !!$('#dub-asr-itn')?.checked,
+            ali_language: $('#dub-asr-lang')?.value || '',
+            chunk_seconds: chunkSecs,
+        };
+    }
+
+    function collectGenerateOptions() {
+        return {
+            output_dir: $('#dub-out-dir')?.value.trim() || null,
+            tts: {
+                model: $('#dub-tts-model')?.value || undefined,
+                reference_id: (state.config && state.config.tts && state.config.tts.reference_id) || '',
+                speed: parseFloat($('#dub-tts-speed')?.value) || 1,
+                volume: parseFloat($('#dub-tts-volume')?.value) || 0,
+                temperature: parseFloat($('#dub-tts-temp')?.value),
+                top_p: parseFloat($('#dub-tts-top-p')?.value),
+                latency: $('#dub-tts-latency')?.value || undefined,
+                normalize: !!$('#dub-tts-normalize')?.checked,
+            },
+        };
+    }
+
+    /// 发送 snake_case 键以匹配 Rust serde 结构体字段
+    function snakeSegments() {
+        return state.dubbing.segments.map(s => ({
+            index: s.index, start_ms: s.start_ms, end_ms: s.end_ms, text: s.text,
+            words: s.words ? s.words.map(w => ({ begin_ms: w.begin_ms, end_ms: w.end_ms, text: w.text })) : null,
+        }));
     }
 
     async function pickDubVideo() {
@@ -4431,68 +4906,68 @@
             const path = await invoke('pick_video_file');
             if (!path) return;
             state.dubbing.videoPath = path;
-            const nameEl = $('#dub-file-name');
-            if (nameEl) nameEl.textContent = path.split(/[\\/]/).pop();
-            resetDubProgress(false);
+            state.dubbing.segments = [];
+            state.dubbing.outputPath = null;
+            state.dubbing.lastMeta = '';
+            resetDubNodeStatuses(['extract', 'asr', 'edit', 'tts', 'out']);
+            setDubNodeStatus('src', 'done');
+            const name = path.split(/[\\/]/).pop();
+            const nameEl = $('#dub-src-name');
+            if (nameEl) nameEl.textContent = name;
+            const editorPanel = $('#dub-editor');
+            if (editorPanel) editorPanel.hidden = true;
+            renderDubEditor();
+            setDubStatus('就绪');
             updateDubButtons();
+            drawDubWires();
         } catch (e) {
             setDubStatus('选择失败', 'error');
         }
     }
 
-    function resetDubProgress(clearFile) {
-        state.dubbing.steps.forEach(s => { s.status = 'pending'; });
-        state.dubbing.segments = [];
-        state.dubbing.outputPath = null;
-        state.dubbing.srtPath = null;
-        renderDubSteps();
-        renderDubTranscript(true);
-        setDubStatus(state.dubbing.running ? '处理中' : '就绪');
-        const bar = $('#dub-progress-bar');
-        const text = $('#dub-progress-text');
-        const msg = $('#dub-message');
-        const result = $('#dub-result');
-        if (bar) bar.style.width = '0%';
-        if (text) text.textContent = '0%';
-        if (msg) msg.textContent = clearFile ? '选择视频后点击「一键配音」' : '点击「一键配音」开始处理';
-        if (result) result.style.display = 'none';
-        if (clearFile) {
-            state.dubbing.videoPath = null;
-            const nameEl = $('#dub-file-name');
-            if (nameEl) nameEl.textContent = '未选择视频';
-        }
-        updateDubButtons();
-    }
-
-    async function startDubbing() {
+    async function runDubPrepare() {
         if (!invoke || state.dubbing.running || !state.dubbing.videoPath) return;
         try {
-            const provider = (state.config && state.config.dubbing && state.config.dubbing.asr_provider) || 'ali-dashscope';
-            await invoke('dubbing_start', {
-                videoPath: state.dubbing.videoPath,
-                options: { asrProvider: provider }
-            });
             state.dubbing.running = true;
-            state.dubbing.steps.forEach(s => { s.status = 'pending'; });
+            state.dubbing.edited = false;
+            // 重跑识别时清空旧分段，避免增量转写事件把新结果追加到旧结果后面
             state.dubbing.segments = [];
-            state.dubbing.outputPath = null;
-            state.dubbing.srtPath = null;
-            renderDubSteps();
-            renderDubTranscript(true);
-            const bar = $('#dub-progress-bar');
-            const text = $('#dub-progress-text');
-            const msg = $('#dub-message');
-            if (bar) bar.style.width = '1%';
-            if (text) text.textContent = '';
-            if (msg) msg.textContent = '任务已启动，正在准备工具...';
-            setDubStatus('处理中', 'running');
+            renderDubEditor();
+            resetDubNodeStatuses(['src', 'extract', 'asr', 'edit', 'tts', 'out']);
+            setDubNodeStatus('src', 'done');
+            setDubStatus('识别中…', 'running');
             updateDubButtons();
+            await invoke('dubbing_prepare', {
+                videoPath: state.dubbing.videoPath,
+                options: collectPrepareOptions(),
+            });
         } catch (e) {
             state.dubbing.running = false;
-            updateDubButtons();
+            setDubNodeStatus('asr', 'error');
             setDubStatus('启动失败', 'error');
-            const msg = $('#dub-message');
-            if (msg) msg.textContent = String(e);
+            updateDubButtons();
+        }
+    }
+
+    async function runDubGenerate() {
+        if (!invoke || state.dubbing.running || !state.dubbing.videoPath) return;
+        if (!state.dubbing.segments.length) { showDubToast('请先执行「识别字幕」'); return; }
+        try {
+            state.dubbing.running = true;
+            resetDubNodeStatuses(['tts', 'out']);
+            setDubNodeStatus('edit', 'done');
+            setDubStatus('合成中…', 'running');
+            updateDubButtons();
+            await invoke('dubbing_generate', {
+                videoPath: state.dubbing.videoPath,
+                segments: snakeSegments(),
+                options: collectGenerateOptions(),
+            });
+        } catch (e) {
+            state.dubbing.running = false;
+            setDubNodeStatus('tts', 'error');
+            setDubStatus('启动失败', 'error');
+            updateDubButtons();
         }
     }
 
@@ -4507,101 +4982,200 @@
         try { await invoke('open_directory', { path: dir }); } catch (e) { console.error(e); }
     }
 
+    /// 弹出文件夹选择器设置配音输出目录
+    async function pickDubOutputDir() {
+        if (!invoke) return;
+        try {
+            const dir = await invoke('pick_dub_output_dir');
+            if (!dir) return;
+            state.dubbing.outputDir = dir;
+            const inp = $('#dub-out-dir');
+            if (inp) inp.value = dir;
+        } catch (e) { console.error(e); }
+    }
+
+    function updateDubButtons() {
+        const prepBtn = $('#btn-dub-run-prepare');
+        const genBtn = $('#btn-dub-run-generate');
+        const cancelBtn = $('#btn-dub-cancel');
+        const editorBtn = $('#btn-dub-open-editor');
+        const pickBtn = $('#btn-dub-pick');
+        const openDirBtn = $('#btn-dub-open-dir');
+        if (prepBtn) prepBtn.disabled = state.dubbing.running || !state.dubbing.videoPath;
+        if (genBtn) {
+            genBtn.disabled = state.dubbing.running || !state.dubbing.segments.length;
+            genBtn.textContent = '▶ 生成配音' + (state.dubbing.edited ? ' *' : '');
+        }
+        if (cancelBtn) cancelBtn.style.display = state.dubbing.running ? '' : 'none';
+        if (editorBtn) editorBtn.disabled = !state.dubbing.segments.length;
+        if (pickBtn) pickBtn.disabled = state.dubbing.running;
+        if (openDirBtn) openDirBtn.style.display = state.dubbing.outputPath ? '' : 'none';
+    }
+
+    const DUB_STAGE_NODE = {
+        prepare: 'extract',
+        extract: 'extract',
+        asr: 'asr',
+        tts: 'tts',
+        mux: 'out',
+    };
+
     function handleDubProgress(p) {
         if (!p) return;
-        const bar = $('#dub-progress-bar');
-        const text = $('#dub-progress-text');
-        const msg = $('#dub-message');
 
         if (p.status === 'done') {
             state.dubbing.running = false;
-            state.dubbing.steps.forEach(s => { s.status = 'done'; });
-            renderDubSteps();
-            setDubStatus('完成', 'done');
-            if (bar) bar.style.width = '100%';
-            if (text) text.textContent = '100%';
-            if (msg) msg.textContent = p.message || '配音视频已生成';
             const result = p.result || {};
-            state.dubbing.outputPath = result.output || null;
-            state.dubbing.srtPath = result.subtitle || null;
-            const wrap = $('#dub-result');
-            const video = $('#dub-video');
-            const meta = $('#dub-result-meta');
-            if (wrap && video && state.dubbing.outputPath) {
-                video.src = toAssetUrl(state.dubbing.outputPath);
-                wrap.style.display = '';
+            if (result.phase === 'prepare' || Array.isArray(result.segments)) {
+                state.dubbing.segments = result.segments || [];
+                setDubNodeStatus('extract', 'done');
+                setDubNodeStatus('asr', 'done');
+                setDubNodeStatus('edit', 'done');
+                openDubEditor();
+                setDubStatus('识别完成，请编辑字幕', 'done');
+            } else {
+                setDubNodeStatus('tts', 'done');
+                setDubNodeStatus('out', 'done');
+                state.dubbing.outputPath = result.output || null;
+                state.dubbing.srtPath = result.subtitle || null;
+                const video = $('#dub-video');
+                if (video && state.dubbing.outputPath) {
+                    video.src = toAssetUrl(state.dubbing.outputPath);
+                    video.style.display = '';
+                }
+                const detailParts = [];
+                if (result.failed_segments > 0) detailParts.push(`${result.failed_segments} 段跳过`);
+                if (result.fitted_segments > 0) detailParts.push(`${result.fitted_segments} 段精确贴合`);
+                if (result.truncated_segments > 0) detailParts.push(`${result.truncated_segments} 段截尾保同步`);
+                const detailTxt = detailParts.length ? `（${detailParts.join('，')}）` : '';
+                state.dubbing.lastMeta = `${result.segments} 段${detailTxt} · SRT 已导出`;
+                const meta = $('#dub-out-meta');
+                if (meta) meta.textContent = state.dubbing.lastMeta;
+                setDubStatus('完成', 'done');
             }
-            if (meta) {
-                const failTxt = result.failed_segments > 0 ? `，${result.failed_segments} 段合成失败已跳过` : '';
-                meta.textContent = `共 ${result.segments} 段字幕${failTxt} · 字幕文件: ${state.dubbing.srtPath || '-'}`;
-            }
+            drawDubWires();
             updateDubButtons();
             return;
         }
 
         if (p.status === 'error') {
             state.dubbing.running = false;
-            const active = state.dubbing.steps.find(s => s.status === 'running');
-            if (active) active.status = 'error';
-            renderDubSteps();
-            setDubStatus('失败', 'error');
-            if (msg) msg.textContent = p.message || '任务失败';
+            const nodeId = DUB_STAGE_NODE[p.stage] || 'asr';
+            setDubNodeStatus(nodeId, 'error');
+            setDubStatus('失败：' + String(p.message || '').slice(0, 60), 'error');
             updateDubButtons();
             return;
         }
 
         if (p.status === 'cancelled') {
             state.dubbing.running = false;
-            state.dubbing.steps.forEach(s => { if (s.status !== 'done') s.status = 'pending'; });
-            renderDubSteps();
+            Object.keys(DUB_STAGE_NODE).forEach(k => setDubNodeStatus(DUB_STAGE_NODE[k], 'pending'));
             setDubStatus('已取消');
-            if (msg) msg.textContent = '任务已取消';
             updateDubButtons();
             return;
         }
 
-        // running：更新对应阶段状态（前序阶段标为完成）
-        if (p.stage) {
-            const idx = state.dubbing.steps.findIndex(s => s.key === p.stage);
-            if (idx >= 0) {
-                state.dubbing.steps.forEach((s, i) => {
-                    if (i < idx) s.status = 'done';
-                    else if (i === idx) s.status = 'running';
-                });
-                renderDubSteps();
-            }
+        // running：点亮对应节点，前置节点标为完成
+        const nodeId = DUB_STAGE_NODE[p.stage];
+        if (nodeId) {
+            const order = ['src', 'extract', 'asr', 'edit', 'tts', 'out'];
+            const idx = order.indexOf(nodeId);
+            order.forEach((id, i) => {
+                if (i < idx && id !== 'edit') setDubNodeStatus(id, 'done');
+            });
+            setDubNodeStatus(nodeId, 'running');
         }
-        if (typeof p.percent === 'number' && bar) bar.style.width = p.percent + '%';
-        if (typeof p.percent === 'number' && text) text.textContent = p.percent + '%';
-        if (msg && p.message) msg.textContent = p.message;
+        setDubStatus(`${p.label || '处理中'} ${p.percent}%`, 'running');
+    }
+
+    function showDubToast(msg) {
+        setDubStatus(msg);
     }
 
     function initDubbing() {
-        renderDubSteps();
-        const pickBtn = $('#btn-dub-pick');
-        if (pickBtn) pickBtn.addEventListener('click', pickDubVideo);
-        const startBtn = $('#btn-dub-start');
-        if (startBtn) startBtn.addEventListener('click', startDubbing);
-        const cancelBtn = $('#btn-dub-cancel');
-        if (cancelBtn) cancelBtn.addEventListener('click', cancelDubbing);
-        const openBtn = $('#btn-dub-open-dir');
-        if (openBtn) openBtn.addEventListener('click', openDubFolder);
-        // 识别引擎切换：持久化到配置（配置未就绪时按需拉取，避免静默丢失）
-        const provSel = $('#dub-asr-provider');
-        if (provSel) {
-            provSel.addEventListener('change', async () => {
-                if (!invoke) return;
-                if (!state.config) {
-                    try { state.config = await invoke('get_config'); } catch (e) { console.error(e); return; }
+        buildDubNodes();
+
+        const bind = (id, evt, fn) => { const el = $('#' + id); if (el) el.addEventListener(evt, fn); };
+
+        // 工具栏与编辑器（静态 DOM，直接绑定）
+        bind('btn-dub-run-prepare', 'click', runDubPrepare);
+        bind('btn-dub-run-generate', 'click', runDubGenerate);
+        bind('btn-dub-cancel', 'click', cancelDubbing);
+        bind('btn-dub-reseg', 'click', () => {
+            const chars = parseInt($('#dub-seg-chars')?.value, 10) || 20;
+            const mindur = parseInt($('#dub-seg-mindur')?.value, 10) || 0;
+            if (state.dubbing.segments.length) resegmentDub(chars, mindur);
+        });
+        bind('btn-dub-add-seg', 'click', addDubSegment);
+        bind('dub-canvas-wrap', 'scroll', drawDubWires);
+
+        // 字幕列表右键菜单：在光标处拆分 / 合并 / 删除（行为静态容器，行由 JS 重建，用委托）
+        const editorList = $('#dub-editor-list');
+        if (editorList) {
+            editorList.addEventListener('contextmenu', (e) => {
+                const row = e.target.closest('.dub-row');
+                if (!row) return;
+                e.preventDefault();
+                const i = Number(row.dataset.idx);
+                const seg = state.dubbing.segments[i];
+                if (!seg) return;
+                const ta = row.querySelector('.dub-row-text');
+                // 同步尚未提交（未触发 change）的编辑内容，保证拆分位置准确
+                if (ta && ta.value !== seg.text) seg.text = ta.value;
+                const pos = ta ? ta.selectionStart : -1;
+                const items = [];
+                if (pos > 0 && pos < seg.text.length) {
+                    const before = seg.text.slice(Math.max(0, pos - 4), pos);
+                    const after = seg.text.slice(pos, pos + 4);
+                    items.push({ label: `在此处拆分（…${before} | ${after}…）`, onClick: () => splitDubSegAt(i, pos) });
                 }
-                state.config.dubbing = state.config.dubbing || {};
-                state.config.dubbing.asr_provider = provSel.value;
-                try { await invoke('save_config', { newConfig: state.config }); } catch (e) { console.error(e); }
-                renderDubEngineBadges();
+                items.push({ label: '从中间拆分', onClick: () => splitDubSeg(i) });
+                if (i > 0) items.push({ label: '并入上一段', onClick: () => mergeDubSeg(i) });
+                items.push({ label: '删除分段', danger: true, onClick: () => delDubSeg(i) });
+                showContextMenu(e.clientX, e.clientY, items);
             });
         }
+
+        // 节点内控件由 buildDubNodes() 注入，每次切到本页都会重建导致直绑监听丢失，
+        // 故在画布容器上统一事件委托（容器为静态 DOM，只绑一次）
+        const canvas = $('#dub-canvas');
+        if (canvas) {
+            canvas.addEventListener('click', (e) => {
+                const t = e.target.closest('button');
+                if (!t) return;
+                if (t.id === 'btn-dub-pick') pickDubVideo();
+                else if (t.id === 'btn-dub-open-editor') openDubEditor();
+                else if (t.id === 'btn-dub-open-dir') openDubFolder();
+                else if (t.id === 'btn-dub-pick-dir') pickDubOutputDir();
+                else if (t.id === 'btn-dub-voice-lib') openVoiceLib();
+            });
+            canvas.addEventListener('change', (e) => {
+                if (e.target.id !== 'dub-asr-provider') return;
+                syncDubAsrPanel();
+                // 持久化引擎选择
+                if (invoke) {
+                    (async () => {
+                        if (!state.config) {
+                            try { state.config = await invoke('get_config'); } catch (err) { return; }
+                        }
+                        state.config.dubbing = state.config.dubbing || {};
+                        state.config.dubbing.asr_provider = e.target.value;
+                        try { await invoke('save_config', { newConfig: state.config }); } catch (err) { console.error(err); }
+                    })();
+                }
+            });
+            canvas.addEventListener('input', (e) => {
+                const id = e.target.id;
+                if (id === 'dub-tts-speed' || id === 'dub-tts-volume') updateDubSpeedLabels();
+                else if (id === 'dub-out-dir') state.dubbing.outputDir = e.target.value;
+            });
+        }
+
+        window.addEventListener('resize', () => drawDubWires());
+        requestAnimationFrame(drawDubWires);
     }
 
+    /// 初始化 TTS 视图事件
     function initTts() {
         const text = $('#tts-text');
         if (text) {

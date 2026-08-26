@@ -1,8 +1,9 @@
 //! 逐段 TTS 合成与配音时间轴拼装。
 //!
-//! 每个字幕分段调用 Fish Audio 合成 WAV，解码为统一规格（24kHz 单声道 s16），
-//! 若合成时长超出原分段时长则自动提高语速重试一次；
-//! 随后按「原起始时间 + 不重叠前移」规则流式写入配音音轨 WAV。
+//! 每个字幕分段调用 Fish Audio 合成 WAV，解码为统一规格（24kHz 单声道 s16）；
+//! 去除首尾静音后，用 ffmpeg `atempo` 变时基（不变调）把每段**精确**拉伸/压缩到
+//! 原分段时长，保证每段都从原起始时间开口且时长完全贴合，一次直出；
+//! atempo 失败时才回退为尾部截断，避免级联后移。
 
 use std::io::BufWriter;
 use std::path::Path;
@@ -14,8 +15,17 @@ use crate::tts::client::FishTtsClient;
 
 /// 配音音轨统一采样率（人声 24k 足够，兼顾体积）
 pub const TRACK_SAMPLE_RATE: u32 = 24_000;
-/// 允许的轻微超时比例（超过才触发语速重试）
-const FIT_TOLERANCE: f64 = 1.05;
+/// 已贴合判定带宽：实测时长落在槽位时长 ±2% 内时跳过拉伸，避免无谓音质损耗
+const FIT_BAND: f64 = 0.02;
+
+/// 单段贴合统计：拉伸方式与回退情况
+#[derive(Debug, Default)]
+pub struct FitStats {
+    /// 经 ffmpeg atempo 精确拉伸/压缩到槽位时长
+    pub stretched: bool,
+    /// 拉伸失败回退为尾部截断（保底不级联）
+    pub truncated: bool,
+}
 
 /// 单段 TTS 结果：24kHz mono s16 原始样本与实际时长
 pub struct SegmentAudio {
@@ -68,48 +78,175 @@ async fn synth_with_fallback(
     }
 }
 
-/// 合成单个分段并尽量贴合目标时长。
-/// 超长时按比例提高 `prosody.speed` 重试一次（Fish 语速范围 0.5–2.0）。
+/// 预估合成初始语速：按文本粗估自然时长与槽位时长的比值做温和预调，
+/// 让后续 atempo 拉伸因子尽量接近 1（因子越极端音质损耗越大）。
+pub fn estimate_fit_speed(text: &str, slot_ms: u64, base_speed: f32) -> f32 {
+    if slot_ms == 0 {
+        return base_speed;
+    }
+    let mut cjk = 0usize;
+    let mut latin = 0usize;
+    for c in text.chars() {
+        match c {
+            '\u{4E00}'..='\u{9FFF}'
+            | '\u{3400}'..='\u{4DBF}'
+            | '\u{3040}'..='\u{30FF}'
+            | '\u{AC00}'..='\u{D7AF}' => cjk += 1,
+            _ if c.is_alphanumeric() => latin += 1,
+            _ => {}
+        }
+    }
+    // 粗估：中日韩 ~4.8 字/秒，拉丁 ~13 字符/秒（含标点停顿的 TTS 自然语速）
+    let est_ms = (cjk as f64 / 4.8 + latin as f64 / 13.0) * 1000.0;
+    if est_ms < 200.0 {
+        return base_speed;
+    }
+    let ratio = est_ms / slot_ms as f64;
+    (base_speed as f64 * ratio).clamp(0.8, 1.5) as f32
+}
+
+/// 合成单个分段：单次调用（含音色失效回退）→ 解码到音轨规格 → 去首尾静音。
+/// 时长精确贴合由 [`fit_to_slot`] 完成，不在此重试，保证一次直出。
 pub async fn synthesize_segment(
     client: &FishTtsClient,
     cfg: &TtsConfig,
     text: &str,
-    slot_ms: u64,
-    base_speed: f32,
+    speed: f32,
 ) -> Result<SegmentAudio> {
-    let mut attempt_speed = base_speed;
-    let mut best: Option<SegmentAudio> = None;
+    let bytes = synth_with_fallback(client, cfg, text, speed).await?;
+    let mut audio = decode_wav_to_track(&bytes)?;
+    trim_silence(&mut audio);
+    Ok(audio)
+}
 
-    for _ in 0..2 {
-        let bytes = synth_with_fallback(client, cfg, text, attempt_speed).await?;
-        let audio = decode_wav_to_track(&bytes)?;
-        let duration = audio.duration_ms;
+/// 将音轨规格样本写出为 WAV 文件（24kHz mono s16）
+pub fn write_track_wav(path: &Path, audio: &SegmentAudio) -> Result<()> {
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: TRACK_SAMPLE_RATE,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut writer =
+        hound::WavWriter::create(path, spec).context("创建临时 WAV 失败")?;
+    for &s in &audio.samples {
+        writer.write_sample(s as i32)?;
+    }
+    writer.finalize().context("写入临时 WAV 失败")?;
+    Ok(())
+}
 
-        // 保留时长更短的版本（超长段落重试后取更优者）
-        if best.as_ref().is_none_or(|b| duration < b.duration_ms) {
-            best = Some(audio);
-        }
-        if duration as f64 <= slot_ms as f64 * FIT_TOLERANCE {
-            break;
-        }
-
-        // 计算需要的语速提升：时长比即语速比（近似反比关系）
-        let ratio = duration as f64 / slot_ms.max(1) as f64;
-        let next = (attempt_speed * ratio as f32).clamp(0.5, 2.0);
-        if (next - attempt_speed).abs() < 0.01 {
-            break; // 已到语速上限
-        }
-        log::info!(
-            "[dubbing] 段落超长（{}ms / {}ms），语速 {} -> {} 重试",
-            duration,
-            slot_ms,
-            attempt_speed,
-            next
-        );
-        attempt_speed = next;
+/// 把单段音频**精确**贴合到槽位时长（音画同步核心）：
+/// ffmpeg `atempo` 变时基（不变调）拉伸/压缩到目标时长；
+/// 失败时回退为尾部截断，保证后续段不被级联后移。
+pub fn fit_to_slot(
+    ff: &Path,
+    temp_dir: &Path,
+    index: usize,
+    mut audio: SegmentAudio,
+    slot_ms: u64,
+) -> (SegmentAudio, FitStats) {
+    let mut stats = FitStats::default();
+    if slot_ms == 0 || audio.duration_ms == 0 {
+        return (audio, stats);
+    }
+    let ratio = audio.duration_ms as f64 / slot_ms as f64;
+    if (1.0 - FIT_BAND..=1.0 + FIT_BAND).contains(&ratio) {
+        return (audio, stats); // 已在贴合带内，无需处理
     }
 
-    best.ok_or_else(|| anyhow!("TTS 合成失败：无有效音频"))
+    let in_path = temp_dir.join(format!("seg_{:04}_in.wav", index));
+    let out_path = temp_dir.join(format!("seg_{:04}_fit.wav", index));
+    let res = (|| -> Result<SegmentAudio> {
+        write_track_wav(&in_path, &audio)?;
+        super::ffmpeg::time_stretch_wav(ff, &in_path, &out_path, ratio)?;
+        let bytes = std::fs::read(&out_path).context("读取变速结果失败")?;
+        decode_wav_to_track(&bytes)
+    })();
+    let _ = std::fs::remove_file(&in_path);
+    let _ = std::fs::remove_file(&out_path);
+
+    match res {
+        Ok(mut fitted) => {
+            stats.stretched = true;
+            // 变速结果可能仍有个位数毫秒尾差，超出槽位的部分修掉（通常不会发生）
+            let limit = ms_to_samples(slot_ms);
+            if fitted.samples.len() as u64 > limit {
+                fitted.samples.truncate(limit as usize);
+                fitted.duration_ms = samples_to_ms(limit);
+            }
+            log::debug!(
+                "[dubbing] 段 {} 精确贴合：{}ms -> {}ms（tempo {:.3}）",
+                index + 1,
+                audio.duration_ms,
+                slot_ms,
+                ratio
+            );
+            (fitted, stats)
+        }
+        Err(e) => {
+            log::warn!(
+                "[dubbing] 段 {} atempo 贴合失败（{}），回退尾部截断",
+                index + 1,
+                brief_err(&e.to_string())
+            );
+            let limit = ms_to_samples(slot_ms);
+            if audio.samples.len() as u64 > limit {
+                audio.samples.truncate(limit as usize);
+                audio.duration_ms = samples_to_ms(limit);
+                stats.truncated = true;
+            }
+            (audio, stats)
+        }
+    }
+}
+
+/// 去除首尾静音（10ms 帧能量检测，阈值相对峰值），让人声起点对齐分段起点。
+/// 单侧最多修剪 500ms，避免异常样本删过头。
+pub fn trim_silence(audio: &mut SegmentAudio) {
+    const FRAME: usize = (TRACK_SAMPLE_RATE / 100) as usize; // 10ms
+    const MAX_TRIM: usize = FRAME * 50; // 单侧上限 500ms
+    let s = &audio.samples;
+    if s.len() < FRAME * 4 {
+        return;
+    }
+    let peak = s.iter().map(|&v| (v as i64).unsigned_abs()).max().unwrap_or(0);
+    if peak == 0 {
+        return; // 纯静音段不修剪，保留时长占位
+    }
+    // 平方能量阈值：(peak * 0.008)^2，用 u64 比较避免浮点
+    let thr = ((peak as u64) * 8 / 1000).pow(2);
+    let frame_loud = |start: usize| {
+        let end = (start + FRAME).min(s.len());
+        let mut sum: u64 = 0;
+        for &v in &s[start..end] {
+            let a = (v as i64).unsigned_abs();
+            sum += a * a;
+        }
+        sum / (end - start) as u64 > thr
+    };
+    let frames = s.len() / FRAME;
+    let mut lead = 0usize;
+    while lead < frames.min(MAX_TRIM / FRAME) && !frame_loud(lead * FRAME) {
+        lead += 1;
+    }
+    let mut tail = 0usize;
+    while tail < frames.saturating_sub(lead).min(MAX_TRIM / FRAME)
+        && !frame_loud((frames - 1 - tail) * FRAME)
+    {
+        tail += 1;
+    }
+    let cut_head = lead * FRAME;
+    let cut_tail = tail * FRAME;
+    if cut_head + cut_tail == 0 {
+        return;
+    }
+    let new_len = s.len() - cut_head - cut_tail;
+    if new_len < FRAME {
+        return; // 修剪后过短，保留原样
+    }
+    audio.samples = audio.samples[cut_head..cut_head + new_len].to_vec();
+    audio.duration_ms = samples_to_ms(audio.samples.len() as u64);
 }
 
 /// 解码 WAV 字节为音轨规格（24kHz mono s16）
@@ -355,6 +492,32 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[test]
+    fn trims_leading_and_trailing_silence() {
+        // 100ms 静音 + 200ms 响音 + 150ms 静音 @24k → 修剪后约 200ms
+        let frame = (TRACK_SAMPLE_RATE / 100) as usize;
+        let mut samples = vec![0i16; frame * 10];
+        samples.extend(vec![8000i16; frame * 20]);
+        samples.extend(vec![0i16; frame * 15]);
+        let mut audio = SegmentAudio {
+            samples,
+            duration_ms: 450,
+        };
+        trim_silence(&mut audio);
+        assert!((195..=205).contains(&audio.duration_ms));
+    }
+
+    #[test]
+    fn trim_keeps_pure_silence_placeholder() {
+        // 纯静音段不修剪，保留时长占位（避免破坏时间轴）
+        let mut audio = SegmentAudio {
+            samples: vec![0i16; 24_000],
+            duration_ms: 1000,
+        };
+        trim_silence(&mut audio);
+        assert_eq!(audio.duration_ms, 1000);
+    }
+
     /// 真实 API 集成验证。需要有效 Key，手动运行：
     /// FISH_KEY=sk-xxx cargo test --release -- --ignored --nocapture tts_fallback_e2e
     #[tokio::test]
@@ -367,7 +530,7 @@ mod tests {
         let mut cfg = crate::config::TtsConfig::default();
         cfg.fish_api_key = key.clone();
         cfg.format = "wav".into();
-        let a = synthesize_segment(&client, &cfg, "你好，世界。", 10_000, 1.0).await;
+        let a = synthesize_segment(&client, &cfg, "你好，世界。", 1.0).await;
         match a {
             Ok(audio) => println!(
                 "场景A（无音色）成功：{} 样本，{}ms",
@@ -382,7 +545,7 @@ mod tests {
         cfg_b.fish_api_key = key;
         cfg_b.format = "wav".into();
         cfg_b.reference_id = "00a1b221-6137-4b73-ad62-b0cbce134167".into();
-        let b = synthesize_segment(&client, &cfg_b, "你好，世界。", 10_000, 1.0).await;
+        let b = synthesize_segment(&client, &cfg_b, "你好，世界。", 1.0).await;
         match b {
             Ok(audio) => println!(
                 "场景B（失效音色回退）成功：{} 样本，{}ms",
@@ -391,5 +554,46 @@ mod tests {
             ),
             Err(e) => panic!("场景B 失败（回退未生效）: {}", e),
         }
+    }
+
+    #[test]
+    fn estimate_speed_clamped_to_band() {
+        // 10 个中文字自然时长 ≈ 2083ms，槽位 1000ms → 比值 2.08 被限幅到 1.5×
+        let s = estimate_fit_speed("一二三四五六七八九十", 1000, 1.0);
+        assert!((1.49..=1.51).contains(&s));
+        // 槽位远长于自然时长 → 减速下限 0.8×
+        let s2 = estimate_fit_speed("你好", 60_000, 1.0);
+        assert!((0.79..=0.81).contains(&s2));
+        // 空文本/零槽位 → 基准语速
+        assert_eq!(estimate_fit_speed("", 1000, 1.2), 1.2);
+        assert_eq!(estimate_fit_speed("你好", 0, 1.2), 1.2);
+    }
+
+    #[test]
+    fn fit_skips_within_band() {
+        // 时长偏差 ±2% 内不处理（无需 ffmpeg）
+        let td = std::env::temp_dir();
+        let audio = SegmentAudio {
+            samples: vec![100i16; 24_240],
+            duration_ms: 1010,
+        };
+        let (out, stats) =
+            fit_to_slot(std::path::Path::new("__no_such_ffmpeg__"), &td, 0, audio, 1000);
+        assert!(!stats.stretched && !stats.truncated);
+        assert_eq!(out.duration_ms, 1010);
+    }
+
+    #[test]
+    fn fit_falls_back_to_truncation_without_ffmpeg() {
+        // ffmpeg 不可用时回退尾部截断，保证不超出槽位（不级联后移）
+        let td = std::env::temp_dir();
+        let audio = SegmentAudio {
+            samples: vec![100i16; 24_000], // 1000ms
+            duration_ms: 1000,
+        };
+        let (out, stats) =
+            fit_to_slot(std::path::Path::new("__no_such_ffmpeg__"), &td, 0, audio, 500);
+        assert!(stats.truncated && !stats.stretched);
+        assert!((495..=505).contains(&out.duration_ms));
     }
 }

@@ -15,6 +15,14 @@ pub mod tts_segments;
 
 use serde::{Deserialize, Serialize};
 
+/// 词级时间戳（阿里 ASR 开启词级输出时提供），用于前端精确重新分段
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DubWord {
+    pub begin_ms: u64,
+    pub end_ms: u64,
+    pub text: String,
+}
+
 /// 带时间戳的字幕/配音分段（毫秒）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DubSegment {
@@ -22,9 +30,22 @@ pub struct DubSegment {
     pub start_ms: u64,
     pub end_ms: u64,
     pub text: String,
+    /// 词级时间戳（可选，仅部分引擎提供）
+    #[serde(default)]
+    pub words: Option<Vec<DubWord>>,
 }
 
 impl DubSegment {
+    pub fn new(index: usize, start_ms: u64, end_ms: u64, text: String) -> Self {
+        Self {
+            index,
+            start_ms,
+            end_ms,
+            text,
+            words: None,
+        }
+    }
+
     pub fn duration_ms(&self) -> u64 {
         self.end_ms.saturating_sub(self.start_ms)
     }

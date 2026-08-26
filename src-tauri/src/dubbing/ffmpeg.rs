@@ -330,7 +330,7 @@ pub fn extract_audio_chunks(
     Ok(chunks)
 }
 
-/// 将配音音轨替换进视频（先尝试视频流直拷贝，失败则重编码兜底）
+/// 将配音音轨替换进视频（先尝试视频流直拷贝，失败时降级为全量重编码）
 pub fn mux_replace_audio(
     ffmpeg: &Path,
     video: &Path,
@@ -409,6 +409,45 @@ pub fn mux_replace_audio(
     ))
 }
 
+/// 构建 atempo 滤镜链：单级取值限 [0.5, 2.0]，超出范围自动级联多级。
+/// `tempo` = 原时长 / 目标时长（>1 压缩加速，<1 拉伸减速，音调不变）。
+pub fn atempo_filter_chain(tempo: f64) -> String {
+    let mut t = tempo.clamp(0.05, 20.0);
+    let mut parts = Vec::new();
+    while t > 2.0 + 1e-9 {
+        parts.push("atempo=2.0".to_string());
+        t /= 2.0;
+    }
+    while t < 0.5 - 1e-9 {
+        parts.push("atempo=0.5".to_string());
+        t /= 0.5;
+    }
+    parts.push(format!("atempo={:.4}", t));
+    parts.join(",")
+}
+
+/// 用 atempo 变时基（不变调）把 WAV 精确拉伸/压缩，用于配音段贴合原时长。
+/// 输出统一为 24kHz 单声道 s16，与配音音轨规格一致。
+pub fn time_stretch_wav(ffmpeg: &Path, src: &Path, dst: &Path, tempo: f64) -> Result<()> {
+    let filter = atempo_filter_chain(tempo);
+    let ar = super::tts_segments::TRACK_SAMPLE_RATE.to_string();
+    let out = hidden_command(ffmpeg)
+        .args(["-y", "-hide_banner", "-loglevel", "error", "-i"])
+        .arg(src)
+        .args(["-filter:a", &filter, "-ac", "1", "-ar", &ar])
+        .arg(dst)
+        .output()
+        .context("启动 ffmpeg 变速失败")?;
+    if !out.status.success() || !dst.is_file() {
+        return Err(anyhow!(
+            "atempo 变速失败（tempo={:.4}）: {}",
+            tempo,
+            last_stderr_lines(&String::from_utf8_lossy(&out.stderr))
+        ));
+    }
+    Ok(())
+}
+
 fn last_stderr_lines(stderr: &str) -> String {
     let lines: Vec<&str> = stderr.lines().rev().take(6).collect();
     lines
@@ -433,5 +472,17 @@ mod tests {
         );
         assert_eq!(parse_duration_line("Duration: 01:00:00.00"), Some(3600.0));
         assert_eq!(parse_duration_line("no duration here"), None);
+    }
+
+    #[test]
+    fn atempo_chain_build() {
+        assert_eq!(atempo_filter_chain(1.0), "atempo=1.0000");
+        assert_eq!(atempo_filter_chain(1.5), "atempo=1.5000");
+        // 超 2.0 级联：3.0 = 2.0 * 1.5
+        assert_eq!(atempo_filter_chain(3.0), "atempo=2.0,atempo=1.5000");
+        // 低于 0.5 级联：0.3 = 0.5 * 0.6
+        assert_eq!(atempo_filter_chain(0.3), "atempo=0.5,atempo=0.6000");
+        // 极端值被限幅：8.0 = 2*2*2
+        assert_eq!(atempo_filter_chain(8.0), "atempo=2.0,atempo=2.0,atempo=2.0000");
     }
 }

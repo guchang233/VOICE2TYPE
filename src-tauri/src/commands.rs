@@ -1386,19 +1386,55 @@ pub async fn pick_video_file(app: tauri::AppHandle) -> Result<Option<String>, St
     Ok(picked.map(|p| p.to_string()))
 }
 
-/// 启动一键配音任务（同一时间仅允许一个），进度通过 `dubbing-progress` 事件推送，
-/// 转写结果通过 `dubbing-transcript` 事件实时推送。
+/// 弹出文件夹选择器选择配音输出目录（不写入配置，仅返回路径）
 #[tauri::command]
-pub fn dubbing_start(
+pub async fn pick_dub_output_dir(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    use tokio::sync::oneshot;
+
+    let (tx, rx) = oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title("选择配音输出目录")
+        .pick_folder(move |folder| {
+            let _ = tx.send(folder);
+        });
+
+    let folder = rx.await.map_err(|e| format!("对话框通道错误: {}", e))?;
+    Ok(folder.map(|p| p.to_string()))
+}
+
+/// 阶段一：启动识别任务（提取音轨 + 云端 ASR）。
+/// 完成后经 `dubbing-progress` done 事件返回带词级时间戳的分段。
+#[tauri::command]
+pub fn dubbing_prepare(
     app: tauri::AppHandle,
     config: tauri::State<'_, Arc<ConfigManager>>,
     video_path: String,
-    options: Option<crate::dubbing::pipeline::DubOptions>,
+    options: Option<crate::dubbing::pipeline::PrepareOptions>,
 ) -> Result<(), String> {
-    crate::dubbing::pipeline::spawn_job(
+    crate::dubbing::pipeline::spawn_prepare(
         app,
         config.inner().clone(),
         video_path,
+        options.unwrap_or_default(),
+    )
+}
+
+/// 阶段二：用（可能已编辑的）字幕生成配音视频。
+#[tauri::command]
+pub fn dubbing_generate(
+    app: tauri::AppHandle,
+    config: tauri::State<'_, Arc<ConfigManager>>,
+    video_path: String,
+    segments: Vec<crate::dubbing::DubSegment>,
+    options: Option<crate::dubbing::pipeline::GenerateOptions>,
+) -> Result<(), String> {
+    crate::dubbing::pipeline::spawn_generate(
+        app,
+        config.inner().clone(),
+        video_path,
+        segments,
         options.unwrap_or_default(),
     )
 }

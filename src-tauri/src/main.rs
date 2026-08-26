@@ -113,7 +113,9 @@ fn main() {
             commands::tts_list_voices,
             commands::tts_get_voice,
             commands::pick_video_file,
-            commands::dubbing_start,
+            commands::pick_dub_output_dir,
+            commands::dubbing_prepare,
+            commands::dubbing_generate,
             commands::dubbing_cancel,
             commands::dubbing_status,
         ])

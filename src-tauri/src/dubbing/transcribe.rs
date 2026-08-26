@@ -165,6 +165,7 @@ pub fn parse_verbose_json(body: &str) -> Option<Vec<DubSegment>> {
             start_ms: (start * 1000.0).max(0.0) as u64,
             end_ms: (end * 1000.0).max(0.0) as u64,
             text,
+            words: None,
         });
     }
     Some(out)
@@ -205,6 +206,7 @@ pub fn parse_srt(body: &str) -> Vec<DubSegment> {
                 start_ms: start,
                 end_ms: end,
                 text: joined,
+                words: None,
             });
         }
     }
@@ -333,6 +335,7 @@ mod tests {
             start_ms: 3661000,
             end_ms: 3665500,
             text: "测试一行".into(),
+            words: None,
         }];
         let srt = segments_to_srt(&segs);
         assert!(srt.contains("01:01:01,000 --> 01:01:05,500"));
@@ -350,24 +353,28 @@ mod tests {
                 start_ms: 0,
                 end_ms: 800,
                 text: "你".into(),
+                words: None,
             },
             DubSegment {
                 index: 0,
                 start_ms: 850,
                 end_ms: 1600,
                 text: "好".into(),
+                words: None,
             },
             DubSegment {
                 index: 0,
                 start_ms: 1700,
                 end_ms: 1900,
                 text: "[Music]".into(),
+                words: None,
             },
             DubSegment {
                 index: 0,
                 start_ms: 3000,
                 end_ms: 4200,
                 text: "世界".into(),
+                words: None,
             },
         ];
         finalize_segments(&mut segs);

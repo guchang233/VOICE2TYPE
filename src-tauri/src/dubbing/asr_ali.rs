@@ -28,11 +28,33 @@ const TASK_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const POLL_MIN: Duration = Duration::from_secs(2);
 const POLL_MAX: Duration = Duration::from_secs(6);
 
+/// 阿里 ASR 识别参数（节点设置面板可调）
+#[derive(Debug, Clone)]
+pub struct AliAsrOptions {
+    /// 逆文本规范化（中文/英文数字转阿拉伯数字）
+    pub enable_itn: bool,
+    /// 词级时间戳（同时影响断句：VAD+标点），供前端精确重新分段
+    pub enable_words: bool,
+    /// 语种提示（空/auto = 自动检测）
+    pub language: String,
+}
+
+impl Default for AliAsrOptions {
+    fn default() -> Self {
+        Self {
+            enable_itn: true,
+            enable_words: true,
+            language: String::new(),
+        }
+    }
+}
+
 /// 转写单个音频分块文件，返回分块内相对时间戳分段（毫秒）。
 pub async fn transcribe_chunk(
     path: &Path,
     api_key: &str,
     chunk_name: &str,
+    opts: &AliAsrOptions,
     is_cancelled: impl Fn() -> bool,
 ) -> Result<Vec<DubSegment>> {
     if api_key.is_empty() {
@@ -42,7 +64,7 @@ pub async fn transcribe_chunk(
     }
 
     let oss_url = upload_to_temp_storage(path, api_key, chunk_name).await?;
-    let task_id = submit_task(api_key, &oss_url).await?;
+    let task_id = submit_task(api_key, &oss_url, opts).await?;
     let result_json = poll_task(api_key, &task_id, &is_cancelled).await?;
     let mut segs = parse_transcription(&result_json)?;
     crate::dubbing::transcribe::finalize_segments(&mut segs);
@@ -154,17 +176,21 @@ async fn upload_to_temp_storage(path: &Path, api_key: &str, chunk_name: &str) ->
 
 // ===================== 步骤 2：提交异步转写任务 =====================
 
-async fn submit_task(api_key: &str, oss_url: &str) -> Result<String> {
+async fn submit_task(api_key: &str, oss_url: &str, opts: &AliAsrOptions) -> Result<String> {
     let url = format!("{}/api/v1/services/audio/asr/transcription", DASHSCOPE_BASE);
+    let mut parameters = json!({
+        "channel_id": [0],
+        // 句级时间戳 + VAD 断句；开启词级后为 VAD+标点断句，便于前端精确分段
+        "enable_words": opts.enable_words,
+        "enable_itn": opts.enable_itn,
+    });
+    if !opts.language.is_empty() && opts.language != "auto" {
+        parameters["language"] = json!(opts.language);
+    }
     let body = json!({
         "model": DASHSCOPE_ASR_MODEL,
         "input": { "file_url": oss_url },
-        "parameters": {
-            "channel_id": [0],
-            // 句级时间戳 + VAD 断句，最适合逐段配音
-            "enable_words": false,
-            "enable_itn": true,
-        },
+        "parameters": parameters,
     });
 
     let resp = HTTP_CLIENT
@@ -276,7 +302,7 @@ async fn download_result(url: &str) -> Result<String> {
 
 // ===================== 步骤 4：解析结果 =====================
 
-/// 解析转录结果 JSON：`transcripts[].sentences[].{begin_time,end_time,text}`（毫秒）
+/// 解析转录结果 JSON：`transcripts[].sentences[].{begin_time,end_time,text,words[]}`（毫秒）
 pub fn parse_transcription(body: &str) -> Result<Vec<DubSegment>> {
     let v: Value = serde_json::from_str(body).context("解析转写结果 JSON 失败")?;
     let transcripts = v
@@ -298,11 +324,40 @@ pub fn parse_transcription(body: &str) -> Result<Vec<DubSegment>> {
                 .unwrap_or("")
                 .trim()
                 .to_string();
+
+            // 词级时间戳（enable_words=true 时返回），供前端精确分段
+            let words = s.get("words").and_then(Value::as_array).map(|ws| {
+                ws.iter()
+                    .filter_map(|w| {
+                        Some(crate::dubbing::DubWord {
+                            begin_ms: w.get("begin_time").and_then(Value::as_i64)?.max(0) as u64,
+                            end_ms: w.get("end_time").and_then(Value::as_i64)?.max(0) as u64,
+                            text: w.get("text").and_then(Value::as_str)?.trim().to_string(),
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            });
+            let words = words.filter(|w| !w.is_empty());
+
+            // 句级边界常带前后衬垫，用首词起点/末词终点向内收紧（不外扩，避免与相邻段重叠）
+            let (start_ms, end_ms) = if let Some(ws) = &words {
+                let s_start = start_ms.max(0) as u64;
+                let s_end = end_ms.max(0) as u64;
+                let w_start = ws.first().map(|w| w.begin_ms).unwrap_or(s_start);
+                let w_end = ws.last().map(|w| w.end_ms).unwrap_or(s_end);
+                let ns = w_start.max(s_start).min(s_end);
+                let ne = w_end.min(s_end).max(ns);
+                if ne > ns { (ns, ne) } else { (s_start, s_end) }
+            } else {
+                (start_ms.max(0) as u64, end_ms.max(0) as u64)
+            };
+
             out.push(DubSegment {
                 index: 0,
-                start_ms: (start_ms.max(0)) as u64,
-                end_ms: (end_ms.max(0)) as u64,
+                start_ms,
+                end_ms,
                 text,
+                words,
             });
         }
     }
