@@ -75,31 +75,84 @@ jobs:
           echo "Created release binary: $DEST"
           ls -lh "$DEST"
 
+      - name: Extract release notes from CHANGELOG
+        shell: bash
+        env:
+          REL_TAG: ${{ steps.tag.outputs.name }}
+        run: |
+          export PYTHONIOENCODING=utf-8
+          python << 'PYEOF'
+          import re, os, subprocess, sys
+
+          try:
+              sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+          except Exception:
+              pass
+
+          tag = os.environ["REL_TAG"]
+          version = tag.lstrip("v")
+
+          # 上一个 tag（用于生成版本对比链接）
+          try:
+              prev_tag = subprocess.check_output(
+                  ["git", "describe", "--tags", "--abbrev=0", tag + "^"],
+                  text=True, encoding="utf-8", errors="replace"
+              ).strip()
+          except Exception:
+              prev_tag = ""
+
+          # 从 CHANGELOG.md 提取当前版本的章节作为发布描述，
+          # 避免每个 Release 都是同一份写死的模板文本
+          section = ""
+          try:
+              with open("CHANGELOG.md", "r", encoding="utf-8") as f:
+                  content = f.read()
+              m = re.search(
+                  r"^##\s*\[" + re.escape(version) + r"\][^\n]*\n(.*?)(?=^##\s*\[|\Z)",
+                  content,
+                  re.MULTILINE | re.DOTALL,
+              )
+              if m:
+                  section = m.group(1).strip()
+          except Exception as e:
+              print(f"read changelog failed: {e}")
+
+          if not section:
+              section = "（本版本未记录详细变更，请查看提交历史）"
+
+          repo = os.environ.get("GITHUB_REPOSITORY", "")
+          lines = []
+          lines.append(f"## 本版本变更（v{version}）")
+          lines.append("")
+          lines.append(section)
+          lines.append("")
+          lines.append("## 安装说明")
+          lines.append("")
+          lines.append("下载下方的 `Voice2Type_v*.exe` 文件即可直接运行，无需安装。")
+          lines.append("")
+          lines.append("**系统要求：**")
+          lines.append("- Windows 10/11 (x86_64)")
+          lines.append("- WebView2 运行时（Windows 11 已内置，Windows 10 可能需要安装）")
+          if prev_tag and repo:
+              lines.append("")
+              lines.append(f"**Full Changelog**: https://github.com/{repo}/compare/{prev_tag}...{tag}")
+
+          with open("release_notes.md", "w", encoding="utf-8") as f:
+              f.write("\n".join(lines) + "\n")
+          print(f"release notes written: section={len(section)} chars, prev_tag={prev_tag or '-'}")
+          PYEOF
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.name }}
           name: "Voice2Type ${{ steps.tag.outputs.name }}"
-          body: |
-            Voice2Type 桌面版自动构建发布。
-
-            ## 安装说明
-
-            下载下方的 `Voice2Type_v*.exe` 文件即可直接运行，无需安装。
-
-            **系统要求：**
-            - Windows 10/11 (x86_64)
-            - WebView2 运行时（Windows 11 已内置，Windows 10 可能需要安装）
-
-            ## 特性
-
-            - 基于 Tauri 2.0 架构，蓝色主题 UI
-            - 支持流式语音识别与整段识别
-            - 实时字幕功能，可自定义样式
-            - 支持 OBS 捕捉
+          # 发布描述取自 CHANGELOG.md 中当前版本的章节（上一步生成），每个版本各不相同；
+          # 关闭自动生成的提交列表，避免与手写变更内容重复、风格不统一
+          body_path: release_notes.md
           draft: false
           prerelease: false
-          generate_release_notes: true
+          generate_release_notes: false
           files: ${{ steps.binary.outputs.path }}
 
       - name: Generate CHANGELOG entry
@@ -214,10 +267,24 @@ jobs:
               assets: [ { name: $asset_name, browser_download_url: $asset_url } ]
             }' > update.json
 
-          # 提交到仓库（触发 jsDelivr CDN 缓存更新）
-          # tag 触发时 checkout 处于 detached HEAD，需显式指定推送到 main 分支
+          # 提交到仓库（触发 jsDelivr CDN 缓存更新）。
+          # tag 触发时 checkout 处于 detached HEAD，且 main 可能已领先于 tag
+          # （如标签推送后又有新提交推上主干），直接 HEAD:main 会因非快进被拒。
+          # 故：先保存产物 → 切到最新 main → 恢复产物 → 提交推送。
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          cp update.json /tmp/update.json.new
+          CHANGED_CHANGELOG=0
+          if ! git diff --quiet -- CHANGELOG.md; then
+            CHANGED_CHANGELOG=1
+            cp CHANGELOG.md /tmp/CHANGELOG.md.new
+          fi
+          git fetch origin main
+          git checkout -B main origin/main
+          cp /tmp/update.json.new update.json
+          if [ "$CHANGED_CHANGELOG" = "1" ]; then
+            cp /tmp/CHANGELOG.md.new CHANGELOG.md
+          fi
           git add update.json CHANGELOG.md
           git commit -m "chore: update update.json and CHANGELOG for ${VERSION}" || echo "No changes to commit"
-          git push origin HEAD:main
+          git push origin main
