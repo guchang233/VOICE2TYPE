@@ -56,6 +56,16 @@ impl ToString for AppStatus {
     }
 }
 
+/// 任意本地 Whisper 转写成功后调用：允许下次周期性预热刷新模型 page cache
+pub fn mark_whisper_used() {
+    WHISPER_USED_SINCE_PREWARM.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// 周期预热任务用：取出「用过」标记（读后清零）
+pub fn take_whisper_used() -> bool {
+    WHISPER_USED_SINCE_PREWARM.swap(false, std::sync::atomic::Ordering::Relaxed)
+}
+
 pub struct AppState {
     pub config: Arc<ConfigManager>,
     pub recorder: Arc<Mutex<Recorder>>,
@@ -77,6 +87,11 @@ pub struct AppState {
     /// 防止新旧两路同时输出。
     run_generation: Arc<AtomicU64>,
 }
+
+/// 自上次模型缓存预热后是否实际用过本地 Whisper 转写（整段与流式两条路径都会置位）。
+/// 周期性 page-cache 保活据此门控，纯闲置时不再每 10 分钟全量重读模型文件。
+static WHISPER_USED_SINCE_PREWARM: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 impl AppState {
     pub fn new(config: Arc<ConfigManager>) -> Self {
@@ -108,6 +123,16 @@ impl AppState {
         }
     }
 
+    /// 本地转写成功后调用：允许下次周期性预热刷新模型 page cache
+    pub fn mark_whisper_used(&self) {
+        mark_whisper_used();
+    }
+
+    /// 周期预热任务用：取出「用过」标记（读后清零）
+    pub fn take_whisper_used(&self) -> bool {
+        take_whisper_used()
+    }
+
     pub async fn set_app_handle(&self, handle: AppHandle) {
         self.subtitle.set_app_handle(handle.clone()).await;
         *self.app_handle.lock().await = Some(handle);
@@ -119,6 +144,10 @@ impl AppState {
     ///   2) 加载模型文件
     /// 三者刷入 OS page cache 后，每次 spawn 从内存读而非磁盘，缩短启动税。
     pub async fn prewarm_model_cache(&self) {
+        // 引擎门控：未选本地 Whisper 时模型文件永远用不上，预热纯属浪费磁盘 IO
+        if !self.config.is_local_whisper() {
+            return;
+        }
         let model_name = self.config.local_whisper_model();
         let model_dir = self.config.whisper_models_dir();
         let model_path = model_dir.join(if model_name.is_empty() {
@@ -541,6 +570,7 @@ impl AppState {
                     return Err(format!("Whisper error: {}", e));
                 }
             };
+            self.mark_whisper_used();
 
             // 缓存检测到的语言（仅当本次用了 auto 且检测成功）
             // 同时持久化到 config，跨重启复用，避免首调检测开销

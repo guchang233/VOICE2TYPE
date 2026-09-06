@@ -1,6 +1,7 @@
 use std::ffi::c_void;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
+use std::time::Duration;
 
 #[cfg(target_os = "windows")]
 use windows::{
@@ -72,6 +73,35 @@ struct WindowState {
     success_duration: u64, // 成功状态持续时间（毫秒）
 }
 
+/// 线程生命周期内复用的 GDI 资源：按最大尺寸预分配 DIB、常驻字体与文本缓冲，
+/// 避免每帧 CreateDIBSection/CreateFontW/Vec 分配（60fps 下每秒上百次 GDI 分配）
+#[cfg(target_os = "windows")]
+struct FrameResources {
+    hdc_screen: HDC,
+    hdc_mem: HDC,
+    bitmap: HBITMAP,
+    // 预分配的最大画布（宽度上限 227 = 195 胶囊 + 2×16 阴影边距，取 240 留余量）
+    max_w: i32,
+    max_h: i32,
+    pixels: *mut u32,
+    pixel_len: usize,
+    font: HFONT,
+    text_buf: Vec<u16>,
+    last_text: String,
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for FrameResources {
+    fn drop(&mut self) {
+        unsafe {
+            DeleteObject(HGDIOBJ(self.font.0));
+            DeleteObject(HGDIOBJ(self.bitmap.0));
+            DeleteDC(self.hdc_mem);
+            ReleaseDC(None, self.hdc_screen);
+        }
+    }
+}
+
 #[cfg(target_os = "windows")]
 unsafe fn create_and_run_window(
     rx: Receiver<IndicatorState>,
@@ -140,17 +170,66 @@ unsafe fn create_and_run_window(
     // However, WM_PAINT/TIMER might be dispatched.
     // Let's keep logic in the main loop as much as possible, using PeekMessage or MsgWaitForMultipleObjects.
 
-    // Setup Timer for animation (approx 60fps -> 16ms)
-    SetTimer(hwnd, 1, 16, None);
+    // 帧资源一次性预分配（窗口整个生命周期复用）
+    let mut res = create_frame_resources();
 
     let mut msg = MSG::default();
+    // 动画帧率约 60fps；用 recv_timeout 同时承担「取状态」与「帧节拍」，
+    // 替代旧的 5ms 忙轮询 + SetTimer：指示器隐藏静止时线程完全阻塞，零唤醒
+    const FRAME: Duration = Duration::from_millis(16);
     loop {
-        // Check for channel messages (non-blocking)
-        if let Ok(new_state) = rx.try_recv() {
-            if new_state != state.target_state {
-                state.target_state = new_state.clone();
-                state.state_start_time = std::time::Instant::now(); // 重置状态开始时间
-                update_targets(&mut state, &new_state);
+        // 判断是否需要继续出帧：完全隐藏且无过渡、无自动隐藏期限 → 阻塞等新状态
+        let auto_hide_deadline = match state.target_state {
+            IndicatorState::Error => Some(state.state_start_time + Duration::from_millis(state.error_duration)),
+            IndicatorState::Success => Some(state.state_start_time + Duration::from_millis(state.success_duration)),
+            _ => None,
+        };
+        let animating = state.current_alpha > 0.01
+            || state.current_alpha != state.target_alpha
+            || (state.current_width - state.width as f32).abs() > 0.5
+            || state.current_color != state.target_color;
+        let wait_deadline = auto_hide_deadline.filter(|_| !animating);
+
+        if wait_deadline.is_none() && !animating {
+            match rx.recv() {
+                Ok(new_state) => {
+                    if new_state != state.target_state {
+                        state.target_state = new_state.clone();
+                        state.state_start_time = std::time::Instant::now();
+                        update_targets(&mut state, &new_state);
+                    }
+                }
+                Err(_) => return, // 发送端已丢弃
+            }
+        } else {
+            // 等到 min(帧间隔, 自动隐藏期限)，期间新状态立即到达则立即处理
+            let now = std::time::Instant::now();
+            let wait = wait_deadline
+                .map(|d| d.saturating_duration_since(now))
+                .unwrap_or(FRAME);
+            let wait = wait.min(FRAME);
+            match rx.recv_timeout(wait) {
+                Ok(new_state) => {
+                    if new_state != state.target_state {
+                        state.target_state = new_state.clone();
+                        state.state_start_time = std::time::Instant::now();
+                        update_targets(&mut state, &new_state);
+                    }
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+            }
+            // 收割排队的其余状态，只保留最新
+            let mut latest: Option<IndicatorState> = None;
+            while let Ok(new_state) = rx.try_recv() {
+                latest = Some(new_state);
+            }
+            if let Some(new_state) = latest {
+                if new_state != state.target_state {
+                    state.target_state = new_state.clone();
+                    state.state_start_time = std::time::Instant::now();
+                    update_targets(&mut state, &new_state);
+                }
             }
         }
 
@@ -178,18 +257,74 @@ unsafe fn create_and_run_window(
             }
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
-
-            // Handle Timer manually if dispatch doesn't cover it well (it does)
-            if msg.message == WM_TIMER && msg.wParam.0 == 1 {
-                if update_animation(&mut state) {
-                    draw_window(hwnd, &state);
-                }
-            }
         }
 
-        // Sleep a bit to avoid CPU spin if no messages
-        // MsgWaitForMultipleObjects would be better but Sleep(1) is okay for this simple thread
-        thread::sleep(std::time::Duration::from_millis(5));
+        // 推进动画并按需重绘（空闲静止时 update_animation 返回 false，零重绘）
+        if update_animation(&mut state) {
+            draw_window(hwnd, &state, &mut res);
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn create_frame_resources() -> FrameResources {
+    unsafe {
+        let hdc_screen = GetDC(None);
+        let hdc_mem = CreateCompatibleDC(hdc_screen);
+
+        let max_w: i32 = 240;
+        let max_h: i32 = 80;
+        let bmi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: max_w,
+                biHeight: -max_h, // Top-down coordinate space
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut p_bits: *mut c_void = std::ptr::null_mut();
+        let bitmap = CreateDIBSection(hdc_mem, &bmi, DIB_RGB_COLORS, &mut p_bits, None, 0)
+            .expect("CreateDIBSection failed");
+        SelectObject(hdc_mem, bitmap);
+
+        let font = CreateFontW(
+            -16,
+            0,
+            0,
+            0,
+            FW_SEMIBOLD.0 as i32, // elegant medium-semibold weight
+            0,
+            0,
+            0,
+            DEFAULT_CHARSET.0 as u32,
+            OUT_DEFAULT_PRECIS.0 as u32,
+            CLIP_DEFAULT_PRECIS.0 as u32,
+            CLEARTYPE_QUALITY.0 as u32,
+            DEFAULT_PITCH.0 as u32,
+            w!("Segoe UI Variable Text"), // Fluent Windows 11 system font
+        );
+        // DC 状态一次设置，所有帧复用：位图、透明背景、白色文字、字体
+        SelectObject(hdc_mem, bitmap);
+        SelectObject(hdc_mem, font);
+        SetBkMode(hdc_mem, TRANSPARENT);
+        SetTextColor(hdc_mem, COLORREF(0x00FFFFFF)); // absolute white typography
+
+        FrameResources {
+            hdc_screen,
+            hdc_mem,
+            bitmap,
+            max_w,
+            max_h,
+            pixels: p_bits as *mut u32,
+            pixel_len: (max_w * max_h) as usize,
+            font,
+            text_buf: Vec::new(),
+            last_text: String::new(),
+        }
     }
 }
 
@@ -325,7 +460,7 @@ unsafe extern "system" fn wnd_proc(
 }
 
 #[cfg(target_os = "windows")]
-unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
+unsafe fn draw_window(hwnd: HWND, state: &WindowState, res: &mut FrameResources) {
     if state.current_alpha <= 0.01 {
         ShowWindow(hwnd, SW_HIDE);
         return;
@@ -355,32 +490,12 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
         SWP_NOZORDER | SWP_NOACTIVATE,
     );
 
-    let hdc_screen = GetDC(None);
-    let hdc_mem = CreateCompatibleDC(hdc_screen);
+    let hdc_screen = res.hdc_screen;
+    let hdc_mem = res.hdc_mem;
 
-    // Create 32-bit DIB for ultra-smooth rendering with individual pixel alpha support
-    let bmi = BITMAPINFO {
-        bmiHeader: BITMAPINFOHEADER {
-            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-            biWidth: w,
-            biHeight: -h, // Top-down coordinate space
-            biPlanes: 1,
-            biBitCount: 32,
-            biCompression: BI_RGB.0,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-
-    let mut p_bits: *mut c_void = std::ptr::null_mut();
-    let hbitmap = CreateDIBSection(hdc_mem, &bmi, DIB_RGB_COLORS, &mut p_bits, None, 0).unwrap();
-    let old_bitmap = SelectObject(hdc_mem, hbitmap);
-
-    // Cast raw bits to a mutable Rust slice
-    let pixels = std::slice::from_raw_parts_mut(p_bits as *mut u32, (w * h) as usize);
-
-    // Set all initial pixels to zero (fully transparent canvas)
-    for p in pixels.iter_mut() {
+    // 复用预分配 DIB：只清空本帧使用的区域（预分配尺寸 ≥ 帧尺寸）
+    let pixels = std::slice::from_raw_parts_mut(res.pixels, res.pixel_len);
+    for p in pixels[..(w * h) as usize].iter_mut() {
         *p = 0;
     }
 
@@ -834,29 +949,8 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
         }
     }
 
-    // Phase 3: Text Alignment and CleatType Rendering
-    SetBkMode(hdc_mem, TRANSPARENT);
-    SetTextColor(hdc_mem, COLORREF(0x00FFFFFF)); // absolute white typography
-
-    let font_height = 16;
-    let font = CreateFontW(
-        -font_height,
-        0,
-        0,
-        0,
-        FW_SEMIBOLD.0 as i32, // elegant medium-semibold weight
-        0,
-        0,
-        0,
-        DEFAULT_CHARSET.0 as u32,
-        OUT_DEFAULT_PRECIS.0 as u32,
-        CLIP_DEFAULT_PRECIS.0 as u32,
-        CLEARTYPE_QUALITY.0 as u32,
-        DEFAULT_PITCH.0 as u32,
-        w!("Segoe UI Variable Text"), // Fluent Windows 11 system font
-    );
-    let old_font = SelectObject(hdc_mem, font);
-
+    // Phase 3: Text Alignment and ClearType Rendering
+    // DC 状态（背景模式/文字颜色/字体）已在 create_frame_resources 设置一次，此处直接绘制
     let padding_shadow_i = padding_shadow as i32;
     let mut text_rect = RECT {
         left: padding_shadow_i + 40,
@@ -865,10 +959,17 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
         bottom: h - padding_shadow_i,
     };
 
-    let mut text_wide: Vec<u16> = state.text.encode_utf16().chain(Some(0)).collect();
+    // 文本变化时才重新编码 UTF-16（缓冲复用，零分配；未用 DT_MODIFYSTRING，内容不会被改写）
+    if res.last_text != state.text {
+        res.text_buf.clear();
+        res.text_buf.extend(state.text.encode_utf16());
+        res.text_buf.push(0);
+        res.last_text.clone_from(&state.text);
+    }
+    let text_wide = res.text_buf.as_mut_slice();
     DrawTextW(
         hdc_mem,
-        &mut text_wide,
+        text_wide,
         &mut text_rect,
         DT_VCENTER | DT_SINGLELINE,
     );
@@ -896,9 +997,6 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
         }
     }
 
-    SelectObject(hdc_mem, old_font);
-    DeleteObject(font);
-
     // Phase 4: Sync rendering update of Layered Window
     let pt_src = POINT { x: 0, y: 0 };
     let size = SIZE { cx: w, cy: h };
@@ -925,9 +1023,4 @@ unsafe fn draw_window(hwnd: HWND, state: &WindowState) {
     );
 
     ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-
-    SelectObject(hdc_mem, old_bitmap);
-    DeleteObject(hbitmap);
-    DeleteDC(hdc_mem);
-    ReleaseDC(None, hdc_screen);
 }

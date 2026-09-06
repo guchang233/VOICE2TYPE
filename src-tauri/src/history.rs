@@ -52,7 +52,8 @@ pub fn clear() {
     }
 }
 
-const MAX_ENTRIES: usize = 20;
+// 历史容量：从 20 提升到 100（JSON 落盘很小，UI 列表渲染无压力）
+const MAX_ENTRIES: usize = 100;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct HistoryFile {

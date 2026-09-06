@@ -231,13 +231,18 @@
         if (viewName === 'history') {
             loadHistory();
         } else if (viewName === 'settings') {
-            loadSettings();
+            // 已拉取过配置则跳过 invoke+全量重填：既省一次往返，也不会覆盖未保存的手输内容
+            if (!state.config) {
+                loadSettings();
+            }
             loadInputDevices();
             // 模型和引擎检测改为手动触发
         } else if (viewName === 'tts') {
             loadTtsView();
         } else if (viewName === 'dubbing') {
             loadDubbingView();
+        } else if (viewName === 'logs') {
+            renderLogs();
         }
 
         // 视图切换后刷新分段控件指示器（新视图变为可见后才能正确测量尺寸）
@@ -1382,10 +1387,13 @@
             applyTheme(config.theme || 'auto', false);
         } catch (err) {
             console.error('Failed to load config:', err);
-            // 初始化默认配置，确保用户操作（如切换模式）能被保存
-            state.config = { basic: { dictation_mode: state.dictationMode } };
+            // 初始化默认骨架，确保用户操作（如切换模式）能被保存；补齐各段避免 collectSettings 崩溃
+            state.config = ensureConfigSections({ basic: { dictation_mode: state.dictationMode } });
             setupDefaultSettings();
         }
+
+        // 开机自启动状态来自注册表而非配置文件
+        refreshAutostartToggle();
 
         // 初始渲染（未下载状态）
         renderModelCards();
@@ -1407,10 +1415,14 @@
     /// - #setting-input-device：语音输入设备（整段+流式）
     /// - #setting-subtitle-input-device：字幕识别音源
     /// 保留当前选中值，若设备已不存在则回退到"系统默认"
+    // 设备列表加载代计数：并发调用时只让最新一次的结果落盘，避免旧响应覆盖新响应
+    let inputDeviceLoadGen = 0;
     async function loadInputDevices() {
         if (!invoke) return;
+        const gen = ++inputDeviceLoadGen;
         try {
             const [devices, defaultName] = await invoke('list_input_devices');
+            if (gen !== inputDeviceLoadGen) return;
             const fills = [
                 { id: 'setting-input-device', current: state.config?.basic?.input_device || '' },
                 { id: 'setting-subtitle-input-device', current: state.config?.subtitle?.inputDevice || '' },
@@ -2249,17 +2261,49 @@
 
     /// 设置页脏状态跟踪：用户改动任何设置控件时标记为未保存
     function initSettingsDirtyTracking() {
-        const handler = () => {
+        // 设置页与字幕页都包含可保存的设置控件（开机自启动即时生效，不参与保存流程）
+        const handler = (e) => {
+            if (e.target && e.target.id === 'setting-autostart') return;
             if (!state.populatingSettings) {
                 state.settingsDirty = true;
             }
         };
-        // 设置页与字幕页都包含可保存的设置控件
         ['#view-settings', '#view-subtitle'].forEach(viewId => {
             const view = $(viewId);
             if (view) {
                 view.addEventListener('change', handler);
                 view.addEventListener('input', handler);
+            }
+        });
+    }
+
+    /// 拉取开机自启动注册表状态并回填开关（失败静默，非配置项）
+    async function refreshAutostartToggle() {
+        if (!invoke) return;
+        const el = $('#setting-autostart');
+        if (!el) return;
+        try {
+            el.checked = await invoke('get_autostart');
+        } catch (err) {
+            console.warn('Failed to query autostart state:', err);
+        }
+    }
+
+    function initAutostartToggle() {
+        const el = $('#setting-autostart');
+        if (!el || el.dataset.autostartBound) return;
+        el.dataset.autostartBound = '1';
+        el.addEventListener('change', async () => {
+            const want = el.checked;
+            try {
+                await invoke('set_autostart', { enabled: want });
+                setStatus('ready', want ? '已开启开机自启动' : '已关闭开机自启动');
+                setTimeout(() => setStatus('idle', '就绪'), 2000);
+            } catch (err) {
+                console.error('Failed to set autostart:', err);
+                el.checked = !want; // 失败回滚开关显示
+                setStatus('error', '设置自启动失败: ' + err);
+                setTimeout(() => setStatus('idle', '就绪'), 3000);
             }
         });
     }
@@ -2372,10 +2416,19 @@
         badge.textContent = modelName;
     }
 
+    /// 补齐配置骨架：state.config 半残（如启动时 get_config 失败只剩 basic）时，
+    /// 直接往子对象赋值会 TypeError；后端 save_config 是全量替换，缺段还会清掉该段配置
+    function ensureConfigSections(cfg) {
+        for (const key of ['model_selection', 'model', 'basic', 'features', 'vad', 'advanced', 'llm_post']) {
+            if (!cfg[key] || typeof cfg[key] !== 'object') cfg[key] = {};
+        }
+        return cfg;
+    }
+
     function collectSettings() {
         if (!state.config) return null;
 
-        const newConfig = JSON.parse(JSON.stringify(state.config));
+        const newConfig = ensureConfigSections(JSON.parse(JSON.stringify(state.config)));
 
         const batchSel = $('#setting-batch-model');
         const streamSel = $('#setting-stream-model');
@@ -2493,7 +2546,15 @@
     }
 
     async function saveSettings() {
-        const newConfig = collectSettings();
+        let newConfig;
+        try {
+            newConfig = collectSettings();
+        } catch (err) {
+            console.error('Failed to collect settings:', err);
+            setStatus('error', '收集设置失败');
+            setTimeout(() => setStatus('idle', '就绪'), 2000);
+            return;
+        }
         if (!newConfig) return;
 
         if (!invoke) {
@@ -3479,6 +3540,9 @@
     function renderLogs() {
         const container = $('#logs-container');
         if (!container) return;
+        // 日志视图不可见时跳过整表重建（上千条 innerHTML 的代价不小），
+        // 切回视图时由 switchView 统一触发一次渲染
+        if (state.currentView !== 'logs') return;
 
         const filtered = getFilteredLogs();
 
@@ -3562,20 +3626,41 @@
         const origInfo = console.info;
         const origLog = console.log;
 
+        // 安全序列化：循环引用/特殊对象会让 JSON.stringify 抛异常，
+        // 超长内容会刷爆日志面板，统一降级并截断
+        function safeLogString(v) {
+            if (v === null) return 'null';
+            if (v === undefined) return 'undefined';
+            const t = typeof v;
+            if (t === 'string') return v;
+            if (t === 'number' || t === 'boolean' || t === 'bigint') return String(v);
+            if (v instanceof Error) return v.stack || (v.name + ': ' + v.message);
+            try {
+                const s = JSON.stringify(v);
+                return s === undefined ? String(v) : s;
+            } catch (err) {
+                return String(v);
+            }
+        }
+        function joinLogArgs(args) {
+            const s = args.map(safeLogString).join(' ');
+            return s.length > 4000 ? s.slice(0, 4000) + '…' : s;
+        }
+
         console.error = function(...args) {
-            addLog('error', args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' '), 'console');
+            addLog('error', joinLogArgs(args), 'console');
             origError.apply(console, args);
         };
         console.warn = function(...args) {
-            addLog('warn', args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' '), 'console');
+            addLog('warn', joinLogArgs(args), 'console');
             origWarn.apply(console, args);
         };
         console.info = function(...args) {
-            addLog('info', args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' '), 'console');
+            addLog('info', joinLogArgs(args), 'console');
             origInfo.apply(console, args);
         };
         console.log = function(...args) {
-            addLog('info', args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' '));
+            addLog('info', joinLogArgs(args));
             origLog.apply(console, args);
         };
     }
@@ -3583,39 +3668,61 @@
     function initHotkeyInputs() {
         $$('.hotkey-input').forEach(input => {
             input.addEventListener('click', () => {
-                input.value = '按下按键...';
+                if (input.dataset.listening === 'true') return; // 已在捕获中，避免重复注册
                 input.dataset.listening = 'true';
-
-                const onKeyDown = (e) => {
-                    e.preventDefault();
-                    if (input.dataset.listening !== 'true') return;
-
-                    let keyName = '';
-                    if (e.key.startsWith('F') && e.key.length <= 3) {
-                        keyName = e.key;
-                    } else if (e.key.length === 1) {
-                        keyName = e.key.toUpperCase();
-                    } else {
-                        const specialKeys = {
-                            'Escape': 'Esc',
-                            'Backspace': 'Backspace',
-                            'Tab': 'Tab',
-                            'Enter': 'Enter',
-                            ' ': 'Space'
-                        };
-                        keyName = specialKeys[e.key] || e.key;
-                    }
-
-                    input.value = keyName;
-                    input.dataset.listening = 'false';
-                    document.removeEventListener('keydown', onKeyDown);
-                    // 立即更新主界面快捷键提示
-                    updateHotkeyHint();
-                };
-
-                document.addEventListener('keydown', onKeyDown);
+                input.dataset.original = input.value || '';
+                input.value = '按下按键...';
+                startHotkeyCapture(input);
             });
         });
+    }
+
+    /// 热键捕获：全局 keydown 只在捕获态生效；失焦未按键则还原并注销监听，
+    /// 否则监听器永久残留、后续任意按键（如在其他输入框打字）都会被吞掉
+    function startHotkeyCapture(input) {
+        const onKeyDown = (e) => {
+            if (input.dataset.listening !== 'true') {
+                document.removeEventListener('keydown', onKeyDown);
+                return;
+            }
+            e.preventDefault();
+            e.stopPropagation();
+
+            let keyName = '';
+            if (e.key.startsWith('F') && e.key.length <= 3) {
+                keyName = e.key;
+            } else if (e.key.length === 1) {
+                keyName = e.key.toUpperCase();
+            } else {
+                const specialKeys = {
+                    'Escape': 'Esc',
+                    'Backspace': 'Backspace',
+                    'Tab': 'Tab',
+                    'Enter': 'Enter',
+                    ' ': 'Space'
+                };
+                keyName = specialKeys[e.key] || e.key;
+            }
+
+            input.value = keyName;
+            input.dataset.listening = 'false';
+            delete input.dataset.original;
+            document.removeEventListener('keydown', onKeyDown);
+            // 立即更新主界面快捷键提示
+            updateHotkeyHint();
+        };
+        const onBlur = () => {
+            if (input.dataset.listening === 'true') {
+                // 未按键即失焦：取消捕获并还原显示值
+                input.dataset.listening = 'false';
+                input.value = input.dataset.original || input.value;
+            }
+            delete input.dataset.original;
+            document.removeEventListener('keydown', onKeyDown);
+            updateHotkeyHint();
+        };
+        document.addEventListener('keydown', onKeyDown);
+        input.addEventListener('blur', onBlur, { once: true });
     }
 
     // ===== 自动更新 =====
@@ -3913,11 +4020,14 @@
         });
 
         // 视频配音：实时转写预览（后端只推送增量分段）
+        let dubTranscriptRenderTimer = 0;
         listen('dubbing-transcript', (event) => {
             const p = event.payload || {};
             if (Array.isArray(p.added)) {
                 state.dubbing.segments.push(...p.added);
-                renderDubTranscript();
+                // 分块转写会连续推送，防抖合并渲染，避免每个事件都全量重建编辑器
+                clearTimeout(dubTranscriptRenderTimer);
+                dubTranscriptRenderTimer = setTimeout(renderDubTranscript, 150);
             }
         }).then(unlisten => {
             state.unlisteners.push(unlisten);
@@ -4481,7 +4591,7 @@
                 const move = (ev) => {
                     node.style.left = Math.max(0, ox + ev.clientX - startX) + 'px';
                     node.style.top = Math.max(0, oy + ev.clientY - startY) + 'px';
-                    drawDubWires();
+                    requestDubWires();
                 };
                 const up = () => {
                     window.removeEventListener('pointermove', move);
@@ -4493,6 +4603,16 @@
                 window.addEventListener('pointermove', move);
                 window.addEventListener('pointerup', up);
             });
+        });
+    }
+
+    // pointermove 高频拖拽：合并到每帧一次重绘
+    let dubWireRaf = 0;
+    function requestDubWires() {
+        if (dubWireRaf) return;
+        dubWireRaf = requestAnimationFrame(() => {
+            dubWireRaf = 0;
+            drawDubWires();
         });
     }
 
@@ -5294,6 +5414,7 @@
         initSubtitle();
         initHistory();
         initSettingsSliders();
+        initAutostartToggle();
         initApiKeyToggles();
         initHotkeyInputs();
         initOutput();

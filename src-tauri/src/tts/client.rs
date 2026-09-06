@@ -10,6 +10,7 @@
 //! 鉴权：`Authorization: Bearer <api_key>`
 
 use anyhow::{Context, Result};
+use once_cell::sync::Lazy;
 use reqwest::Client;
 use serde_json::{json, Value};
 use std::time::Duration;
@@ -145,26 +146,32 @@ fn sanitize_proxy_url(url: &str) -> String {
     url.to_string()
 }
 
-/// 获取 TTS HTTP 客户端：动态检测系统代理。
+/// 获取 TTS HTTP 客户端（进程级复用，避免每次请求重建连接池并读取注册表）。
 /// - 总超时 5 分钟（音频合成较慢）；连接超时 15 秒（快速失败，不挂死）
+/// - 系统代理仅在首次构建时检测（与 api::client 行为一致，改代理需重启生效）
 /// - 代理走 HTTP CONNECT，域名解析在代理远端进行，不受本地 DNS 污染影响
-fn get_tts_client() -> Client {
-    let proxy_url = get_system_proxy();
-
-    let mut builder = Client::builder()
-        .timeout(Duration::from_secs(300))
-        .connect_timeout(Duration::from_secs(15));
-    match &proxy_url {
-        Some(p) => {
-            log::info!("[tts] 使用系统代理: {}", sanitize_proxy_url(p));
-            match reqwest::Proxy::all(p) {
-                Ok(proxy) => builder = builder.proxy(proxy),
-                Err(e) => log::warn!("[tts] 代理配置无效，回退直连: {}", e),
+fn get_tts_client() -> &'static Client {
+    static CLIENT: Lazy<Client> = Lazy::new(|| {
+        let proxy_url = get_system_proxy();
+        let mut builder = Client::builder()
+            .timeout(Duration::from_secs(300))
+            .connect_timeout(Duration::from_secs(15));
+        match &proxy_url {
+            Some(p) => {
+                log::info!("[tts] 使用系统代理: {}", sanitize_proxy_url(p));
+                match reqwest::Proxy::all(p) {
+                    Ok(proxy) => builder = builder.proxy(proxy),
+                    Err(e) => log::warn!("[tts] 代理配置无效，回退直连: {}", e),
+                }
             }
+            None => log::info!("[tts] 未检测到系统代理，使用直连"),
         }
-        None => log::info!("[tts] 未检测到系统代理，使用直连"),
-    }
-    builder.build().expect("failed to build TTS HTTP client")
+        builder.build().unwrap_or_else(|e| {
+            log::error!("[tts] 构建 HTTP 客户端失败（{}），退回默认配置", e);
+            Client::new()
+        })
+    });
+    &CLIENT
 }
 
 /// 音色库搜索/列表参数。

@@ -116,6 +116,8 @@ fn main() {
             commands::check_update,
             commands::download_and_install_update,
             commands::restart_app,
+            commands::get_autostart,
+            commands::set_autostart,
             commands::get_app_version,
             commands::subtitle_snapshot,
             commands::subtitle_theme,
@@ -162,8 +164,8 @@ fn main() {
                 });
             }
 
-            // 空闲周期性 OS 缓存保活：全天托盘工具期间，别的程序可能把模型挤出 OS page cache，
-            // 导致下次转写又走磁盘 IO。每 10 分钟廉价重读一次（不占应用 RAM，只刷 OS 缓存）。
+            // 空闲周期性 OS 缓存保活：仅当上次预热后实际用过本地转写时才重读，
+            // 纯闲置不再周期性全量重读模型文件（不再与系统内存管理争抢 page cache）
             {
                 let state = app_state.clone();
                 tauri::async_runtime::spawn(async move {
@@ -173,8 +175,10 @@ fn main() {
                     interval.tick().await;
                     loop {
                         interval.tick().await;
-                        // prewarm 内部会在模型不存在时安全跳过
-                        state.prewarm_model_cache().await;
+                        // prewarm 内部会在模型不存在/引擎未选本地时安全跳过
+                        if state.take_whisper_used() {
+                            state.prewarm_model_cache().await;
+                        }
                     }
                 });
             }
@@ -261,7 +265,7 @@ fn main() {
                 let mut is_holding = false;
                 let mut toggle_recording = false;
 
-                let mut callback = move |event: rdev::Event| {
+                let callback = move |event: rdev::Event| {
                     let batch_hotkey = config_for_hotkey.hotkey();
 
                     match event.event_type {

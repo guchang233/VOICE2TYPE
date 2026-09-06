@@ -452,9 +452,49 @@ async fn asr_node(
     est_chunks: usize,
     chunk_seconds: u64,
 ) -> Result<(usize, Vec<DubSegment>)> {
+    // 云端 ASR 单块耗时以秒计，滑动窗口并发转写（结果仍按块顺序拼接）
+    const ASR_CONCURRENCY: usize = 2;
+
     let mut processed: usize = 0;
     let mut cumulative: usize = 0;
     let mut collected: Vec<DubSegment> = Vec::new();
+
+    // 按块顺序记录 (index, 任务句柄)，窗口满时按序收割最早一块，
+    // 保证 collected 与前端增量预览的顺序与原实现一致
+    let mut inflight: Vec<(usize, tokio::task::JoinHandle<Result<Vec<DubSegment>>>)> = Vec::new();
+
+    async fn absorb(
+        index: usize,
+        handle: tokio::task::JoinHandle<Result<Vec<DubSegment>>>,
+        app: &tauri::AppHandle,
+        chunk_seconds: u64,
+        completed: usize,
+        cumulative: &mut usize,
+        collected: &mut Vec<DubSegment>,
+    ) -> Result<()> {
+        let mut part = handle
+            .await
+            .map_err(|e| anyhow!("识别任务执行失败: {}", e))??;
+
+        // 分块内相对时间 → 全局绝对时间，并统一重排索引
+        let offset_ms = (index as u64) * chunk_seconds * 1000;
+        for seg in part.iter_mut() {
+            seg.start_ms += offset_ms;
+            seg.end_ms += offset_ms;
+            seg.index = *cumulative + seg.index;
+        }
+        *cumulative += part.len();
+
+        // 实时推送增量转写结果给前端预览
+        let _ = app.emit(
+            "dubbing-transcript",
+            serde_json::json!({ "added": &part, "completed": completed, "cumulative": *cumulative }),
+        );
+        collected.extend(part);
+        Ok(())
+    }
+
+    let mut absorbed: usize = 0;
 
     while let Some(msg) = rx.recv().await {
         if is_cancelled() {
@@ -473,29 +513,37 @@ async fn asr_node(
         );
 
         let chunk_name = format!("chunk_{:04}.mp3", msg.index);
-        let mut part = match &backend {
-            AsrBackend::AliDashScope { api_key } => {
-                asr_ali::transcribe_chunk(&msg.path, api_key, &chunk_name, &ali_opts, is_cancelled)
-                    .await?
+        let backend2 = backend.clone();
+        let opts2 = ali_opts.clone();
+        let cfg2 = config.clone();
+        let path2 = msg.path.clone();
+        let handle = tokio::spawn(async move {
+            match backend2 {
+                AsrBackend::AliDashScope { api_key } => {
+                    asr_ali::transcribe_chunk(&path2, &api_key, &chunk_name, &opts2, is_cancelled)
+                        .await
+                }
+                AsrBackend::GlobalCompat => {
+                    transcribe::transcribe_file(&path2, &cfg2).await
+                }
             }
-            AsrBackend::GlobalCompat => transcribe::transcribe_file(&msg.path, &config).await?,
-        };
+        });
+        inflight.push((msg.index, handle));
 
-        // 分块内相对时间 → 全局绝对时间，并统一重排索引
-        let offset_ms = (msg.index as u64) * chunk_seconds * 1000;
-        for seg in part.iter_mut() {
-            seg.start_ms += offset_ms;
-            seg.end_ms += offset_ms;
-            seg.index = cumulative + seg.index;
+        if inflight.len() >= ASR_CONCURRENCY {
+            absorbed += 1;
+            let (idx, h) = inflight.remove(0);
+            absorb(idx, h, &app, chunk_seconds, absorbed, &mut cumulative, &mut collected).await?;
         }
-        cumulative += part.len();
-
-        // 实时推送增量转写结果给前端预览
-        let _ = app.emit(
-            "dubbing-transcript",
-            serde_json::json!({ "added": &part, "completed": processed, "cumulative": cumulative }),
-        );
-        collected.extend(part);
+    }
+    // 收尾：按顺序收割仍在窗口内的任务
+    while !inflight.is_empty() {
+        if is_cancelled() {
+            return Err(anyhow!("{}", CANCELLED_SENTINEL));
+        }
+        absorbed += 1;
+        let (idx, h) = inflight.remove(0);
+        absorb(idx, h, &app, chunk_seconds, absorbed, &mut cumulative, &mut collected).await?;
     }
 
     Ok((processed, collected))
@@ -633,8 +681,9 @@ async fn run_generate(
     }))
 }
 
-/// 顺序执行逐段 TTS：预估语速单次合成 → atempo 精确拉伸到槽位时长 → 按原起点写入。
-/// 返回（成功/失败/拉伸贴合/截断回退）计数。
+/// 逐段 TTS：预估语速单次合成 → atempo 精确拉伸到槽位时长 → 按原起点写入。
+/// 有界并发（TTS_CONCURRENCY 路 HTTP + 贴合子进程并行），结果按原顺序写入
+/// TimelineWriter。返回（成功/失败/拉伸贴合/截断回退）计数。
 async fn run_tts_segments(
     app: &tauri::AppHandle,
     ff: &std::path::Path,
@@ -643,9 +692,16 @@ async fn run_tts_segments(
     track_path: &PathBuf,
     tts_cfg: &TtsConfig,
 ) -> Result<(usize, usize, usize, usize)> {
-    let client = FishTtsClient::new();
+    use futures_util::stream::{self, StreamExt};
+
+    // Fish Audio 有速率限制，3 路并发在提速 2-3 倍的同时不易触发限流
+    const TTS_CONCURRENCY: usize = 3;
+
     let base_speed = tts_cfg.speed.clamp(0.5, 2.0);
-    let cfg = tts_segments::wav_tts_config(tts_cfg);
+    // Arc 包裹后整个闭包链无外部借用，否则 async block 捕获 &client/&cfg
+    // 会让 map 闭包的 HRTB 生命周期检查失败（"FnOnce is not general enough"）
+    let client = std::sync::Arc::new(FishTtsClient::new());
+    let cfg = std::sync::Arc::new(tts_segments::wav_tts_config(tts_cfg));
 
     let mut writer = tts_segments::TimelineWriter::create(track_path)?;
     let mut ok = 0usize;
@@ -655,39 +711,60 @@ async fn run_tts_segments(
     let mut consec_fail = 0usize;
     const MAX_INITIAL_CONSEC_FAILS: usize = 3;
     let total = segments.len();
+    let ff_owned = ff.to_path_buf();
+    let temp_owned = temp_dir.to_path_buf();
 
-    for seg in segments {
+    // 有界并发 + 保序：StreamExt::buffered 同时至多 N 个在途请求，按原顺序产出结果。
+    // 闭包直接接收所有权 DubSegment：返回 async block 的闭包一旦以引用为参，
+    // rustc 的 HRTB 推断会失败（"FnOnce is not general enough"）
+    let mut stream = stream::iter(segments.iter().cloned())
+        .map(|seg| {
+            let client = std::sync::Arc::clone(&client);
+            let cfg = std::sync::Arc::clone(&cfg);
+            let ff2 = ff_owned.clone();
+            let td = temp_owned.clone();
+            async move {
+                if is_cancelled() {
+                    return Err(anyhow!("{}", CANCELLED_SENTINEL));
+                }
+                let slot = seg.duration_ms();
+                let speed = tts_segments::estimate_fit_speed(&seg.text, slot, base_speed);
+                match tts_segments::synthesize_segment(&client, &cfg, &seg.text, speed).await {
+                    Ok(raw) => {
+                        // atempo 精确拉伸/压缩到槽位时长（同步子进程，放到阻塞线程）
+                        let (audio, fit) = {
+                            let idx = seg.index;
+                            tokio::task::spawn_blocking(move || {
+                                tts_segments::fit_to_slot(&ff2, &td, idx, raw, slot)
+                            })
+                            .await
+                            .map_err(|e| anyhow!("贴合任务执行失败: {}", e))?
+                        };
+                        Ok((seg.index, seg.start_ms, seg.text, audio, fit))
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+        })
+        .buffered(TTS_CONCURRENCY);
+
+    while let Some(item) = stream.next().await {
         if is_cancelled() {
             return Err(anyhow!("{}", CANCELLED_SENTINEL));
         }
         let pct = 5 + ((ok * 80 / total.max(1)).min(83) as u32);
-        let preview: String = seg.text.chars().take(24).collect();
-        emit_progress(
-            app,
-            "tts",
-            "语音合成",
-            pct,
-            &format!("合成 {}/{}: {}...", ok + failed + 1, total, preview),
-            Some(ok + failed),
-            Some(total),
-        );
-
-        let slot = seg.duration_ms();
-        let speed = tts_segments::estimate_fit_speed(&seg.text, slot, base_speed);
-        match tts_segments::synthesize_segment(&client, &cfg, &seg.text, speed).await {
-            Ok(raw) => {
-                // atempo 精确拉伸/压缩到槽位时长（同步子进程，放到阻塞线程）
-                let (audio, fit) = {
-                    let ff2 = ff.to_path_buf();
-                    let td = temp_dir.to_path_buf();
-                    let idx = seg.index;
-                    tokio::task::spawn_blocking(move || {
-                        tts_segments::fit_to_slot(&ff2, &td, idx, raw, slot)
-                    })
-                    .await
-                    .map_err(|e| anyhow!("贴合任务执行失败: {}", e))?
-                };
-                writer.write_at(seg.start_ms, &audio)?;
+        match item {
+            Ok((_index, start_ms, text, audio, fit)) => {
+                emit_progress(
+                    app,
+                    "tts",
+                    "语音合成",
+                    pct,
+                    &format!("合成 {}/{}: {}...", ok + failed + 1, total, text.chars().take(24).collect::<String>()),
+                    Some(ok + failed),
+                    Some(total),
+                );
+                writer.write_at(start_ms, &audio)?;
                 ok += 1;
                 if fit.stretched {
                     stretched += 1;
@@ -698,7 +775,10 @@ async fn run_tts_segments(
                 consec_fail = 0;
             }
             Err(e) => {
-                log::warn!("[dubbing] 第 {} 段合成失败，保留静音: {}", seg.index + 1, e);
+                if e.to_string().contains(CANCELLED_SENTINEL) {
+                    return Err(e);
+                }
+                log::warn!("[dubbing] 第 {} 段合成失败，保留静音: {}", ok + failed + 1, e);
                 failed += 1;
                 consec_fail += 1;
                 if ok == 0 && consec_fail >= MAX_INITIAL_CONSEC_FAILS {

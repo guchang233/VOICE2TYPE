@@ -24,8 +24,10 @@ use crate::config::{ConfigManager, SubtitleWindow, PRIMARY_WINDOW_ID};
 // 不能用 per-window 的 additional_browser_args：它会让 wry 另建 WebView2 环境，
 // 多环境共享同一用户数据目录会报 ERROR_INVALID_STATE(0x8007139F) 导致窗口创建失败。
 
-/// 窗口几何保存节流：每个窗口每 800ms 最多触发一次持久化
-static LAST_GEO_SAVE: Lazy<StdMutex<HashMap<String, Instant>>> =
+/// 窗口几何防抖代际：每次几何变化自增，只有最新代际的延迟任务执行持久化。
+/// （旧实现按「距上次调度 ≥800ms」节流，最后一次拖动若落在节流窗口内，
+/// 最终位置永远不会被保存。）
+static GEO_DEBOUNCE_GEN: Lazy<StdMutex<HashMap<String, u64>>> =
     Lazy::new(|| StdMutex::new(HashMap::new()));
 
 /// 窗口 ID → label 映射（主窗口复用静态 "subtitle"，其余动态命名）
@@ -99,29 +101,30 @@ pub fn ensure_window(
     build_window(app, win, config, on_close)
 }
 
-/// 窗口几何变化 → 防抖持久化到配置
+/// 窗口几何变化 → 防抖持久化到配置（每次变化重置计时，静止 600ms 后保存最终值）
 fn debounce_save_geometry(window: &WebviewWindow, window_id: &str, config: &Arc<ConfigManager>) {
-    let due = {
-        let mut map = match LAST_GEO_SAVE.lock() {
+    let my_gen = {
+        let mut map = match GEO_DEBOUNCE_GEN.lock() {
             Ok(m) => m,
-            Err(_) => return,
+            Err(e) => e.into_inner(),
         };
-        match map.get(window_id) {
-            Some(t) if t.elapsed() < Duration::from_millis(800) => false,
-            _ => {
-                map.insert(window_id.to_string(), Instant::now());
-                true
-            }
-        }
+        let gen = map.entry(window_id.to_string()).or_insert(0);
+        *gen += 1;
+        *gen
     };
-    if !due {
-        return;
-    }
     let win = window.clone();
     let config = config.clone();
     let id = window_id.to_string();
     tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(800)).await;
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        // 若期间又有新的几何变化（代际已前进），由最新一代的任务负责落盘
+        let is_latest = GEO_DEBOUNCE_GEN
+            .lock()
+            .map(|m| m.get(&id).copied().unwrap_or(0) == my_gen)
+            .unwrap_or(false);
+        if !is_latest {
+            return;
+        }
         let pos = win.outer_position().ok();
         let size = win.outer_size().ok();
         if let (Some(p), Some(s)) = (pos, size) {

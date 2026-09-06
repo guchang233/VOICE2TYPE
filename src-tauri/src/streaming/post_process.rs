@@ -11,10 +11,11 @@ static EMOJI_RE: Lazy<Regex> = Lazy::new(|| {
 });
 static WHITESPACE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"[ \t]+").expect("whitespace regex"));
 static PUNCT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"[\p{P}]").expect("punctuation regex"));
-/// 仅合并 3 个及以上连续相同标点
-static TRIPLE_PUNCT_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"([，,])\1{2,}|([。．.])\2{2,}").expect("triple punct")
-});
+/// 仅合并 3 个及以上连续同类标点。
+/// 注意：regex crate 不支持反向引用（\1），原 `([，,])\1{2,}` 写法会在首次使用时
+/// 直接 panic（clippy::invalid_regex）；改用两个字符类正则等价实现。
+static TRIPLE_COMMA_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"[，,]{3,}").expect("triple comma"));
+static TRIPLE_DOT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"[。．.]{3,}").expect("triple dot"));
 
 /// 极高置信、整词替换
 static LIGHT_PHRASE_FIXES: &[(&str, &str)] = &[
@@ -136,15 +137,8 @@ fn apply_light_typos(text: &str) -> String {
 }
 
 fn light_normalize_punctuation(text: &str) -> String {
-    TRIPLE_PUNCT_RE
-        .replace_all(text, |caps: &regex::Captures| {
-            if caps.get(1).is_some() {
-                "，".to_string()
-            } else {
-                "。".to_string()
-            }
-        })
-        .to_string()
+    let s = TRIPLE_COMMA_RE.replace_all(text, "，");
+    TRIPLE_DOT_RE.replace_all(&s, "。").to_string()
 }
 
 /// 只合并空格/制表符，不把中文逐字拆开

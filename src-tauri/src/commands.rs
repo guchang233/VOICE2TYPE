@@ -998,15 +998,49 @@ pub async fn download_and_install_update(
 
 #[tauri::command]
 pub fn restart_app(app_handle: tauri::AppHandle) {
-    // 重启应用：先启动新进程，再退出当前
+    // 重启应用：先启动新进程成功后再退出当前；
+    // spawn 失败（exe 缺失/被安全软件拦截）时保持运行，避免应用直接消失
     let current = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("voice2type.exe"));
-    let _ = std::process::Command::new(current).spawn();
-    app_handle.exit(0);
+    match std::process::Command::new(&current).spawn() {
+        Ok(_) => app_handle.exit(0),
+        Err(e) => {
+            log::error!("[restart] 启动新进程失败（{}: {}），保持当前实例运行", current.display(), e);
+            crate::notify::queue_tray_message("重启失败", &format!("无法启动新进程: {}", e));
+        }
+    }
 }
 
 #[tauri::command]
 pub fn get_app_version() -> String {
     crate::update::current_version()
+}
+
+/// 查询开机自启动状态（注册表 HKCU\...\Run 与当前 exe 路径比对）
+#[tauri::command]
+pub fn get_autostart() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        crate::win_utils::is_autostart_enabled()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        false
+    }
+}
+
+/// 设置开机自启动（立即写注册表，无需保存配置）
+#[tauri::command]
+pub fn set_autostart(enabled: bool) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        // SAFETY: 仅操作 HKCU 注册表 Run 键，无其他不安全副作用
+        unsafe { crate::win_utils::set_autostart(enabled).map_err(|e| e.to_string()) }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = enabled;
+        Err("开机自启动仅支持 Windows".to_string())
+    }
 }
 
 // ===================== 实时字幕（v3：中央引擎 + 信号拉取） =====================
@@ -1238,21 +1272,23 @@ pub async fn tts_synthesize(
 
     let ext = tts_format_ext(&tts_cfg.format);
 
-    // 清理旧的生成文件（所有 preview_* 前缀，不论扩展名），避免磁盘堆积
+    // 使用 UUID 生成唯一文件名，确保 URL 改变，强制 <audio> 重新加载。
+    // 先写新文件再清理旧 preview_*：若先清理，两次并发合成会互相删除对方的输出
+    let id = uuid::Uuid::new_v4();
+    let path = dir.join(format!("preview_{}.{}", id, ext));
+    tokio::fs::write(&path, &bytes).await.map_err(|e| format!("写入生成文件失败: {}", e))?;
+
+    // 清理除刚生成的文件之外的旧 preview_*（不论扩展名），避免磁盘堆积
+    let keep = path.file_name().and_then(|n| n.to_str()).map(|s| s.to_string());
     if let Ok(mut entries) = tokio::fs::read_dir(&dir).await {
         while let Ok(Some(entry)) = entries.next_entry().await {
             if let Some(name) = entry.file_name().to_str() {
-                if name.starts_with("preview_") {
+                if name.starts_with("preview_") && keep.as_deref() != Some(name) {
                     let _ = tokio::fs::remove_file(entry.path()).await;
                 }
             }
         }
     }
-
-    // 使用 UUID 生成唯一文件名，确保 URL 改变，强制 <audio> 重新加载
-    let id = uuid::Uuid::new_v4();
-    let path = dir.join(format!("preview_{}.{}", id, ext));
-    tokio::fs::write(&path, &bytes).await.map_err(|e| format!("写入生成文件失败: {}", e))?;
 
     Ok(path.to_string_lossy().to_string())
 }

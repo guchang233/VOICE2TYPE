@@ -132,6 +132,7 @@ impl AsrEngine for WhisperAsrEngine {
         }
 
         log::info!("[asr/whisper] 转写完成, 文本长度={}", result.0.len());
+        crate::app_state::mark_whisper_used();
         Ok(result.0)
     }
 
