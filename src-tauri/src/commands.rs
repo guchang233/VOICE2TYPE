@@ -1128,7 +1128,7 @@ pub fn get_subtitle_transcript(
     state
         .subtitle
         .transcript()
-        .map(|t| t.lock().unwrap().segments().to_vec())
+        .map(|t| t.lock().unwrap_or_else(|e| e.into_inner()).segments().to_vec())
         .unwrap_or_default()
 }
 
@@ -1163,7 +1163,7 @@ pub async fn export_subtitle_transcript(
     };
     // 注意：MutexGuard 不能跨 await 持有（future 需 Send）
     let content = {
-        let tr = transcript.lock().unwrap();
+        let tr = transcript.lock().unwrap_or_else(|e| e.into_inner());
         if tr.is_empty() {
             return Err("暂无转录内容，请先开启实时字幕".to_string());
         }

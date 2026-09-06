@@ -245,7 +245,7 @@ async fn handle_frame(
         };
         let source_tag = if source == Source::A { "A" } else { "B" };
         let appended: Vec<_> = {
-            let mut tr = transcript.lock().unwrap();
+            let mut tr = transcript.lock().unwrap_or_else(|e| e.into_inner());
             finalized
                 .iter()
                 .map(|s| tr.push(source_tag, &speaker, s))

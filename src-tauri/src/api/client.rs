@@ -39,13 +39,14 @@ impl ApiClient {
         let model = config.get_model_name();
         let service = config.get_speech_service();
 
+        let key_preview: String = api_key.chars().take(8).collect();
         log::info!(
             "API request: service={}, model={}, url={}, audio_size={} bytes, key={}...",
             service,
             model,
             url,
             audio_data.len(),
-            &api_key[..api_key.len().min(8)]
+            key_preview
         );
 
         let form = self.build_form(audio_data, config, "recording.wav")?;

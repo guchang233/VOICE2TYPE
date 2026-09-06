@@ -197,7 +197,7 @@ impl AsrSource {
             Ok(mut buf) => std::mem::take(&mut *buf),
             Err(_) => Vec::new(),
         };
-        let last_seq = *self.seq.lock().unwrap();
+        let last_seq = *self.seq.lock().unwrap_or_else(|e| e.into_inner());
         if !rest.is_empty() {
             let (pcm_i16, _) = resample_and_convert(&rest, self.sample_rate);
             let bytes: Vec<u8> = pcm_i16.iter().flat_map(|s| s.to_le_bytes()).collect();

@@ -76,7 +76,7 @@ impl log::Log for TauriLogger {
         write_to_file(&log_entry);
 
         // 2. 通过 Tauri 事件推送到前端
-        if let Some(handle) = APP_HANDLE.lock().unwrap().as_ref() {
+        if let Some(handle) = APP_HANDLE.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             let _ = handle.emit(
                 "backend-log",
                 serde_json::json!({
@@ -91,7 +91,7 @@ impl log::Log for TauriLogger {
         // 3. 写入命名管道 (供外部日志查看器子进程使用)
         #[cfg(target_os = "windows")]
         unsafe {
-            if let Some(handle) = *LOG_PIPE_HANDLE.lock().unwrap() {
+            if let Some(handle) = *LOG_PIPE_HANDLE.lock().unwrap_or_else(|e| e.into_inner()) {
                 let mut buf = Vec::with_capacity(log_entry.len() + 2);
                 buf.extend_from_slice(log_entry.as_bytes());
                 buf.extend_from_slice(b"\r\n");
@@ -110,7 +110,7 @@ fn write_to_file(log_entry: &str) {
         return;
     };
     let log_file = cfg.log_file_path();
-    let mut guard = LOG_FILE_HANDLE.lock().unwrap();
+    let mut guard = LOG_FILE_HANDLE.lock().unwrap_or_else(|e| e.into_inner());
     let file_ok = if let Some((ref path, _)) = *guard {
         path == &log_file
     } else {
@@ -138,7 +138,7 @@ pub fn init_logger() {
 /// 设置 AppHandle，启用向前端推送日志事件
 /// 在 Tauri setup() 中调用
 pub fn set_app_handle(handle: AppHandle) {
-    *APP_HANDLE.lock().unwrap() = Some(handle);
+    *APP_HANDLE.lock().unwrap_or_else(|e| e.into_inner()) = Some(handle);
 }
 
 /// 写入日志（路由到 log 宏，由 TauriLogger 统一处理）
@@ -174,7 +174,7 @@ pub fn init_log_pipe() {
             0,
             None,
         );
-        *LOG_PIPE_HANDLE.lock().unwrap() = Some(handle);
+        *LOG_PIPE_HANDLE.lock().unwrap_or_else(|e| e.into_inner()) = Some(handle);
         let _ = ConnectNamedPipe(handle, None);
     });
 }
@@ -183,15 +183,15 @@ pub fn init_log_pipe() {
 #[cfg(target_os = "windows")]
 pub fn start_log_viewer() {
     use std::process::Command;
-    if LOG_VIEWER_CHILD.lock().unwrap().is_none() {
+    if LOG_VIEWER_CHILD.lock().unwrap_or_else(|e| e.into_inner()).is_none() {
         if let Ok(exe) = std::env::current_exe() {
             if let Ok(child) = Command::new(exe).arg("--log-viewer").spawn() {
-                *LOG_VIEWER_CHILD.lock().unwrap() = Some(child);
+                *LOG_VIEWER_CHILD.lock().unwrap_or_else(|e| e.into_inner()) = Some(child);
                 std::thread::spawn(|| {
                     use std::time::Duration;
                     loop {
                         let exited = {
-                            let mut guard = LOG_VIEWER_CHILD.lock().unwrap();
+                            let mut guard = LOG_VIEWER_CHILD.lock().unwrap_or_else(|e| e.into_inner());
                             if let Some(ch) = guard.as_mut() {
                                 ch.try_wait().map(|o| o.is_some()).unwrap_or(false)
                             } else {
@@ -203,7 +203,7 @@ pub fn start_log_viewer() {
                             // 子进程已退出：关闭日志并同步 UI 勾选
                             #[cfg(target_os = "windows")]
                             {
-                                if let Some(handle) = LOG_PIPE_HANDLE.lock().unwrap().take() {
+                                if let Some(handle) = LOG_PIPE_HANDLE.lock().unwrap_or_else(|e| e.into_inner()).take() {
                                     unsafe {
                                         let _ = CloseHandle(handle);
                                     }
@@ -212,7 +212,7 @@ pub fn start_log_viewer() {
                                     cfg.set_show_log(false);
                                     cfg.save_or_notify();
                                 }
-                                *LOG_VIEWER_CHILD.lock().unwrap() = None;
+                                *LOG_VIEWER_CHILD.lock().unwrap_or_else(|e| e.into_inner()) = None;
                                 crate::request_uncheck_log_menu();
                             }
                             break;
@@ -230,14 +230,14 @@ pub fn start_log_viewer() {
 pub fn log_set_enabled(enabled: bool, _config: Option<&crate::config::ConfigManager>) {
     if enabled {
         crate::LOG_MENU_NEEDS_UNCHECK.store(false, std::sync::atomic::Ordering::SeqCst);
-        if LOG_PIPE_HANDLE.lock().unwrap().is_none() {
+        if LOG_PIPE_HANDLE.lock().unwrap_or_else(|e| e.into_inner()).is_none() {
             init_log_pipe();
             start_log_viewer();
         }
     } else {
         // 停止子进程
         {
-            let mut guard = LOG_VIEWER_CHILD.lock().unwrap();
+            let mut guard = LOG_VIEWER_CHILD.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(mut child) = guard.take() {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -245,7 +245,7 @@ pub fn log_set_enabled(enabled: bool, _config: Option<&crate::config::ConfigMana
         }
         // 关闭管道
         {
-            let mut guard = LOG_PIPE_HANDLE.lock().unwrap();
+            let mut guard = LOG_PIPE_HANDLE.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(handle) = guard.take() {
                 unsafe {
                     let _ = CloseHandle(handle);
@@ -254,7 +254,7 @@ pub fn log_set_enabled(enabled: bool, _config: Option<&crate::config::ConfigMana
         }
         // 关闭并释放缓存的文件句柄（下次写日志会自动重新打开）
         {
-            let mut guard = LOG_FILE_HANDLE.lock().unwrap();
+            let mut guard = LOG_FILE_HANDLE.lock().unwrap_or_else(|e| e.into_inner());
             *guard = None;
         }
         // 重置 LOG_MENU_NEEDS_UNCHECK 标志

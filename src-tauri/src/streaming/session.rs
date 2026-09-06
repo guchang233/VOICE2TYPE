@@ -79,10 +79,10 @@ impl StreamingSession {
             anyhow::bail!("豆包 API Key 未配置");
         }
 
-        self.pcm_buffer.lock().unwrap().clear();
+        self.pcm_buffer.lock().unwrap_or_else(|e| e.into_inner()).clear();
         self.output.reset();
         self.output.begin_session();
-        *self.audio_seq.lock().unwrap() = 2;
+        *self.audio_seq.lock().unwrap_or_else(|e| e.into_inner()) = 2;
         self.start_instant = Some(Instant::now());
         self.partial_count.store(0, Ordering::SeqCst);
         self.final_count.store(0, Ordering::SeqCst);
@@ -150,9 +150,11 @@ impl StreamingSession {
                     break;
                 }
 
-                // 取走当前 buffer 中全部积累的样本（采集回调一直在写入）
+                // 取走当前 buffer 中全部积累的样本（采集回调一直在写入）。
                 // 之前的计算 `buf.len() * TARGET_RATE / rate` 会只取走 1/3，
                 // 导致 buffer 以 3 倍速积压，音频直到松开才被发送。
+                // mem::replace 换出数据并留下一块预分配缓冲：
+                // mem::take 会把容量清零，迫使音频回调在下个块重新增长分配。
                 let chunk_f32 = {
                     let Ok(mut buf) = pcm_buf.lock() else {
                         break;
@@ -160,7 +162,8 @@ impl StreamingSession {
                     if buf.is_empty() {
                         continue;
                     }
-                    std::mem::take(&mut *buf)
+                    let expected = rate as usize * CHUNK_MS as usize / 1000;
+                    std::mem::replace(&mut *buf, Vec::with_capacity(expected))
                 };
 
                 if chunk_f32.is_empty() {
@@ -209,18 +212,24 @@ impl StreamingSession {
 
         IS_STREAMING.store(false, Ordering::SeqCst);
 
+        // 优雅停止 pump：让它把手头的块发送完再退出。
+        // 直接 abort 会在 send_audio 中途销毁已从缓冲取走的音频，造成丢尾。
+        // pump 每轮循环先检查 IS_STREAMING，最多再跑一轮即退出；
+        // 若网络停滞卡在 send 上则超时兜底 abort。
         if let Some(pump) = self.pump_task.take() {
-            pump.abort();
+            if tokio::time::timeout(Duration::from_secs(1), pump).await.is_err() {
+                log::warn!("[流式] pump 优雅退出超时，强制终止");
+            }
         }
 
-        // 发送最后一包
+        // 发送最后一包（此时 pump 已退出，缓冲中不会再有新数据写入）
         if let Some(client) = &self.client {
             let rest: Vec<f32> = {
-                let mut buf = self.pcm_buffer.lock().unwrap();
+                let mut buf = self.pcm_buffer.lock().unwrap_or_else(|e| e.into_inner());
                 std::mem::take(&mut *buf)
             };
             if !cancelled {
-                let last_seq = *self.audio_seq.lock().unwrap();
+                let last_seq = *self.audio_seq.lock().unwrap_or_else(|e| e.into_inner());
                 if !rest.is_empty() {
                     let (pcm_i16, _) = resample_and_convert(&rest, self.sample_rate);
                     let bytes: Vec<u8> = pcm_i16.iter().flat_map(|s| s.to_le_bytes()).collect();

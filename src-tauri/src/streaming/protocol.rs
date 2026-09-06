@@ -43,7 +43,9 @@ fn build_header(msg_type: u8, flags: u8, serialization: u8, compression: u8) -> 
 }
 
 fn gzip_compress(data: &[u8]) -> Result<Vec<u8>> {
-    let mut enc = GzEncoder::new(Vec::new(), Compression::default());
+    // 每 200ms 一个音频块都会走这里，用 fast 级别：PCM 压缩率本就有限，
+    // default 级别的额外 CPU 在流式场景下不值得
+    let mut enc = GzEncoder::new(Vec::new(), Compression::fast());
     enc.write_all(data)?;
     Ok(enc.finish()?)
 }

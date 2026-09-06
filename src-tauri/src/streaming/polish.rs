@@ -273,7 +273,10 @@ pub async fn correct_with_custom(
 
     // 鲁棒清洗：去代码块、前缀、引号、多余空白
     let out = clean_llm_output(&raw);
-    log::debug!("[correct] LLM 原始返回: {:?} -> 清洗后: {:?}", &raw[..raw.len().min(80)], &out[..out.len().min(80)]);
+    // 按字符截断预览，避免中文等非 char 边界切片 panic
+    let raw_preview: String = raw.chars().take(80).collect();
+    let out_preview: String = out.chars().take(80).collect();
+    log::debug!("[correct] LLM 原始返回: {:?} -> 清洗后: {:?}", raw_preview, out_preview);
 
     if out.is_empty() {
         anyhow::bail!("错别字校对返回为空");

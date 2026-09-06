@@ -70,106 +70,89 @@ pub fn start_capture_with_prefs(
         crate::utils::logger::write_log_line(&format!("[音频] 采集错误: {}", err));
     };
 
-    // 为每个样本格式分支，统一调用 push_samples_mono（会按 downmix 策略做混音）
+    // 流式模式：会话 pump 每 200ms 取走数据，上限设为 10 分钟音频量，
+    // 防止网络/消费者长时间停滞时采集缓冲无界增长
+    let max_buffer_samples = src_rate as usize * 600;
+
+    // 为每个样本格式分支，统一调用 push_samples_mono_converted（会按 downmix 策略做混音）
     let stream = match sample_format {
-        SampleFormat::F32 => {
-            let buf = buffer.clone();
-            let dm = downmix.clone();
-            device.build_input_stream(
-                &config,
-                move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    push_samples_mono(buf.clone(), data, channels, &dm);
-                },
-                err_fn,
-                None,
-            )?
-        }
-        SampleFormat::I16 => {
-            let buf = buffer.clone();
-            let dm = downmix.clone();
-            device.build_input_stream(
-                &config,
-                move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                    let f: Vec<f32> = data.iter().map(|&s| s as f32 / i16::MAX as f32).collect();
-                    push_samples_mono(buf.clone(), &f, channels, &dm);
-                },
-                err_fn,
-                None,
-            )?
-        }
-        SampleFormat::U16 => {
-            let buf = buffer.clone();
-            let dm = downmix.clone();
-            device.build_input_stream(
-                &config,
-                move |data: &[u16], _: &cpal::InputCallbackInfo| {
-                    let f: Vec<f32> = data
-                        .iter()
-                        .map(|&s| (s as f32 / u16::MAX as f32) * 2.0 - 1.0)
-                        .collect();
-                    push_samples_mono(buf.clone(), &f, channels, &dm);
-                },
-                err_fn,
-                None,
-            )?
-        }
-        SampleFormat::I32 => {
-            let buf = buffer.clone();
-            let dm = downmix.clone();
-            device.build_input_stream(
-                &config,
-                move |data: &[i32], _: &cpal::InputCallbackInfo| {
-                    let f: Vec<f32> = data.iter().map(|&s| s as f32 / i32::MAX as f32).collect();
-                    push_samples_mono(buf.clone(), &f, channels, &dm);
-                },
-                err_fn,
-                None,
-            )?
-        }
-        SampleFormat::U32 => {
-            let buf = buffer.clone();
-            let dm = downmix.clone();
-            device.build_input_stream(
-                &config,
-                move |data: &[u32], _: &cpal::InputCallbackInfo| {
-                    let f: Vec<f32> = data
-                        .iter()
-                        .map(|&s| (s as f32 / u32::MAX as f32) * 2.0 - 1.0)
-                        .collect();
-                    push_samples_mono(buf.clone(), &f, channels, &dm);
-                },
-                err_fn,
-                None,
-            )?
-        }
-        SampleFormat::I8 => {
-            let buf = buffer.clone();
-            let dm = downmix.clone();
-            device.build_input_stream(
-                &config,
-                move |data: &[i8], _: &cpal::InputCallbackInfo| {
-                    let f: Vec<f32> = data.iter().map(|&s| s as f32 / i8::MAX as f32).collect();
-                    push_samples_mono(buf.clone(), &f, channels, &dm);
-                },
-                err_fn,
-                None,
-            )?
-        }
+        SampleFormat::F32 => build_capture_stream!(
+            device, config, f32, |s: f32| s, true, buffer, channels, downmix, err_fn,
+            max_buffer_samples
+        )?,
+        SampleFormat::I16 => build_capture_stream!(
+            device,
+            config,
+            i16,
+            |s: i16| s as f32 / i16::MAX as f32,
+            true,
+            buffer,
+            channels,
+            downmix,
+            err_fn,
+            max_buffer_samples
+        )?,
+        SampleFormat::U16 => build_capture_stream!(
+            device,
+            config,
+            u16,
+            |s: u16| (s as f32 / u16::MAX as f32) * 2.0 - 1.0,
+            true,
+            buffer,
+            channels,
+            downmix,
+            err_fn,
+            max_buffer_samples
+        )?,
+        SampleFormat::I32 => build_capture_stream!(
+            device,
+            config,
+            i32,
+            |s: i32| s as f32 / i32::MAX as f32,
+            true,
+            buffer,
+            channels,
+            downmix,
+            err_fn,
+            max_buffer_samples
+        )?,
+        SampleFormat::U32 => build_capture_stream!(
+            device,
+            config,
+            u32,
+            |s: u32| (s as f32 / u32::MAX as f32) * 2.0 - 1.0,
+            true,
+            buffer,
+            channels,
+            downmix,
+            err_fn,
+            max_buffer_samples
+        )?,
+        SampleFormat::I8 => build_capture_stream!(
+            device,
+            config,
+            i8,
+            |s: i8| s as f32 / i8::MAX as f32,
+            true,
+            buffer,
+            channels,
+            downmix,
+            err_fn,
+            max_buffer_samples
+        )?,
         SampleFormat::U8 => {
             // 理论上 pick_best_input_config 已经过滤 U8；这里仍然兜底处理
-            let buf = buffer.clone();
-            let dm = downmix.clone();
-            device.build_input_stream(
-                &config,
-                move |data: &[u8], _: &cpal::InputCallbackInfo| {
-                    let f: Vec<f32> = data
-                        .iter()
-                        .map(|&s| (s as f32 / u8::MAX as f32) * 2.0 - 1.0)
-                        .collect();
-                    push_samples_mono(buf.clone(), &f, channels, &dm);
-                },
+            build_capture_stream!(
+                device,
+                config,
+                u8,
+                |s: u8| (s as f32 / u8::MAX as f32) * 2.0 - 1.0,
+                true,
+                buffer,
+                channels,
+                downmix,
                 err_fn,
-                None,
+                max_buffer_samples
             )?
         }
         other => anyhow::bail!("不支持的样本格式: {:?}", other),
@@ -182,6 +165,124 @@ pub fn start_capture_with_prefs(
 // ======================================================================
 // 公共辅助：配置选取 / 下混策略，subtitle.rs / recorder.rs 直接复用
 // ======================================================================
+
+/// 下混通道数上限：超出则退化为 average（麦克风一般 1-2 通道，纯兜底）
+pub(crate) const MAX_DOWNMIX_CHANNELS: usize = 32;
+
+/// 把交错的多声道 f32 样本下混为单声道后追加到共享 buffer。
+/// `downmix`：`average` | `strongest` | `first_channel`
+pub fn push_samples_mono(
+    buffer: Arc<Mutex<Vec<f32>>>,
+    data: &[f32],
+    channels: u16,
+    downmix: &str,
+) {
+    push_samples_mono_ref(&buffer, data, channels, downmix);
+}
+
+/// [`push_samples_mono`] 的零 Arc 拷贝版本：直接借用 Mutex，
+/// 供音频回调热路径使用（避免每次回调克隆 Arc）。
+pub fn push_samples_mono_ref(
+    buffer: &Mutex<Vec<f32>>,
+    data: &[f32],
+    channels: u16,
+    downmix: &str,
+) {
+    push_samples_mono_converted(buffer, data, channels, downmix, 0, |s| s);
+}
+
+/// 单次遍历完成「任意样本格式 → f32 转换 + 下混」，无中间 Vec 分配，
+/// 供 cpal 实时音频回调使用。
+///
+/// `max_samples` > 0 时，buffer 超过该样本数即丢弃本次块（防止消费者卡死
+/// 时采集缓冲无界增长）；0 表示不限制（整段录音模式）。
+pub fn push_samples_mono_converted<T: Copy>(
+    buffer: &Mutex<Vec<f32>>,
+    data: &[T],
+    channels: u16,
+    downmix: &str,
+    max_samples: usize,
+    convert: impl Fn(T) -> f32,
+) {
+    if data.is_empty() {
+        return;
+    }
+    let ch = channels.max(1) as usize;
+    let frames = data.len() / ch;
+    // 音频回调内不能阻塞等待：锁中毒时取回内部数据继续写，避免丢流
+    let mut buf = buffer.lock().unwrap_or_else(|e| e.into_inner());
+    if max_samples > 0 && buf.len() + frames > max_samples {
+        // 消费者长时间停滞：丢弃新样本而非无界增长（正常会话远达不到此上限）
+        return;
+    }
+    buf.reserve(frames);
+    if ch == 1 {
+        buf.extend(data.iter().map(|&s| convert(s)));
+        return;
+    }
+    match downmix {
+        "first_channel" => {
+            for frame in data.chunks_exact(ch) {
+                buf.push(convert(frame[0]));
+            }
+        }
+        "strongest" if ch <= MAX_DOWNMIX_CHANNELS => {
+            // 计算每声道 RMS（本回调块内），选 RMS 最大者整段采用
+            let mut rms = [0.0f64; MAX_DOWNMIX_CHANNELS];
+            for frame in data.chunks_exact(ch) {
+                for (c, &s) in frame.iter().enumerate() {
+                    let v = convert(s) as f64;
+                    rms[c] += v * v;
+                }
+            }
+            let mut best = 0usize;
+            for c in 1..ch {
+                if rms[c] > rms[best] {
+                    best = c;
+                }
+            }
+            for frame in data.chunks_exact(ch) {
+                buf.push(convert(frame[best]));
+            }
+        }
+        _ => {
+            // average（旧行为，兜底；含超出栈数组上限的多通道）
+            let chf = ch as f32;
+            for frame in data.chunks_exact(ch) {
+                let mut sum = 0.0f32;
+                for &s in frame {
+                    sum += convert(s);
+                }
+                buf.push(sum / chf);
+            }
+        }
+    }
+}
+
+/// 为给定样本类型构建 cpal 输入流：回调内单次遍历完成「格式转换 + 下混」，
+/// 无中间 Vec 分配、无 Arc 克隆（实时音频回调安全）。
+///
+/// - `$active`：`bool` 表达式，false 时丢弃该块（整段录音用 AtomicBool，流式传 `true`）
+/// - `$max`：采集缓冲样本数上限（0 = 不限制）
+/// - `$conv`：`Fn(T) -> f32` 样本转换
+macro_rules! build_capture_stream {
+    ($device:expr, $config:expr, $ty:ty, $conv:expr, $active:expr, $buf:expr, $channels:expr, $dm:expr, $err:expr, $max:expr) => {{
+        let __buf = $buf.clone();
+        let __dm = $dm.clone();
+        $device.build_input_stream(
+            &$config,
+            move |data: &[$ty], _: &cpal::InputCallbackInfo| {
+                if !$active {
+                    return;
+                }
+                crate::streaming::audio::push_samples_mono_converted(&__buf, data, $channels, &__dm, $max, $conv)
+            },
+            $err,
+            None,
+        )
+    }};
+}
+pub(crate) use build_capture_stream;
 
 /// 在给定设备上，按用户偏好挑选「最优」的 `(StreamConfig, SampleFormat)`。
 ///
@@ -244,60 +345,6 @@ pub fn pick_best_input_config(
         },
         fmt,
     ))
-}
-
-/// 把交错的多声道 f32 样本下混为单声道后追加到 buffer。
-/// `downmix`：`average` | `strongest` | `first_channel`
-pub fn push_samples_mono(
-    buffer: Arc<Mutex<Vec<f32>>>,
-    data: &[f32],
-    channels: u16,
-    downmix: &str,
-) {
-    if let Ok(mut buf) = buffer.lock() {
-        if channels == 1 {
-            buf.extend_from_slice(data);
-            return;
-        }
-        let ch = channels as usize;
-        match downmix {
-            "first_channel" => {
-                for frame in data.chunks_exact(ch) {
-                    buf.push(frame[0]);
-                }
-            }
-            "strongest" => {
-                // 计算每声道 RMS（本回调块内），选 RMS 最大者整段采用
-                let n_frames = data.len() / ch;
-                if n_frames == 0 {
-                    return;
-                }
-                let mut rms = vec![0.0f64; ch];
-                for frame in data.chunks_exact(ch) {
-                    for (c, &s) in frame.iter().enumerate() {
-                        let v = s as f64;
-                        rms[c] += v * v;
-                    }
-                }
-                let best = rms
-                    .iter()
-                    .enumerate()
-                    .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
-                    .map(|(i, _)| i)
-                    .unwrap_or(0);
-                for frame in data.chunks_exact(ch) {
-                    buf.push(frame[best]);
-                }
-            }
-            _ => {
-                // average（旧行为，兜底）
-                for frame in data.chunks_exact(ch) {
-                    let mono: f32 = frame.iter().sum::<f32>() / ch as f32;
-                    buf.push(mono);
-                }
-            }
-        }
-    }
 }
 
 // ====== 内部辅助函数 ======
@@ -478,7 +525,7 @@ mod tests {
         let check = |strategy: &str| {
             let buf = Arc::new(Mutex::new(Vec::new()));
             push_samples_mono(buf.clone(), &data, 2, strategy);
-            let r = buf.lock().unwrap().clone();
+            let r = buf.lock().unwrap_or_else(|e| e.into_inner()).clone();
             assert_eq!(r.len(), 10, "strategy {} frame count mismatch", strategy);
             r
         };

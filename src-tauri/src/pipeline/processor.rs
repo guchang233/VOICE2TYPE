@@ -208,10 +208,13 @@ impl AsyncPostProcessor for LlmCorrector {
         match correct_with_custom(&text, &url, &key, &model, &sys_prompt).await {
             Ok(corrected) => {
                 if corrected != text {
+                    // 按字符截断预览，避免在非 char 边界切片导致中文文本 panic
+                    let preview_src: String = text.chars().take(80).collect();
+                    let preview_dst: String = corrected.chars().take(80).collect();
                     log::info!(
                         "[llm-corrector] 校对完成（有修改）: {:?} -> {:?}",
-                        &text[..text.len().min(80)],
-                        &corrected[..corrected.len().min(80)]
+                        preview_src,
+                        preview_dst
                     );
                 } else {
                     log::info!("[llm-corrector] 校对完成（无修改）");
@@ -283,10 +286,10 @@ impl PostProcessor for PostProcessorChain {
     fn process(&self, text: String, context: &Context) -> String {
         let mut result = text;
         for processor in &self.processors {
-            let before = result.clone();
+            let before_len = result.len();
             result = processor.process(result, context);
-            if before != result {
-                log::debug!("[chain] {} 处理: {} -> {}", processor.name(), before.len(), result.len());
+            if before_len != result.len() {
+                log::debug!("[chain] {} 处理: {} -> {} 字节", processor.name(), before_len, result.len());
             }
         }
         result

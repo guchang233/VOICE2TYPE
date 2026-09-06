@@ -234,12 +234,12 @@ impl SubtitleEngine {
 
     /// 当前转录（无会话时返回 None）
     pub fn transcript(&self) -> Option<Arc<StdMutex<Transcript>>> {
-        self.transcript.lock().unwrap().clone()
+        self.transcript.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// 清空转录
     pub fn clear_transcript(&self) {
-        *self.transcript.lock().unwrap() = None;
+        *self.transcript.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 
     // ==================== 会话生命周期 ====================
@@ -303,7 +303,7 @@ impl SubtitleEngine {
 
         // 2. 新建本次会话的转录存储
         let transcript = Arc::new(StdMutex::new(Transcript::new()));
-        *self.transcript.lock().unwrap() = Some(transcript.clone());
+        *self.transcript.lock().unwrap_or_else(|e| e.into_inner()) = Some(transcript.clone());
 
         // 3. 会话生命周期事件
         let _ = app.emit("subtitle-session-started", serde_json::json!({ "running": true }));

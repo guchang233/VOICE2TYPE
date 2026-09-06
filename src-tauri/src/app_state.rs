@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
@@ -6,7 +6,7 @@ use tokio::sync::Mutex;
 use crate::api::client::ApiClient;
 use crate::audio::processor;
 use crate::config::ConfigManager;
-use crate::output::handler::{self, OutputHandler};
+use crate::output::handler::OutputHandler;
 use crate::recorder::Recorder;
 use crate::streaming::audio as stream_audio;
 use crate::streaming::session::StreamingSession;
@@ -73,6 +73,9 @@ pub struct AppState {
     /// 是否正在处理（ASR/LLM/输出）：替代原 processing_lock Mutex，
     /// 允许 force_cancel 强制重置后立即启动新录音。
     is_processing: Arc<AtomicBool>,
+    /// 识别代际计数：每次新识别自增；旧任务在检查点发现代际过期即自行退出，
+    /// 防止新旧两路同时输出。
+    run_generation: Arc<AtomicU64>,
 }
 
 impl AppState {
@@ -101,6 +104,7 @@ impl AppState {
             streaming_runtime: Arc::new(Mutex::new(StreamingRuntime::new())),
             cancel_flag: Arc::new(AtomicBool::new(false)),
             is_processing: Arc::new(AtomicBool::new(false)),
+            run_generation: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -393,14 +397,19 @@ impl AppState {
             return self.stop_streaming_recording().await;
         }
 
-        // 用 AtomicBool 替代原 Mutex 互斥锁：如果上一次处理被 force_cancel 重置，
-        // 这里可以直接接管；如果上一次仍在运行，设置 cancel_flag 让其尽快退出。
+        // 代际计数：每次识别自增。旧任务在各检查点发现代际过期即退出，
+        // 与 cancel_flag 双保险，避免旧任务在新任务开始后继续输出。
+        let my_gen = self.run_generation.fetch_add(1, Ordering::SeqCst) + 1;
+        // 如果上一次处理仍在运行：请求其取消并等待退出（有界等待），
+        // 替代原先固定 50ms 睡眠——旧任务在长 LLM 调用中不会在 50ms 内退出，
+        // 原实现随后清除 cancel_flag 会导致新旧两路并发输出。
         if self.is_processing.swap(true, Ordering::SeqCst) {
-            log::warn!("[recognize] 上一次识别仍在处理中，发送取消信号");
+            log::warn!("[recognize] 上一次识别仍在处理中，等待其退出");
             self.cancel_flag.store(true, Ordering::SeqCst);
-            // 给旧任务一点时间检查 cancel_flag 并退出
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            self.is_processing.store(true, Ordering::SeqCst);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            while self.is_processing.load(Ordering::SeqCst) && std::time::Instant::now() < deadline {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
         }
         // 重置 cancel_flag，当前这次识别正常进行
         self.cancel_flag.store(false, Ordering::SeqCst);
@@ -419,8 +428,8 @@ impl AppState {
         self.emit_status(AppStatus::Processing).await;
         Self::set_indicator_state(&self.app_handle, crate::indicator::IndicatorState::Processing).await;
 
-        // 取消检查点 1：录音停止后
-        if self.cancel_flag.load(Ordering::SeqCst) {
+        // 取消检查点 1：录音停止后（或已被更新的识别取代）
+        if self.cancel_flag.load(Ordering::SeqCst) || self.run_generation.load(Ordering::SeqCst) != my_gen {
             log::info!("[recognize] 已取消（录音停止后）");
             self.is_processing.store(false, Ordering::SeqCst);
             self.emit_status(AppStatus::Idle).await;
@@ -583,8 +592,8 @@ impl AppState {
             }
         };
 
-        // 取消检查点 2：ASR 完成、LLM 处理前
-        if self.cancel_flag.load(Ordering::SeqCst) {
+        // 取消检查点 2：ASR 完成、LLM 处理前（或已被更新的识别取代）
+        if self.cancel_flag.load(Ordering::SeqCst) || self.run_generation.load(Ordering::SeqCst) != my_gen {
             log::info!("[recognize] 已取消（ASR 完成后）");
             self.is_processing.store(false, Ordering::SeqCst);
             self.emit_status(AppStatus::Idle).await;
@@ -594,8 +603,8 @@ impl AppState {
         let processed_text =
             crate::pipeline::process_with_config_async(&recognition_result, &self.config).await;
 
-        // 取消检查点 3：LLM 处理后、输出前
-        if self.cancel_flag.load(Ordering::SeqCst) {
+        // 取消检查点 3：LLM 处理后、输出前（或已被更新的识别取代）
+        if self.cancel_flag.load(Ordering::SeqCst) || self.run_generation.load(Ordering::SeqCst) != my_gen {
             log::info!("[recognize] 已取消（LLM 处理后）");
             self.is_processing.store(false, Ordering::SeqCst);
             self.emit_status(AppStatus::Idle).await;
@@ -611,7 +620,13 @@ impl AppState {
             .handle_output(processed_text.clone(), &self.config)
             .await
         {
+            // 输出失败（剪贴板/注入失败）必须如实反馈：置 Error 指示器并返回错误，
+            // 不能仍然显示“成功”，否则用户以为已输入。
             log::error!("Output handling error: {}", e);
+            self.is_processing.store(false, Ordering::SeqCst);
+            self.emit_status(AppStatus::Error(e.to_string())).await;
+            Self::set_indicator_state(&self.app_handle, crate::indicator::IndicatorState::Error).await;
+            return Err(format!("输出失败: {}", e));
         }
 
         if let Some(handle) = self.app_handle.lock().await.as_ref() {

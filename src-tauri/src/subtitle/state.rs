@@ -298,21 +298,21 @@ impl SharedState {
 
     /// 安装变更通知器（引擎安装「向可见字幕窗口发信号」的闭包）
     pub fn set_notifier(&self, notifier: Arc<Notifier>) {
-        *self.notifier.write().unwrap() = Some(notifier);
+        *self.notifier.write().unwrap_or_else(|e| e.into_inner()) = Some(notifier);
     }
 
     pub fn read(&self) -> RwLockReadGuard<'_, Snapshot> {
-        self.inner.read().unwrap()
+        self.inner.read().unwrap_or_else(|e| e.into_inner())
     }
 
     pub fn write(&self) -> RwLockWriteGuard<'_, Snapshot> {
-        self.inner.write().unwrap()
+        self.inner.write().unwrap_or_else(|e| e.into_inner())
     }
 
     /// 版本号 +1 并触发通知器，返回新版本
     pub fn bump(&self) -> u64 {
         let v = self.version.fetch_add(1, Ordering::SeqCst) + 1;
-        if let Some(n) = self.notifier.read().unwrap().as_ref() {
+        if let Some(n) = self.notifier.read().unwrap_or_else(|e| e.into_inner()).as_ref() {
             n();
         }
         v

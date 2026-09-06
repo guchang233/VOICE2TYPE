@@ -7,9 +7,9 @@
 use anyhow::{Context, Result};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
-use crate::streaming::push_samples_mono;
+
+use crate::streaming::push_samples_mono_ref;
 
 /// loopback 采集句柄：drop 时停止采集线程。
 pub struct LoopbackCapture {
@@ -64,7 +64,7 @@ pub fn start_loopback_capture(
             let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
             let co_initialized = hr.is_ok();
 
-            let init = (|| -> Result<(u32, u16, IAudioClient, IAudioCaptureClient)> {
+            let init = (|| -> Result<(u32, u16, IAudioClient, IAudioCaptureClient, windows::Win32::Foundation::HANDLE)> {
                 // 创建设备枚举器
                 let enumerator: IMMDeviceEnumerator =
                     CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
@@ -110,17 +110,30 @@ pub fn start_loopback_capture(
                     );
                 }
 
-                // 初始化 AudioClient（共享模式 + LOOPBACK）
+                // 初始化 AudioClient（共享模式 + LOOPBACK + 事件驱动）
+                // 事件驱动：OS 在有数据包时唤醒采集线程，替代 10ms 轮询
+                let event = windows::Win32::System::Threading::CreateEventW(
+                    None,
+                    false,
+                    false,
+                    windows::core::PCWSTR::null(),
+                )
+                .context("创建采集事件失败")?;
+
                 audio_client
                     .Initialize(
                         AUDCLNT_SHAREMODE_SHARED,
-                        AUDCLNT_STREAMFLAGS_LOOPBACK,
+                        AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
                         0,
                         0,
                         format_ptr,
                         None,
                     )
                     .context("Initialize AudioClient 失败")?;
+
+                audio_client
+                    .SetEventHandle(event)
+                    .context("设置采集事件句柄失败")?;
 
                 // 获取 CaptureClient
                 let capture_client: IAudioCaptureClient = audio_client
@@ -138,14 +151,14 @@ pub fn start_loopback_capture(
                     sample_rate, channels, dm
                 ));
 
-                Ok((sample_rate, channels, audio_client, capture_client))
+                Ok((sample_rate, channels, audio_client, capture_client, event))
             })();
 
             match init {
-                Ok((sample_rate, channels, audio_client, capture_client)) => {
+                Ok((sample_rate, channels, audio_client, capture_client, event)) => {
                     // 通知主线程采样率
                     let _ = init_tx.send(Ok((sample_rate, channels)));
-                    (Some((audio_client, capture_client)), co_initialized, channels)
+                    (Some((audio_client, capture_client, event)), co_initialized, channels)
                 }
                 Err(e) => {
                     let _ = init_tx.send(Err(e));
@@ -156,8 +169,10 @@ pub fn start_loopback_capture(
 
         let (com_objs, co_initialized, ch) = init_result;
 
-        // ===== 采集循环 =====
-        if let Some((audio_client, capture_client)) = com_objs {
+        // ===== 采集循环（事件驱动：OS 在有数据包时唤醒，替代 10ms 轮询） =====
+        if let Some((audio_client, capture_client, event)) = com_objs {
+            use windows::Win32::Foundation::WAIT_OBJECT_0;
+            use windows::Win32::System::Threading::WaitForSingleObject;
             unsafe {
                 loop {
                     if stop_clone.load(Ordering::Relaxed) {
@@ -184,14 +199,18 @@ pub fn start_loopback_capture(
                             let len = num_frames as usize * ch as usize;
                             let samples =
                                 std::slice::from_raw_parts(data_ptr as *const f32, len);
-                            push_samples_mono(buffer.clone(), samples, ch, &dm);
+                            push_samples_mono_ref(&buffer, samples, ch, &dm);
                         }
 
                         let _ = capture_client.ReleaseBuffer(num_frames);
                         packet_size = capture_client.GetNextPacketSize().unwrap_or(0);
                     }
 
-                    std::thread::sleep(Duration::from_millis(10));
+                    // 等待下一个数据包事件；带超时以便响应停止信号
+                    // （无声音播放时 loopback 不产生事件，超时是唯一退出路径）
+                    if WaitForSingleObject(event, 200) == WAIT_OBJECT_0 {
+                        continue;
+                    }
                 }
 
                 let _ = audio_client.Stop();

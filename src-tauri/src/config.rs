@@ -1224,7 +1224,7 @@ impl ConfigManager {
 
     pub fn models_dir(&self) -> PathBuf {
         // 优先使用用户自定义目录
-        let custom = self.config.lock().unwrap().model.custom_models_dir.clone();
+        let custom = self.config.lock().unwrap_or_else(|e| e.into_inner()).model.custom_models_dir.clone();
         if !custom.is_empty() && PathBuf::from(&custom).is_dir() {
             return PathBuf::from(custom);
         }
@@ -1250,12 +1250,12 @@ impl ConfigManager {
 
     /// 设置自定义模型目录
     pub fn set_custom_models_dir(&self, dir: String) {
-        self.config.lock().unwrap().model.custom_models_dir = dir;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).model.custom_models_dir = dir;
     }
 
     /// 清除自定义模型目录（恢复默认）
     pub fn clear_custom_models_dir(&self) {
-        self.config.lock().unwrap().model.custom_models_dir = String::new();
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).model.custom_models_dir = String::new();
     }
 
     pub fn ensure_models_dir(&self) -> anyhow::Result<PathBuf> {
@@ -1288,7 +1288,7 @@ impl ConfigManager {
 
     fn migrate_legacy_whisper_dir(&self) {
         let legacy = self.config_dir().join("whisper");
-        let mut cfg = self.config.lock().unwrap();
+        let mut cfg = self.config.lock().unwrap_or_else(|e| e.into_inner());
         if cfg.model.local_whisper_dir.is_empty() && legacy.is_dir() {
             cfg.model.local_whisper_dir = legacy.to_string_lossy().into_owned();
         }
@@ -1331,18 +1331,18 @@ impl ConfigManager {
     }
 
     pub fn get_config(&self) -> AppConfig {
-        self.config.lock().unwrap().clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     pub fn set_config(&self, new_config: AppConfig) {
-        let mut cfg = self.config.lock().unwrap();
+        let mut cfg = self.config.lock().unwrap_or_else(|e| e.into_inner());
         *cfg = new_config;
         cfg.basic.model_name = cfg.model_selection.batch_model.clone();
         cfg.subtitle.normalize();
     }
 
     fn effective_model_name(&self) -> String {
-        let cfg = self.config.lock().unwrap();
+        let cfg = self.config.lock().unwrap_or_else(|e| e.into_inner());
         let batch = &cfg.model_selection.batch_model;
         if !batch.is_empty() {
             batch.clone()
@@ -1360,7 +1360,7 @@ impl ConfigManager {
     }
 
     pub fn get_api_key(&self) -> String {
-        let cfg = self.config.lock().unwrap();
+        let cfg = self.config.lock().unwrap_or_else(|e| e.into_inner());
         let model = if cfg.model_selection.batch_model.is_empty() {
             cfg.basic.model_name.clone()
         } else {
@@ -1375,7 +1375,7 @@ impl ConfigManager {
     }
 
     pub fn set_api_key(&self, key: String) {
-        let mut cfg = self.config.lock().unwrap();
+        let mut cfg = self.config.lock().unwrap_or_else(|e| e.into_inner());
         let model = if cfg.model_selection.batch_model.is_empty() {
             cfg.basic.model_name.clone()
         } else {
@@ -1389,107 +1389,107 @@ impl ConfigManager {
     }
 
     pub fn get_siliconflow_api_key(&self) -> String {
-        self.config.lock().unwrap().model.siliconflow_api_key.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).model.siliconflow_api_key.clone()
     }
 
     pub fn set_siliconflow_api_key(&self, key: String) {
-        self.config.lock().unwrap().model.siliconflow_api_key = key;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).model.siliconflow_api_key = key;
     }
 
     pub fn get_groq_api_key(&self) -> String {
-        self.config.lock().unwrap().model.groq_api_key.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).model.groq_api_key.clone()
     }
 
     pub fn set_groq_api_key(&self, key: String) {
-        self.config.lock().unwrap().model.groq_api_key = key;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).model.groq_api_key = key;
     }
 
     pub fn get_doubao_api_key(&self) -> String {
-        self.config.lock().unwrap().model.doubao_api_key.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).model.doubao_api_key.clone()
     }
 
     pub fn set_doubao_api_key(&self, key: String) {
-        self.config.lock().unwrap().model.doubao_api_key = key;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).model.doubao_api_key = key;
     }
 
     pub fn get_dashscope_api_key(&self) -> String {
-        self.config.lock().unwrap().model.dashscope_api_key.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).model.dashscope_api_key.clone()
     }
 
     pub fn set_dashscope_api_key(&self, key: String) {
-        self.config.lock().unwrap().model.dashscope_api_key = key;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).model.dashscope_api_key = key;
     }
 
     pub fn streaming_hotkey(&self) -> u32 {
-        self.config.lock().unwrap().streaming.hotkey
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).streaming.hotkey
     }
 
     pub fn set_streaming_hotkey(&self, vk: u32) {
-        self.config.lock().unwrap().streaming.hotkey = vk;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).streaming.hotkey = vk;
     }
 
     pub fn streaming_trigger_mode(&self) -> String {
-        self.config.lock().unwrap().streaming.trigger_mode.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).streaming.trigger_mode.clone()
     }
 
     pub fn set_streaming_trigger_mode(&self, mode: String) {
-        self.config.lock().unwrap().streaming.trigger_mode = mode;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).streaming.trigger_mode = mode;
     }
 
     pub fn streaming_resource_id(&self) -> String {
-        self.config.lock().unwrap().streaming.resource_id.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).streaming.resource_id.clone()
     }
 
     pub fn set_streaming_resource_id(&self, id: String) {
-        self.config.lock().unwrap().streaming.resource_id = id;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).streaming.resource_id = id;
     }
 
     pub fn streaming_model_name(&self) -> String {
-        self.config.lock().unwrap().streaming.model_name.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).streaming.model_name.clone()
     }
 
     pub fn streaming_output_language(&self) -> String {
-        self.config.lock().unwrap().streaming.output_language.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).streaming.output_language.clone()
     }
 
     pub fn set_streaming_output_language(&self, lang: String) {
-        self.config.lock().unwrap().streaming.output_language = lang;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).streaming.output_language = lang;
     }
 
     pub fn streaming_allow_emoji(&self) -> bool {
-        self.config.lock().unwrap().streaming.allow_emoji
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).streaming.allow_emoji
     }
 
     pub fn set_streaming_allow_emoji(&self, allow: bool) {
-        self.config.lock().unwrap().streaming.allow_emoji = allow;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).streaming.allow_emoji = allow;
     }
 
     pub fn streaming_allow_punctuation(&self) -> bool {
-        self.config.lock().unwrap().streaming.allow_punctuation
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).streaming.allow_punctuation
     }
 
     pub fn set_streaming_allow_punctuation(&self, allow: bool) {
-        self.config.lock().unwrap().streaming.allow_punctuation = allow;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).streaming.allow_punctuation = allow;
     }
 
     pub fn streaming_enable_indicator(&self) -> bool {
-        self.config.lock().unwrap().streaming.enable_indicator
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).streaming.enable_indicator
     }
 
     pub fn set_streaming_enable_indicator(&self, enable: bool) {
-        self.config.lock().unwrap().streaming.enable_indicator = enable;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).streaming.enable_indicator = enable;
     }
 
     pub fn streaming_post_process_mode(&self) -> String {
-        self.config.lock().unwrap().streaming.post_process_mode.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).streaming.post_process_mode.clone()
     }
 
     pub fn set_streaming_post_process_mode(&self, mode: String) {
-        self.config.lock().unwrap().streaming.post_process_mode = mode;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).streaming.post_process_mode = mode;
     }
 
     pub fn get_api_url(&self) -> String {
-        let cfg = self.config.lock().unwrap();
+        let cfg = self.config.lock().unwrap_or_else(|e| e.into_inner());
         let model = if cfg.model_selection.batch_model.is_empty() {
             cfg.basic.model_name.clone()
         } else {
@@ -1503,7 +1503,7 @@ impl ConfigManager {
     }
 
     pub fn set_api_url(&self, url: String) {
-        let mut cfg = self.config.lock().unwrap();
+        let mut cfg = self.config.lock().unwrap_or_else(|e| e.into_inner());
         if cfg.basic.model_name == MODEL_CUSTOM {
             cfg.model.custom_api_url = url;
         }
@@ -1514,7 +1514,7 @@ impl ConfigManager {
     }
 
     pub fn get_model_name(&self) -> String {
-        let cfg = self.config.lock().unwrap();
+        let cfg = self.config.lock().unwrap_or_else(|e| e.into_inner());
         let model = if cfg.model_selection.batch_model.is_empty() {
             cfg.basic.model_name.clone()
         } else {
@@ -1537,7 +1537,7 @@ impl ConfigManager {
     }
 
     pub fn set_model_name(&self, model: String) {
-        let mut cfg = self.config.lock().unwrap();
+        let mut cfg = self.config.lock().unwrap_or_else(|e| e.into_inner());
         match model.as_str() {
             MODEL_TELEAI | MODEL_SENSEVOICE | MODEL_WHISPER | MODEL_LOCAL_WHISPER => {
                 cfg.basic.model_name = model
@@ -1550,35 +1550,35 @@ impl ConfigManager {
     }
 
     pub fn local_whisper_model(&self) -> String {
-        self.config.lock().unwrap().model.local_whisper_model.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).model.local_whisper_model.clone()
     }
 
     pub fn set_local_whisper_model(&self, name: String) {
-        self.config.lock().unwrap().model.local_whisper_model = name;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).model.local_whisper_model = name;
     }
 
     pub fn local_whisper_threads(&self) -> u32 {
-        self.config.lock().unwrap().model.local_whisper_threads
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).model.local_whisper_threads
     }
 
     pub fn set_local_whisper_threads(&self, threads: u32) {
-        self.config.lock().unwrap().model.local_whisper_threads = threads;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).model.local_whisper_threads = threads;
     }
 
     pub fn local_whisper_greedy(&self) -> bool {
-        self.config.lock().unwrap().model.local_whisper_greedy
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).model.local_whisper_greedy
     }
 
     pub fn set_local_whisper_greedy(&self, greedy: bool) {
-        self.config.lock().unwrap().model.local_whisper_greedy = greedy;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).model.local_whisper_greedy = greedy;
     }
 
     pub fn local_whisper_no_fallback(&self) -> bool {
-        self.config.lock().unwrap().model.local_whisper_no_fallback
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).model.local_whisper_no_fallback
     }
 
     pub fn set_local_whisper_no_fallback(&self, no_fallback: bool) {
-        self.config.lock().unwrap().model.local_whisper_no_fallback = no_fallback;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).model.local_whisper_no_fallback = no_fallback;
     }
 
     pub fn local_whisper_detected_language(&self) -> String {
@@ -1590,15 +1590,15 @@ impl ConfigManager {
     }
 
     pub fn set_local_whisper_detected_language(&self, lang: String) {
-        self.config.lock().unwrap().model.local_whisper_detected_language = lang;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).model.local_whisper_detected_language = lang;
     }
 
     pub fn local_whisper_dir(&self) -> String {
-        self.config.lock().unwrap().model.local_whisper_dir.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).model.local_whisper_dir.clone()
     }
 
     pub fn set_local_whisper_dir(&self, path: String) {
-        self.config.lock().unwrap().model.local_whisper_dir = path;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).model.local_whisper_dir = path;
     }
 
     pub fn has_local_whisper_dir(&self) -> bool {
@@ -1606,35 +1606,35 @@ impl ConfigManager {
     }
 
     pub fn allow_emoji(&self) -> bool {
-        self.config.lock().unwrap().features.allow_emoji
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).features.allow_emoji
     }
 
     pub fn set_allow_emoji(&self, allow: bool) {
-        self.config.lock().unwrap().features.allow_emoji = allow;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).features.allow_emoji = allow;
     }
 
     pub fn allow_punctuation(&self) -> bool {
-        self.config.lock().unwrap().features.allow_punctuation
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).features.allow_punctuation
     }
 
     pub fn set_allow_punctuation(&self, allow: bool) {
-        self.config.lock().unwrap().features.allow_punctuation = allow;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).features.allow_punctuation = allow;
     }
 
     pub fn show_log(&self) -> bool {
-        self.config.lock().unwrap().basic.show_log
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).basic.show_log
     }
 
     pub fn set_show_log(&self, show: bool) {
-        self.config.lock().unwrap().basic.show_log = show;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).basic.show_log = show;
     }
 
     pub fn input_device(&self) -> String {
-        self.config.lock().unwrap().basic.input_device.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).basic.input_device.clone()
     }
 
     pub fn set_input_device(&self, name: String) {
-        self.config.lock().unwrap().basic.input_device = name;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).basic.input_device = name;
     }
 
     // ===== 音频采集偏好：返回「有效」值（考虑 Profile 覆盖）=====
@@ -1642,7 +1642,7 @@ impl ConfigManager {
     /// 解析得到「生效」的音频采集参数（Profile 会覆盖单项，除 custom 外）。
     /// 返回 (downmix, sample_fmt, sample_rate, channels)。
     pub fn effective_audio_prefs(&self) -> (String, String, String, String) {
-        let cfg = self.config.lock().unwrap();
+        let cfg = self.config.lock().unwrap_or_else(|e| e.into_inner());
         let b = &cfg.basic;
         let profile = b.audio_profile.as_str();
         let (mut dm, mut sf, mut sr, mut ch) = (
@@ -1672,57 +1672,57 @@ impl ConfigManager {
     }
 
     pub fn audio_profile(&self) -> String {
-        self.config.lock().unwrap().basic.audio_profile.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).basic.audio_profile.clone()
     }
     pub fn set_audio_profile(&self, v: String) {
-        self.config.lock().unwrap().basic.audio_profile = v;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).basic.audio_profile = v;
     }
     pub fn audio_downmix(&self) -> String {
-        self.config.lock().unwrap().basic.audio_downmix.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).basic.audio_downmix.clone()
     }
     pub fn set_audio_downmix(&self, v: String) {
-        self.config.lock().unwrap().basic.audio_downmix = v;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).basic.audio_downmix = v;
     }
     pub fn audio_sample_format(&self) -> String {
-        self.config.lock().unwrap().basic.audio_sample_format.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).basic.audio_sample_format.clone()
     }
     pub fn set_audio_sample_format(&self, v: String) {
-        self.config.lock().unwrap().basic.audio_sample_format = v;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).basic.audio_sample_format = v;
     }
     pub fn audio_sample_rate(&self) -> String {
-        self.config.lock().unwrap().basic.audio_sample_rate.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).basic.audio_sample_rate.clone()
     }
     pub fn set_audio_sample_rate(&self, v: String) {
-        self.config.lock().unwrap().basic.audio_sample_rate = v;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).basic.audio_sample_rate = v;
     }
     pub fn audio_channels(&self) -> String {
-        self.config.lock().unwrap().basic.audio_channels.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).basic.audio_channels.clone()
     }
     pub fn set_audio_channels(&self, v: String) {
-        self.config.lock().unwrap().basic.audio_channels = v;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).basic.audio_channels = v;
     }
 
     // ===== 实时字幕（v3） =====
 
     pub fn subtitle_input_device(&self) -> String {
-        self.config.lock().unwrap().subtitle.input_device.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).subtitle.input_device.clone()
     }
 
     pub fn set_subtitle_input_device(&self, name: String) {
-        self.config.lock().unwrap().subtitle.input_device = name;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).subtitle.input_device = name;
     }
 
     pub fn subtitle_audio_source(&self) -> String {
-        self.config.lock().unwrap().subtitle.audio_source.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).subtitle.audio_source.clone()
     }
 
     pub fn get_subtitle_windows(&self) -> Vec<SubtitleWindow> {
-        self.config.lock().unwrap().subtitle.windows.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).subtitle.windows.clone()
     }
 
     /// 新增字幕窗口（复制当前窗口），返回新窗口 ID
     pub fn add_subtitle_window(&self) -> Result<String, String> {
-        let mut cfg = self.config.lock().unwrap();
+        let mut cfg = self.config.lock().unwrap_or_else(|e| e.into_inner());
         let base = cfg.subtitle.windows.first().cloned().unwrap_or_default();
         let id = format!("w_{}", uuid::Uuid::new_v4().simple());
         let mut win = base;
@@ -1738,7 +1738,7 @@ impl ConfigManager {
 
     /// 复制指定窗口，返回新窗口 ID
     pub fn duplicate_subtitle_window(&self, window_id: &str) -> Result<String, String> {
-        let mut cfg = self.config.lock().unwrap();
+        let mut cfg = self.config.lock().unwrap_or_else(|e| e.into_inner());
         let base = cfg
             .subtitle
             .windows
@@ -1763,7 +1763,7 @@ impl ConfigManager {
         if window_id == PRIMARY_WINDOW_ID {
             return Err("默认字幕窗口不可删除".to_string());
         }
-        let mut cfg = self.config.lock().unwrap();
+        let mut cfg = self.config.lock().unwrap_or_else(|e| e.into_inner());
         let before = cfg.subtitle.windows.len();
         cfg.subtitle
             .windows
@@ -1784,7 +1784,7 @@ impl ConfigManager {
         width: u32,
         height: u32,
     ) {
-        let mut cfg = self.config.lock().unwrap();
+        let mut cfg = self.config.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(w) = cfg.subtitle.windows.iter_mut().find(|w| w.id == window_id) {
             w.x = x;
             w.y = y;
@@ -1795,7 +1795,7 @@ impl ConfigManager {
 
     /// 窗口关闭时停用窗口
     pub fn set_subtitle_window_enabled(&self, window_id: &str, enabled: bool) {
-        let mut cfg = self.config.lock().unwrap();
+        let mut cfg = self.config.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(w) = cfg.subtitle.windows.iter_mut().find(|w| w.id == window_id) {
             w.enabled = enabled;
         }
@@ -1803,7 +1803,7 @@ impl ConfigManager {
 
     /// 窗口控制开关（置顶/穿透/OBS 兼容/自适应）
     pub fn set_subtitle_window_flag(&self, window_id: &str, flag: &str, value: bool) {
-        let mut cfg = self.config.lock().unwrap();
+        let mut cfg = self.config.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(w) = cfg.subtitle.windows.iter_mut().find(|w| w.id == window_id) {
             match flag {
                 "always_on_top" => w.always_on_top = value,
@@ -1818,138 +1818,138 @@ impl ConfigManager {
     // ===== 同声传译 LLM 配置（全局共享） =====
 
     pub fn subtitle_translation_llm_api_url(&self) -> String {
-        self.config.lock().unwrap().subtitle.translation_llm.api_url.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).subtitle.translation_llm.api_url.clone()
     }
 
     pub fn subtitle_translation_llm_api_key(&self) -> String {
-        self.config.lock().unwrap().subtitle.translation_llm.api_key.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).subtitle.translation_llm.api_key.clone()
     }
 
     pub fn subtitle_translation_llm_model(&self) -> String {
-        self.config.lock().unwrap().subtitle.translation_llm.model.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).subtitle.translation_llm.model.clone()
     }
 
 
     pub fn output_mode(&self) -> String {
-        self.config.lock().unwrap().basic.output_mode.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).basic.output_mode.clone()
     }
 
     pub fn set_output_mode(&self, mode: String) {
-        self.config.lock().unwrap().basic.output_mode = mode;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).basic.output_mode = mode;
     }
 
     pub fn autostart_enabled(&self) -> bool {
-        self.config.lock().unwrap().basic.autostart
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).basic.autostart
     }
 
     pub fn set_autostart_enabled(&self, enabled: bool) {
-        self.config.lock().unwrap().basic.autostart = enabled;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).basic.autostart = enabled;
     }
 
     pub fn hotkey(&self) -> u32 {
-        self.config.lock().unwrap().basic.hotkey
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).basic.hotkey
     }
 
     pub fn set_hotkey(&self, vk: u32) {
-        self.config.lock().unwrap().basic.hotkey = vk;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).basic.hotkey = vk;
     }
 
     pub fn enable_indicator(&self) -> bool {
-        self.config.lock().unwrap().features.enable_indicator
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).features.enable_indicator
     }
 
     pub fn set_enable_indicator(&self, enable: bool) {
-        self.config.lock().unwrap().features.enable_indicator = enable;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).features.enable_indicator = enable;
     }
 
     /// 是否启用增强后处理链（PostProcessorChain + TextFormatter）。默认 false。
     pub fn enable_post_processor(&self) -> bool {
-        self.config.lock().unwrap().features.enable_post_processor
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).features.enable_post_processor
     }
 
     pub fn set_enable_post_processor(&self, enable: bool) {
-        self.config.lock().unwrap().features.enable_post_processor = enable;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).features.enable_post_processor = enable;
     }
 
     /// 是否启用 LLM 智能后处理校对。默认 false。
     pub fn llm_post_enable(&self) -> bool {
-        self.config.lock().unwrap().llm_post.enable
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).llm_post.enable
     }
 
     pub fn set_llm_post_enable(&self, enable: bool) {
-        self.config.lock().unwrap().llm_post.enable = enable;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).llm_post.enable = enable;
     }
 
     pub fn llm_post_api_url(&self) -> String {
-        self.config.lock().unwrap().llm_post.api_url.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).llm_post.api_url.clone()
     }
 
     pub fn set_llm_post_api_url(&self, url: String) {
-        self.config.lock().unwrap().llm_post.api_url = url;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).llm_post.api_url = url;
     }
 
     pub fn llm_post_api_key(&self) -> String {
-        self.config.lock().unwrap().llm_post.api_key.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).llm_post.api_key.clone()
     }
 
     pub fn set_llm_post_api_key(&self, key: String) {
-        self.config.lock().unwrap().llm_post.api_key = key;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).llm_post.api_key = key;
     }
 
     pub fn llm_post_model(&self) -> String {
-        self.config.lock().unwrap().llm_post.model.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).llm_post.model.clone()
     }
 
     pub fn set_llm_post_model(&self, model: String) {
-        self.config.lock().unwrap().llm_post.model = model;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).llm_post.model = model;
     }
 
     pub fn llm_post_system_prompt(&self) -> String {
-        self.config.lock().unwrap().llm_post.system_prompt.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).llm_post.system_prompt.clone()
     }
 
     pub fn set_llm_post_system_prompt(&self, prompt: String) {
-        self.config.lock().unwrap().llm_post.system_prompt = prompt;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).llm_post.system_prompt = prompt;
     }
 
     pub fn last_check_time(&self) -> u64 {
-        self.config.lock().unwrap().update.last_check_time
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).update.last_check_time
     }
 
     pub fn set_last_check_time(&self, time: u64) {
-        self.config.lock().unwrap().update.last_check_time = time;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).update.last_check_time = time;
     }
 
     pub fn ignored_version(&self) -> String {
-        self.config.lock().unwrap().update.ignored_version.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).update.ignored_version.clone()
     }
 
     pub fn set_ignored_version(&self, version: String) {
-        self.config.lock().unwrap().update.ignored_version = version;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).update.ignored_version = version;
     }
 
     pub fn output_language(&self) -> String {
-        self.config.lock().unwrap().basic.output_language.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).basic.output_language.clone()
     }
 
     pub fn set_output_language(&self, lang: String) {
-        self.config.lock().unwrap().basic.output_language = lang;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).basic.output_language = lang;
     }
 
     pub fn trigger_mode(&self) -> String {
-        self.config.lock().unwrap().advanced.trigger_mode.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).advanced.trigger_mode.clone()
     }
 
     pub fn set_trigger_mode(&self, mode: String) {
-        self.config.lock().unwrap().advanced.trigger_mode = mode;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).advanced.trigger_mode = mode;
     }
 
     pub fn dictation_mode(&self) -> String {
-        self.config.lock().unwrap().basic.dictation_mode.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).basic.dictation_mode.clone()
     }
 
     pub fn set_dictation_mode(&self, mode: String) {
-        self.config.lock().unwrap().basic.dictation_mode = mode;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).basic.dictation_mode = mode;
     }
 
     pub fn is_stream_mode(&self) -> bool {
@@ -1967,83 +1967,83 @@ impl ConfigManager {
     }
 
     pub fn indicator_fade_duration(&self) -> u64 {
-        self.config.lock().unwrap().indicator.fade_duration
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).indicator.fade_duration
     }
 
     pub fn set_indicator_fade_duration(&self, duration: u64) {
-        self.config.lock().unwrap().indicator.fade_duration = duration;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).indicator.fade_duration = duration;
     }
 
     pub fn indicator_error_duration(&self) -> u64 {
-        self.config.lock().unwrap().indicator.error_duration
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).indicator.error_duration
     }
 
     pub fn set_indicator_error_duration(&self, duration: u64) {
-        self.config.lock().unwrap().indicator.error_duration = duration;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).indicator.error_duration = duration;
     }
 
     pub fn indicator_success_duration(&self) -> u64 {
-        self.config.lock().unwrap().indicator.success_duration
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).indicator.success_duration
     }
 
     pub fn set_indicator_success_duration(&self, duration: u64) {
-        self.config.lock().unwrap().indicator.success_duration = duration;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).indicator.success_duration = duration;
     }
 
     pub fn subtitle_hotkey(&self) -> u32 {
-        self.config.lock().unwrap().subtitle.hotkey
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).subtitle.hotkey
     }
 
     pub fn vad_sensitivity(&self) -> f32 {
-        self.config.lock().unwrap().vad.vad_sensitivity
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).vad.vad_sensitivity
     }
 
     pub fn set_vad_sensitivity(&self, sensitivity: f32) {
-        self.config.lock().unwrap().vad.vad_sensitivity = sensitivity.clamp(0.0, 1.0);
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).vad.vad_sensitivity = sensitivity.clamp(0.0, 1.0);
     }
 
     pub fn vad_silence_duration_ms(&self) -> u32 {
-        self.config.lock().unwrap().vad.vad_silence_duration_ms
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).vad.vad_silence_duration_ms
     }
 
     pub fn set_vad_silence_duration_ms(&self, duration: u32) {
-        self.config.lock().unwrap().vad.vad_silence_duration_ms = duration;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).vad.vad_silence_duration_ms = duration;
     }
 
     pub fn batch_model(&self) -> String {
-        self.config.lock().unwrap().model_selection.batch_model.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).model_selection.batch_model.clone()
     }
 
     pub fn set_batch_model(&self, model: String) {
-        self.config.lock().unwrap().model_selection.batch_model = model;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).model_selection.batch_model = model;
     }
 
     pub fn stream_model(&self) -> String {
-        self.config.lock().unwrap().model_selection.stream_model.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).model_selection.stream_model.clone()
     }
 
     pub fn set_stream_model(&self, model: String) {
-        self.config.lock().unwrap().model_selection.stream_model = model;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).model_selection.stream_model = model;
     }
 
     pub fn subtitle_model(&self) -> String {
-        self.config.lock().unwrap().model_selection.subtitle_model.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).model_selection.subtitle_model.clone()
     }
 
     pub fn set_subtitle_model(&self, model: String) {
-        self.config.lock().unwrap().model_selection.subtitle_model = model;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).model_selection.subtitle_model = model;
     }
 
     pub fn theme(&self) -> String {
-        self.config.lock().unwrap().theme.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).theme.clone()
     }
 
     pub fn set_theme(&self, theme: String) {
-        self.config.lock().unwrap().theme = theme;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).theme = theme;
     }
 
     pub fn reset_ai_config(&self) {
-        let mut cfg = self.config.lock().unwrap();
+        let mut cfg = self.config.lock().unwrap_or_else(|e| e.into_inner());
         cfg.basic.model_name = MODEL_SENSEVOICE.to_string();
         cfg.model = ModelConfig::default();
         cfg.advanced.trigger_mode = AdvancedConfig::default().trigger_mode;
@@ -2051,10 +2051,28 @@ impl ConfigManager {
     }
 
     pub fn save(&self) -> anyhow::Result<()> {
-        let config = self.config.lock().unwrap();
-        let json = serde_json::to_string_pretty(&*config)?;
-        fs::write(&self.config_path, json)?;
-        Ok(())
+        // 锁内仅做序列化，锁外写盘：磁盘 IO 卡顿不再阻塞热键线程 /
+        // 字幕渲染等所有配置读取方
+        let json = {
+            let config = self.config.lock().unwrap_or_else(|e| e.into_inner());
+            serde_json::to_string_pretty(&*config)?
+        };
+        // 原子写：先写临时文件再 rename，避免崩溃/断电留下半截 settings.json
+        let tmp_path = self.config_path.with_extension("json.tmp");
+        match fs::write(&tmp_path, json).and_then(|_| fs::rename(&tmp_path, &self.config_path)) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                // rename 失败（如目标被占用）退回覆盖写，至少保住数据
+                log::warn!("[config] 原子写 rename 失败（{}），退回直接覆盖", e);
+                if let Err(cleanup_err) = fs::remove_file(&tmp_path) {
+                    log::debug!("[config] 清理临时文件失败: {}", cleanup_err);
+                }
+                let config = self.config.lock().unwrap_or_else(|e| e.into_inner());
+                let json = serde_json::to_string_pretty(&*config)?;
+                fs::write(&self.config_path, json)?;
+                Ok(())
+            }
+        }
     }
 
     pub fn save_or_notify(&self) -> bool {
@@ -2079,20 +2097,20 @@ impl ConfigManager {
     }
 
     pub fn get_custom_model_name(&self) -> String {
-        self.config.lock().unwrap().model.custom_model_name.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).model.custom_model_name.clone()
     }
 
     pub fn set_custom_model_name(&self, name: String) {
-        let mut cfg = self.config.lock().unwrap();
+        let mut cfg = self.config.lock().unwrap_or_else(|e| e.into_inner());
         cfg.model.custom_model_name = name;
     }
 
     pub fn tts_config(&self) -> TtsConfig {
-        self.config.lock().unwrap().tts.clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).tts.clone()
     }
 
     pub fn set_tts_config(&self, tts: TtsConfig) {
-        let mut cfg = self.config.lock().unwrap();
+        let mut cfg = self.config.lock().unwrap_or_else(|e| e.into_inner());
         cfg.tts = tts;
     }
 

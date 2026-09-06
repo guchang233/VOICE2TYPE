@@ -8,6 +8,9 @@ mod post_process;
 pub(crate) mod protocol;
 pub(crate) mod session;
 
-pub use audio::{pick_best_input_config, push_samples_mono, start_capture, start_capture_with_prefs};
+pub use audio::{
+    pick_best_input_config, push_samples_mono, push_samples_mono_converted, push_samples_mono_ref,
+    start_capture, start_capture_with_prefs,
+};
 pub use client::StreamingAsrClient;
 pub use protocol::AsrResponse;
