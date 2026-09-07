@@ -4,7 +4,7 @@
   "body": "Voice2Type 桌面版自动构建发布。\r\n\r\n## 安装说明\r\n\r\n下载下方的 `Voice2Type_v*.exe` 文件即可直接运行，无需安装。\r\n\r\n**系统要求：**\r\n- Windows 10/11 (x86_64)\r\n- WebView2 运行时（Windows 11 已内置，Windows 10 可能需要安装）\r\n\r\n## 特性\r\n\r\n- 基于 Tauri 2.0 架构，蓝色主题 UI\r\n- 支持流式语音识别与整段识别\r\n- 实时字幕功能，可自定义样式\r\n- 支持 OBS 捕捉\r\n\r\n\r\n**Full Changelog**: https://github.com/guchang233/VOICE2TYPE/compare/v0.2.0...v0.2.1",
   "prerelease": false,
   "draft": false,
-  "published_at": "2026-08-26T18:48:25Z",
+  "published_at": "2026-08-26T19:20:10Z",
   "assets": [
     {
       "name": "Voice2Type_v0.2.1_x86_64.exe",
