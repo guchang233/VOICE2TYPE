@@ -1,216 +1,191 @@
-//! 会话实时转录：句段记录、译文同步、TXT/SRT/MD 序列化
+//! 会话转录：定稿字幕行按 ID 记录，译文按「ID + 语言」回填，导出 TXT / SRT / Markdown。
+//!
+//! 时间来自切分器：起点 = 这一行开始出现文字的时刻，终点 = 定稿时刻，
+//! SRT 时间轴与实际说话时间一致（不再用「下一句起点」估算）。
 
-use std::time::Instant;
+use std::collections::BTreeMap;
 
 use serde::Serialize;
 
-/// 转录句段上限：防止超长会话导致内存无限增长
-const MAX_TRANSCRIPT_SEGMENTS: usize = 2000;
+use crate::subtitle::state::Caption;
 
-/// 一条转录句段（已定稿的完整句段）
+/// 转录条数上限：超长会话保持内存有界
+const MAX_ENTRIES: usize = 5000;
+/// SRT 单条最短显示时长
+const MIN_SRT_MS: u64 = 800;
+
 #[derive(Debug, Clone, Serialize)]
-pub struct TranscriptSegment {
-    /// 序号（从 1 开始）
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptEntry {
+    /// 字幕 ID（与状态板一致，译文据此回填）
+    pub id: u64,
+    /// 会话内序号（从 1 开始）
     pub index: u64,
-    /// 会话内起始时间（毫秒）
     pub start_ms: u64,
-    /// 音源："A"（主音源）| "B"（双源模式的麦克风副音源）
+    pub end_ms: u64,
+    /// "A" 主音源 | "B" 同传麦克风
     pub source: String,
-    /// 说话人标签
     pub speaker: String,
-    /// 原文
     pub text: String,
-    /// 译文（由主场景翻译流水线同步，可能为空）
-    pub translation: String,
+    /// 目标语言 → 译文
+    pub translations: BTreeMap<String, String>,
 }
 
-/// 会话转录存储：内存中累积本次会话的定稿句段
+#[derive(Debug, Default)]
 pub struct Transcript {
-    started_at: Instant,
-    segments: Vec<TranscriptSegment>,
+    entries: Vec<TranscriptEntry>,
     next_index: u64,
-}
-
-impl Default for Transcript {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl Transcript {
     pub fn new() -> Self {
-        Self {
-            started_at: Instant::now(),
-            segments: Vec::new(),
-            next_index: 1,
-        }
+        Self { entries: Vec::new(), next_index: 1 }
     }
 
-    /// 追加一条句段
-    pub fn push(&mut self, source: &str, speaker: &str, text: &str) -> TranscriptSegment {
-        let seg = TranscriptSegment {
+    pub fn push(&mut self, caption: &Caption, speaker: &str) -> TranscriptEntry {
+        let entry = TranscriptEntry {
+            id: caption.id,
             index: self.next_index,
-            start_ms: self.started_at.elapsed().as_millis() as u64,
-            source: source.to_string(),
+            start_ms: caption.start_ms,
+            end_ms: caption.end_ms,
+            source: caption.source.tag().to_string(),
             speaker: speaker.to_string(),
-            text: text.to_string(),
-            translation: String::new(),
+            text: caption.text.clone(),
+            translations: BTreeMap::new(),
         };
         self.next_index += 1;
-        self.segments.push(seg.clone());
-        // 超上限时丢弃最旧句段，保持内存有界
-        if self.segments.len() > MAX_TRANSCRIPT_SEGMENTS {
-            let excess = self.segments.len() - MAX_TRANSCRIPT_SEGMENTS;
-            self.segments.drain(..excess);
+        self.entries.push(entry.clone());
+        if self.entries.len() > MAX_ENTRIES {
+            let excess = self.entries.len() - MAX_ENTRIES;
+            self.entries.drain(..excess);
         }
-        seg
+        entry
     }
 
-    /// 用主场景翻译流水线的历史译文按位置同步 A 源句段的译文。
-    /// 返回本次发生变化的 (句段序号, 新译文) 列表（供增量推送）。
-    pub fn sync_translations(&mut self, translation_history: &[String]) -> Vec<(u64, String)> {
-        let mut changed = Vec::new();
-        let mut a_idx = 0usize;
-        for seg in self.segments.iter_mut() {
-            if seg.source != "A" {
-                continue;
+    /// 回填译文；返回是否找到该行
+    pub fn set_translation(&mut self, id: u64, lang: &str, text: &str) -> bool {
+        // 新译文几乎总是落在末尾附近，倒序查找
+        match self.entries.iter_mut().rev().find(|e| e.id == id) {
+            Some(e) => {
+                e.translations.insert(lang.to_string(), text.to_string());
+                true
             }
-            if a_idx < translation_history.len() {
-                let t = &translation_history[a_idx];
-                if seg.translation != *t {
-                    seg.translation = t.clone();
-                    changed.push((seg.index, t.clone()));
-                }
-            }
-            a_idx += 1;
+            None => false,
         }
-        changed
     }
 
-    pub fn segments(&self) -> &[TranscriptSegment] {
-        &self.segments
+    pub fn entries(&self) -> &[TranscriptEntry] {
+        &self.entries
     }
 
     pub fn is_empty(&self) -> bool {
-        self.segments.is_empty()
+        self.entries.is_empty()
     }
 
     pub fn len(&self) -> usize {
-        self.segments.len()
+        self.entries.len()
     }
 
-    /// 每条句段估算时长（下一句段起点 - 本句段起点；末句默认 3000ms）
-    fn segment_duration_ms(&self, idx: usize) -> u64 {
-        let cur = self.segments[idx].start_ms;
-        let next = self
-            .segments
-            .get(idx + 1)
-            .map(|s| s.start_ms)
-            .unwrap_or(cur + 3000);
-        next.saturating_sub(cur).max(1000)
-    }
-
-    /// 序列化为 SRT 字幕格式
+    /// SRT：起止时间取实际说话时间，过短的条目延长到下一条起点前
     pub fn to_srt(&self) -> String {
         let mut out = String::new();
-        for (i, seg) in self.segments.iter().enumerate() {
-            let start = format_srt_time(seg.start_ms);
-            let end = format_srt_time(seg.start_ms + self.segment_duration_ms(i));
-            let line = if seg.translation.is_empty() {
-                format_srt_line(&seg.speaker, &seg.text)
-            } else {
-                format!("{}\n{}", format_srt_line(&seg.speaker, &seg.text), seg.translation)
-            };
-            out.push_str(&format!("{}\n{} --> {}\n{}\n\n", i + 1, start, end, line));
+        for (i, e) in self.entries.iter().enumerate() {
+            let next_start = self.entries.get(i + 1).map(|n| n.start_ms).unwrap_or(u64::MAX);
+            let mut end = e.end_ms.max(e.start_ms + MIN_SRT_MS);
+            if end > next_start && next_start > e.start_ms {
+                end = next_start.max(e.start_ms + 1);
+            }
+            let mut body = with_speaker(&e.speaker, &e.text);
+            for t in e.translations.values().filter(|t| !t.is_empty()) {
+                body.push('\n');
+                body.push_str(t);
+            }
+            out.push_str(&format!("{}\n{} --> {}\n{}\n\n", i + 1, srt_time(e.start_ms), srt_time(end), body));
         }
         out
     }
 
-    /// 序列化为纯文本格式
     pub fn to_txt(&self) -> String {
         let mut out = String::new();
-        for seg in &self.segments {
-            let time = format_mmss(seg.start_ms);
-            let speaker = if seg.speaker.is_empty() {
-                String::new()
-            } else {
-                format!("{}: ", seg.speaker)
-            };
-            out.push_str(&format!("[{}] {}{}\n", time, speaker, seg.text));
-            if !seg.translation.is_empty() {
-                out.push_str(&format!("[{}] 译: {}\n", time, seg.translation));
+        for e in &self.entries {
+            out.push_str(&format!("[{}] {}\n", mmss(e.start_ms), with_speaker_colon(&e.speaker, &e.text)));
+            for (lang, t) in e.translations.iter().filter(|(_, t)| !t.is_empty()) {
+                out.push_str(&format!("[{}] {}: {}\n", mmss(e.start_ms), lang, t));
             }
         }
         out
     }
 
-    /// 序列化为 Markdown 格式
     pub fn to_md(&self) -> String {
         let mut out = String::from("# 字幕转录记录\n\n");
-        for seg in &self.segments {
-            let time = format_mmss(seg.start_ms);
-            let speaker = if seg.speaker.is_empty() {
-                String::new()
-            } else {
-                format!("**{}** ", seg.speaker)
-            };
-            out.push_str(&format!("- `[{}]` {}{}\n", time, speaker, seg.text));
-            if !seg.translation.is_empty() {
-                out.push_str(&format!("  - 译: {}\n", seg.translation));
+        for e in &self.entries {
+            let speaker = if e.speaker.is_empty() { String::new() } else { format!("**{}** ", e.speaker) };
+            out.push_str(&format!("- `[{}]` {}{}\n", mmss(e.start_ms), speaker, e.text));
+            for (lang, t) in e.translations.iter().filter(|(_, t)| !t.is_empty()) {
+                out.push_str(&format!("  - {}: {}\n", lang, t));
             }
         }
         out
     }
 }
 
-fn format_mmss(ms: u64) -> String {
-    let total_secs = ms / 1000;
-    format!("{:02}:{:02}", total_secs / 60, total_secs % 60)
+fn with_speaker(speaker: &str, text: &str) -> String {
+    if speaker.is_empty() { text.to_string() } else { format!("[{}] {}", speaker, text) }
 }
 
-fn format_srt_time(ms: u64) -> String {
-    let h = ms / 3_600_000;
-    let m = (ms / 60_000) % 60;
-    let s = (ms / 1000) % 60;
-    let millis = ms % 1000;
-    format!("{:02}:{:02}:{:02},{:03}", h, m, s, millis)
+fn with_speaker_colon(speaker: &str, text: &str) -> String {
+    if speaker.is_empty() { text.to_string() } else { format!("{}: {}", speaker, text) }
 }
 
-fn format_srt_line(speaker: &str, text: &str) -> String {
-    if speaker.is_empty() {
-        text.to_string()
+fn mmss(ms: u64) -> String {
+    let s = ms / 1000;
+    if s >= 3600 {
+        format!("{}:{:02}:{:02}", s / 3600, (s / 60) % 60, s % 60)
     } else {
-        format!("[{}] {}", speaker, text)
+        format!("{:02}:{:02}", s / 60, s % 60)
     }
+}
+
+fn srt_time(ms: u64) -> String {
+    format!("{:02}:{:02}:{:02},{:03}", ms / 3_600_000, (ms / 60_000) % 60, (ms / 1000) % 60, ms % 1000)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::subtitle::state::Source;
+
+    fn cap(id: u64, source: Source, text: &str, s: u64, e: u64) -> Caption {
+        Caption { id, source, text: text.into(), start_ms: s, end_ms: e }
+    }
 
     #[test]
-    fn transcript_serialization_and_translation_sync() {
+    fn translations_attach_by_id_not_position() {
         let mut tr = Transcript::new();
-        tr.push("A", "说话人1", "大家好。");
-        tr.push("B", "麦克风", "收到。");
-        // 译文按位置只同步 A 源句段
-        tr.sync_translations(&["Hello everyone.".to_string()]);
+        for i in 1..=12u64 {
+            tr.push(&cap(i, Source::A, &format!("第{}句。", i), i * 1000, i * 1000 + 500), "我");
+        }
+        // 乱序、隔很多行之后到达的译文仍挂到正确的行上
+        assert!(tr.set_translation(11, "英文", "Sentence 11."));
+        assert!(tr.set_translation(2, "英文", "Sentence 2."));
+        assert!(!tr.set_translation(99, "英文", "x"));
+        assert_eq!(tr.entries()[10].translations["英文"], "Sentence 11.");
+        assert_eq!(tr.entries()[1].translations["英文"], "Sentence 2.");
+        assert!(tr.entries()[0].translations.is_empty());
+    }
 
-        assert_eq!(tr.segments()[0].translation, "Hello everyone.");
-        assert_eq!(tr.segments()[1].translation, "");
-
+    #[test]
+    fn srt_uses_real_times_and_avoids_overlap() {
+        let mut tr = Transcript::new();
+        tr.push(&cap(1, Source::A, "大家好。", 1000, 1200), "对方");
+        tr.push(&cap(2, Source::B, "收到。", 1500, 2600), "我");
+        tr.set_translation(1, "英文", "Hello everyone.");
         let srt = tr.to_srt();
-        assert!(srt.contains("-->"));
-        assert!(srt.contains("[说话人1] 大家好。"));
-        assert!(srt.contains("Hello everyone."));
-        assert!(srt.contains("00:00:0"));
-
-        let txt = tr.to_txt();
-        assert!(txt.contains("译: Hello everyone."));
-        assert!(txt.contains("麦克风: 收到。"));
-
-        let md = tr.to_md();
-        assert!(md.starts_with("# 字幕转录记录"));
-        assert!(md.contains("`[00:00]`"));
+        // 第一条过短（200ms）延长，但不越过下一条起点 1500
+        assert!(srt.contains("00:00:01,000 --> 00:00:01,500"), "{}", srt);
+        assert!(srt.contains("[对方] 大家好。\nHello everyone."));
+        assert!(srt.contains("00:00:01,500 --> 00:00:02,600"));
+        assert!(tr.to_txt().contains("[00:01] 英文: Hello everyone."));
+        assert!(tr.to_md().starts_with("# 字幕转录记录"));
     }
 }

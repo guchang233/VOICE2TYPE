@@ -1,302 +1,280 @@
-//! 字幕会话：音源 → 豆包流式 ASR → 快照更新 → 信号。
+//! 字幕会话：音源 → 豆包流式 ASR → 切分定稿 → 状态板 / 转录 / 同传 → 信号。
 //!
-//! 与旧实现的本质差异：**没有逐帧广播，也没有 80ms 合并发射器**。
-//! 任何状态变化由 [`SharedState::bump`] 触发一次轻量信号（只含类型+版本号），
-//! 字幕窗口收到信号后按需拉取快照 —— 信号-拉取协议。
+//! 每帧：切分器产出定稿行 → 状态板分配 ID → 写转录并通知主界面 → A 源交给同传；
+//! 当前行变化交给同声预览。每 250ms 一次节拍，让无标点的尾句按静止时长定稿。
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use anyhow::Result;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
 
-use crate::config::{ConfigManager, STREAM_MODEL_DOUBAO, PRIMARY_WINDOW_ID};
+use crate::config::{ConfigManager, SubtitleWindow, STREAM_MODEL_DOUBAO};
 use crate::streaming::AsrResponse;
-use crate::subtitle::audio::{start_source, SourceKind};
-use crate::subtitle::state::{SharedState, Source};
+use crate::subtitle::audio::{start_source, AsrSource, SourceKind};
+use crate::subtitle::captions::{CaptionStream, Piece};
+use crate::subtitle::state::{Caption, SharedState, Source};
 use crate::subtitle::transcript::Transcript;
-use crate::subtitle::translate::TranslationHub;
+use crate::subtitle::translate::{TranslationSink, Translator};
 
-/// 运行字幕会话（单源或双音源同传）
-pub async fn run_session(
-    app: AppHandle,
-    config: Arc<ConfigManager>,
-    state: Arc<SharedState>,
-    hub: Arc<TranslationHub>,
-    running: Arc<AtomicBool>,
-    stop_rx: &mut mpsc::Receiver<()>,
-    transcript: Arc<StdMutex<Transcript>>,
-) -> Result<(), String> {
-    // ===== 前置校验 =====
-    if config.subtitle_model() != STREAM_MODEL_DOUBAO {
-        {
-            let mut snap = state.write();
-            snap.reset(false, "请将字幕引擎设置为豆包云端流式识别");
-        }
-        state.bump();
-        wait_until_stop(&running, stop_rx).await;
-        return Ok(());
-    }
-    if config.get_doubao_api_key().is_empty() {
-        {
-            let mut snap = state.write();
-            snap.reset(false, "请先配置豆包 API Key");
-        }
-        state.bump();
-        wait_until_stop(&running, stop_rx).await;
-        return Ok(());
-    }
+/// 连续识别错误熔断阈值
+const MAX_CONSEC_ASR_ERRORS: usize = 8;
+/// 切分节拍
+const TICK: Duration = Duration::from_millis(250);
+/// 会话结束时等待在途翻译的上限
+const DRAIN_TIMEOUT: Duration = Duration::from_millis(1500);
+/// 翻译附带的上文句数
+const CONTEXT_SENTENCES: usize = 2;
 
-    // 音源规划：dual = A 系统扬声器 + B 麦克风；system 单独模式 A 也走扬声器
-    let raw_source = config.subtitle_audio_source();
-    let dual = raw_source == "dual";
-    let a_kind = match raw_source.as_str() {
-        "system" | "dual" => SourceKind::System,
-        _ => SourceKind::Microphone,
+pub struct SessionCtx {
+    pub app: AppHandle,
+    pub config: Arc<ConfigManager>,
+    pub state: Arc<SharedState>,
+    pub transcript: Arc<StdMutex<Transcript>>,
+    pub running: Arc<AtomicBool>,
+    /// 本次会话启用的窗口（决定翻译语言）
+    pub windows: Vec<SubtitleWindow>,
+}
+
+/// 运行字幕会话（单源或同传双源），直到收到停止信号或熔断
+pub async fn run_session(ctx: SessionCtx, stop_rx: &mut mpsc::Receiver<()>) -> Result<(), String> {
+    let state = ctx.state.clone();
+
+    // ===== 前置校验：给出可操作的提示，并保持窗口显示直到用户停止 =====
+    let precheck = if ctx.config.subtitle_model() != STREAM_MODEL_DOUBAO {
+        Some("请在「设置 → 语音识别模型」中把字幕模型设为豆包（云端）")
+    } else if ctx.config.get_doubao_api_key().trim().is_empty() {
+        Some("请先在「设置 → API 密钥」中填写豆包 Key")
+    } else {
+        None
     };
-    let device = config.subtitle_input_device();
-
-    // ===== 初始状态 =====
-    {
-        let mut snap = state.write();
-        snap.reset(dual, "正在连接语音服务...");
+    if let Some(msg) = precheck {
+        state.write().reset(false, [String::new(), String::new()], msg);
+        state.bump();
+        wait_until_stop(&ctx.running, stop_rx).await;
+        return Ok(());
     }
+
+    // ===== 音源规划 =====
+    let raw_source = ctx.config.subtitle_audio_source();
+    let dual = raw_source == "dual";
+    let (a_kind, labels) = match raw_source.as_str() {
+        "dual" => (SourceKind::System, ["对方".to_string(), "我".to_string()]),
+        "system" => (SourceKind::System, ["系统声音".to_string(), String::new()]),
+        _ => (SourceKind::Microphone, ["麦克风".to_string(), String::new()]),
+    };
+    let device = ctx.config.subtitle_input_device();
+
+    state.write().reset(dual, labels.clone(), "正在连接语音服务…");
     state.bump();
 
-    // ===== 转录译文同步器：周期把主窗口译文历史写入转录 =====
-    let sync_task = {
-        let app_d = app.clone();
-        let state_d = state.clone();
-        let transcript_d = transcript.clone();
-        let running_d = running.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_millis(1000));
-            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            loop {
-                interval.tick().await;
-                if !running_d.load(Ordering::Relaxed) {
-                    break;
-                }
-                sync_transcript(&app_d, &transcript_d, &state_d);
+    // ===== 同传：译文落地 → 回填转录 + 通知主界面 =====
+    let sink: TranslationSink = {
+        let transcript = ctx.transcript.clone();
+        let app = ctx.app.clone();
+        Arc::new(move |id: u64, lang: &str, text: &str| {
+            let found = transcript.lock().unwrap_or_else(|e| e.into_inner()).set_translation(id, lang, text);
+            if found {
+                let _ = app.emit(
+                    "subtitle-transcript-updated",
+                    serde_json::json!({ "type": "translation", "id": id, "lang": lang, "text": text }),
+                );
             }
         })
     };
+    let translator = Translator::build(ctx.config.clone(), state.clone(), &ctx.windows, sink);
 
     // ===== 启动音源 =====
-    let mut source_a = start_source(&config, a_kind, &device, &running).await?;
-    let mut source_b = if dual {
-        Some(start_source(&config, SourceKind::Microphone, &device, &running).await?)
+    let mut source_a = match start_source(&ctx.config, a_kind, &device, &ctx.running).await {
+        Ok(s) => s,
+        Err(e) => return Err(e),
+    };
+    let mut source_b: Option<AsrSource> = if dual {
+        match start_source(&ctx.config, SourceKind::Microphone, &device, &ctx.running).await {
+            Ok(s) => Some(s),
+            Err(e) => {
+                source_a.finish().await;
+                return Err(e);
+            }
+        }
     } else {
         None
     };
 
     {
-        let mut snap = state.write();
-        snap.status = if dual {
-            "同传模式已就绪：系统声音→译文，麦克风→副字幕".to_string()
-        } else {
+        let mut b = state.write();
+        b.status = if dual {
+            "同传模式就绪：系统声音 → 原文与译文，麦克风 → 副字幕".to_string()
+        } else if translator.is_empty() {
             "实时字幕已就绪，请开始说话".to_string()
+        } else {
+            "实时字幕与同声传译已就绪，请开始说话".to_string()
         };
     }
     state.bump();
 
-    // ===== 消费循环 =====
-    let app_work = app.clone();
-    let state_work = state.clone();
-    let hub_work = hub.clone();
-    let transcript_work = transcript.clone();
-
-    // 错误熔断：识别服务连接死亡后（如服务端会话超时）音频泵会按节拍持续产出错误，
-    // 若只记日志不处理，字幕文字会永远冻结在最后一帧且日志刷屏。
-    // 连续 N 次错误即写入错误状态并自动结束会话，避免僵死状态。
-    const MAX_CONSEC_ASR_ERRORS: usize = 8;
-    let mut consec_err_a = 0usize;
-    let mut consec_err_b = 0usize;
+    let clock = Instant::now();
+    let now_ms = || clock.elapsed().as_millis() as u64;
+    let mut streams = [CaptionStream::new(), CaptionStream::new()];
+    let mut errors = [0usize; 2];
+    let mut ticker = tokio::time::interval(TICK);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
         tokio::select! {
-            _ = stop_rx.recv() => { break; }
-            _ = tokio::time::sleep(Duration::from_millis(300)) => {
-                if !running.load(Ordering::SeqCst) { break; }
-            }
-            msg_a = source_a.results.recv() => {
-                match msg_a {
-                    Some(Ok(resp)) => {
-                        consec_err_a = 0;
-                        handle_frame(Source::A, resp, &app_work, &state_work, &hub_work, &transcript_work).await;
-                        state_work.bump();
+            _ = stop_rx.recv() => break,
+            _ = ticker.tick() => {
+                if !ctx.running.load(Ordering::SeqCst) {
+                    break;
+                }
+                let t = now_ms();
+                let mut changed = false;
+                for source in [Source::A, Source::B] {
+                    let pieces = streams[source.idx()].tick(t);
+                    if !pieces.is_empty() {
+                        let live = streams[source.idx()].live();
+                        commit(&ctx, &translator, source, pieces, live);
+                        changed = true;
                     }
-                    Some(Err(e)) => {
-                        consec_err_a += 1;
-                        log::error!(
-                            "[字幕] A 源识别错误（{}/{}）: {}",
-                            consec_err_a,
-                            MAX_CONSEC_ASR_ERRORS,
-                            e
-                        );
-                        if consec_err_a >= MAX_CONSEC_ASR_ERRORS {
-                            trip_asr_breaker(&state_work, "主音源", &e.to_string()).await;
-                            break;
-                        }
-                    }
-                    None => {}
+                }
+                if changed {
+                    state.bump();
                 }
             }
-            msg_b = async {
+            msg = source_a.results.recv() => {
+                if !on_message(&ctx, &translator, Source::A, msg, &mut streams, &mut errors, now_ms()).await {
+                    break;
+                }
+            }
+            msg = async {
                 match source_b.as_mut() {
-                    Some(r) => r.results.recv().await,
+                    Some(s) => s.results.recv().await,
                     None => std::future::pending().await,
                 }
             } => {
-                match msg_b {
-                    Some(Ok(resp)) => {
-                        consec_err_b = 0;
-                        handle_frame(Source::B, resp, &app_work, &state_work, &hub_work, &transcript_work).await;
-                        state_work.bump();
-                    }
-                    Some(Err(e)) => {
-                        consec_err_b += 1;
-                        log::error!(
-                            "[字幕] B 源识别错误（{}/{}）: {}",
-                            consec_err_b,
-                            MAX_CONSEC_ASR_ERRORS,
-                            e
-                        );
-                        if consec_err_b >= MAX_CONSEC_ASR_ERRORS {
-                            trip_asr_breaker(&state_work, "副音源（麦克风）", &e.to_string()).await;
-                            break;
-                        }
-                    }
-                    None => {}
+                if !on_message(&ctx, &translator, Source::B, msg, &mut streams, &mut errors, now_ms()).await {
+                    break;
                 }
             }
         }
     }
 
-    // ===== 收尾 =====
+    // ===== 收尾：关闭音源 → 最后一句定稿 → 等译文落地 =====
     source_a.finish().await;
-    if let Some(rb) = source_b.as_mut() {
-        rb.finish().await;
+    if let Some(b) = source_b.as_mut() {
+        b.finish().await;
     }
-
-    running.store(false, Ordering::SeqCst);
-    sync_task.abort();
-
-    // 等待在途翻译任务落地（最多 ~800ms），补一次最终同步
-    tokio::time::sleep(Duration::from_millis(800)).await;
-    sync_transcript(&app, &transcript, &state);
-
-    {
-        let mut snap = state.write();
-        snap.running = false;
+    let t = now_ms();
+    for source in [Source::A, Source::B] {
+        let pieces = streams[source.idx()].flush(t);
+        if !pieces.is_empty() {
+            commit(&ctx, &translator, source, pieces, Default::default());
+        }
     }
     state.bump();
-    std::thread::sleep(Duration::from_millis(200));
+    translator.drain(DRAIN_TIMEOUT).await;
+    translator.shutdown();
 
+    state.write().running = false;
+    state.bump();
     Ok(())
 }
 
-/// ASR 连续错误熔断：把错误状态写入快照（字幕窗口会拉取并展示），
-/// 短暂停留让用户看到提示后再结束会话（后续收尾流程会隐藏窗口并同步主界面）。
-async fn trip_asr_breaker(state: &Arc<SharedState>, source_name: &str, err: &str) {
+/// 处理一路识别结果；返回 false 表示需要结束会话（熔断）
+async fn on_message(
+    ctx: &SessionCtx,
+    translator: &Translator,
+    source: Source,
+    msg: Option<anyhow::Result<AsrResponse>>,
+    streams: &mut [CaptionStream; 2],
+    errors: &mut [usize; 2],
+    now: u64,
+) -> bool {
+    match msg {
+        Some(Ok(resp)) => {
+            errors[source.idx()] = 0;
+            let stream = &mut streams[source.idx()];
+            let pieces = stream.feed(resp.definite_text.trim(), resp.indefinite_text.trim(), now);
+            let live = stream.live();
+            commit(ctx, translator, source, pieces, live);
+            ctx.state.bump();
+            true
+        }
+        Some(Err(e)) => {
+            errors[source.idx()] += 1;
+            let n = errors[source.idx()];
+            log::error!("[字幕] {} 源识别错误（{}/{}）: {}", source.tag(), n, MAX_CONSEC_ASR_ERRORS, e);
+            if n >= MAX_CONSEC_ASR_ERRORS {
+                let name = if source == Source::A { "主音源" } else { "麦克风副音源" };
+                trip_breaker(&ctx.state, name, &e.to_string()).await;
+                return false;
+            }
+            true
+        }
+        // 结果通道关闭：WS 任务已退出（服务端断开），等同熔断
+        None => {
+            let name = if source == Source::A { "主音源" } else { "麦克风副音源" };
+            trip_breaker(&ctx.state, name, "识别连接已关闭").await;
+            false
+        }
+    }
+}
+
+/// 写入定稿行与当前行：状态板分配 ID → 转录 → 主界面增量 → 同传
+fn commit(ctx: &SessionCtx, translator: &Translator, source: Source, pieces: Vec<Piece>, live: crate::subtitle::captions::LiveLine) {
+    let live_text = live.text();
+    let (captions, contexts, speaker, live_gen) = {
+        let mut b = ctx.state.write();
+        let captions: Vec<Caption> = pieces.into_iter().map(|p| b.push_caption(source, p)).collect();
+        b.live[source.idx()] = live;
+        if source == Source::A {
+            if let Some(last) = captions.last() {
+                b.settle_live_translation(last.id);
+            } else if live_text.is_empty() {
+                for view in b.translations.values_mut() {
+                    view.live.clear();
+                }
+            }
+        }
+        let contexts: Vec<Vec<String>> = captions.iter().map(|c| b.context_before(c.id, CONTEXT_SENTENCES)).collect();
+        (captions, contexts, b.labels[source.idx()].clone(), b.live_gen)
+    };
+
+    if !captions.is_empty() {
+        let entries: Vec<_> = {
+            let mut tr = ctx.transcript.lock().unwrap_or_else(|e| e.into_inner());
+            captions.iter().map(|c| tr.push(c, &speaker)).collect()
+        };
+        let _ = ctx.app.emit("subtitle-transcript-updated", serde_json::json!({ "type": "append", "entries": entries }));
+    }
+
+    if source == Source::A && !translator.is_empty() {
+        for (c, context) in captions.iter().zip(contexts) {
+            translator.on_caption(c, context);
+        }
+        translator.on_live(live_gen, &live_text);
+    }
+}
+
+/// 识别连接持续失败：把原因写进状态板（字幕窗口会显示），停留片刻后结束会话
+async fn trip_breaker(state: &Arc<SharedState>, source_name: &str, err: &str) {
     let brief: String = err.chars().take(120).collect();
-    log::error!("[字幕] {} 识别连接持续失败，熔断停止会话: {}", source_name, brief);
+    log::error!("[字幕] {} 识别连接持续失败，停止会话: {}", source_name, brief);
     {
-        let mut snap = state.write();
-        snap.status = format!(
-            "识别服务连接中断（{}），字幕已停止，请重新开启：{}",
-            source_name, brief
-        );
-        snap.running = false;
+        let mut b = state.write();
+        b.status = format!("识别服务连接中断（{}），字幕已停止：{}", source_name, brief);
+        b.running = false;
     }
     state.bump();
-    // 留出窗口拉取并展示错误信息的时间，再进入收尾隐藏流程
     tokio::time::sleep(Duration::from_secs(3)).await;
 }
 
-/// 处理一帧 ASR 结果：更新快照、记录转录、喂入翻译枢纽
-async fn handle_frame(
-    source: Source,
-    resp: AsrResponse,
-    app: &AppHandle,
-    state: &Arc<SharedState>,
-    hub: &Arc<TranslationHub>,
-    transcript: &Arc<StdMutex<Transcript>>,
-) {
-    let d = resp.definite_text.trim().to_string();
-    let i = resp.indefinite_text.trim().to_string();
-
-    let finalized = {
-        let mut snap = state.write();
-        snap.apply_frame(source, &d, &i, &resp.text)
-    };
-
-    // 转录记录（定稿句段）：只推送新增句段（增量）
-    if !finalized.is_empty() {
-        let speaker = {
-            let snap = state.read();
-            if source == Source::A {
-                snap.a.speaker.clone()
-            } else {
-                snap.b.speaker.clone()
-            }
-        };
-        let source_tag = if source == Source::A { "A" } else { "B" };
-        let appended: Vec<_> = {
-            let mut tr = transcript.lock().unwrap_or_else(|e| e.into_inner());
-            finalized
-                .iter()
-                .map(|s| tr.push(source_tag, &speaker, s))
-                .collect()
-        };
-        let _ = app.emit(
-            "subtitle-transcript-updated",
-            serde_json::json!({ "type": "append", "segments": appended }),
-        );
-    }
-
-    // A 源逐窗口翻译
-    if source == Source::A {
-        hub.on_frame(&d, &i).await;
-    }
-}
-
-/// 用主窗口（primary）的译文历史同步转录译文，并把变更增量推送给主窗口
-fn sync_transcript(
-    app: &AppHandle,
-    transcript: &Arc<StdMutex<Transcript>>,
-    state: &Arc<SharedState>,
-) {
-    let history = {
-        let snap = state.read();
-        snap.translation
-            .get(PRIMARY_WINDOW_ID)
-            .map(|v| v.history.clone())
-            .unwrap_or_default()
-    };
-    let changed = {
-        if let Ok(mut tr) = transcript.lock() {
-            tr.sync_translations(&history)
-        } else {
-            Vec::new()
-        }
-    };
-    if !changed.is_empty() {
-        let _ = app.emit(
-            "subtitle-transcript-updated",
-            serde_json::json!({ "type": "update", "updates": changed }),
-        );
-    }
-}
-
-/// 等待停止信号（无 ASR 会话的占位等待）
 async fn wait_until_stop(running: &Arc<AtomicBool>, stop_rx: &mut mpsc::Receiver<()>) {
     while running.load(Ordering::SeqCst) {
         tokio::select! {
             _ = tokio::time::sleep(Duration::from_millis(500)) => {}
-            _ = stop_rx.recv() => { break; }
+            _ = stop_rx.recv() => break,
         }
     }
 }

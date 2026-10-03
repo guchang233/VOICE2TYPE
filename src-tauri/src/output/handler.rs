@@ -75,7 +75,7 @@ impl OutputHandler {
         #[cfg(not(target_os = "windows"))]
         {
             use anyhow::Context;
-            use enigo::{Enigo, Settings};
+            use enigo::{Enigo, Keyboard, Settings};
             let mut enigo =
                 Enigo::new(&Settings::default()).context("Failed to initialize keyboard output")?;
             enigo.text(&text).context("Failed to send text")?;

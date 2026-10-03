@@ -1138,6 +1138,25 @@ pub fn subtitle_push_theme(
     Ok(())
 }
 
+/// 保存字幕设置（实时字幕页自动保存）：只替换 subtitle 段，不碰其它设置；
+/// 保存后通知字幕窗口重拉主题，热键变化时重新注册。返回归一化后的设置。
+#[tauri::command]
+pub fn subtitle_save_settings(
+    app_handle: tauri::AppHandle,
+    config: tauri::State<'_, Arc<ConfigManager>>,
+    state: tauri::State<'_, Arc<AppState>>,
+    settings: crate::config::SubtitleSettings,
+) -> Result<crate::config::SubtitleSettings, String> {
+    let old_hotkey = config.subtitle_hotkey();
+    let saved = config.update_subtitle_settings(settings);
+    config.save().map_err(|e| e.to_string())?;
+    state.subtitle.push_theme(&app_handle);
+    if saved.hotkey != old_hotkey {
+        crate::register_subtitle_shortcut(&app_handle, state.inner().clone(), saved.hotkey)?;
+    }
+    Ok(saved)
+}
+
 /// 应用字幕开关热键：重新注册全局快捷键（设置变更后调用）
 #[tauri::command]
 pub fn apply_subtitle_hotkey(
@@ -1158,11 +1177,11 @@ pub fn apply_subtitle_hotkey(
 #[tauri::command]
 pub fn get_subtitle_transcript(
     state: tauri::State<'_, Arc<AppState>>,
-) -> Vec<crate::subtitle::transcript::TranscriptSegment> {
+) -> Vec<crate::subtitle::transcript::TranscriptEntry> {
     state
         .subtitle
         .transcript()
-        .map(|t| t.lock().unwrap_or_else(|e| e.into_inner()).segments().to_vec())
+        .map(|t| t.lock().unwrap_or_else(|e| e.into_inner()).entries().to_vec())
         .unwrap_or_default()
 }
 
@@ -1485,4 +1504,84 @@ pub fn dubbing_cancel() {
 #[tauri::command]
 pub fn dubbing_status() -> bool {
     crate::dubbing::pipeline::is_running()
+}
+
+/// 单句试听：按这一句的时长预估语速合成，返回 WAV 路径（前端经 asset 协议播放）
+#[tauri::command]
+pub async fn dubbing_preview_segment(
+    config: tauri::State<'_, Arc<ConfigManager>>,
+    text: String,
+    slot_ms: u64,
+    tts: Option<crate::dubbing::pipeline::TtsOverrides>,
+) -> Result<String, String> {
+    crate::dubbing::pipeline::preview_segment(&config, &text, slot_ms, tts)
+        .await
+        .map(|p| p.to_string_lossy().into_owned())
+        .map_err(|e| e.to_string())
+}
+
+/// 把（编辑后的）字幕导出为 SRT：弹出保存对话框，取消返回 None
+#[tauri::command]
+pub async fn dubbing_export_srt(
+    app: tauri::AppHandle,
+    segments: Vec<crate::dubbing::DubSegment>,
+    file_name: Option<String>,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    use tokio::sync::oneshot;
+
+    let mut segments = segments;
+    segments.retain(|s| !s.text.trim().is_empty());
+    segments.sort_by_key(|s| s.start_ms);
+    for (i, s) in segments.iter_mut().enumerate() {
+        s.index = i;
+    }
+    if segments.is_empty() {
+        return Err("没有可导出的字幕".to_string());
+    }
+    let name = file_name.filter(|n| !n.trim().is_empty()).unwrap_or_else(|| "字幕".to_string());
+    let (tx, rx) = oneshot::channel::<Option<std::path::PathBuf>>();
+    app.dialog()
+        .file()
+        .set_title("导出 SRT 字幕")
+        .set_file_name(format!("{}.srt", name))
+        .add_filter("SRT 字幕", &["srt"])
+        .save_file(move |path| {
+            let _ = tx.send(path.and_then(|p| p.into_path().ok()));
+        });
+    let Some(path) = rx.await.map_err(|e| format!("对话框通道错误: {}", e))? else {
+        return Ok(None);
+    };
+    std::fs::write(&path, crate::dubbing::transcribe::segments_to_srt(&segments))
+        .map_err(|e| format!("写入文件失败: {}", e))?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// 导入已有的 SRT 字幕（跳过识别直接配音）：弹出打开对话框，取消返回 None
+#[tauri::command]
+pub async fn dubbing_import_srt(
+    app: tauri::AppHandle,
+) -> Result<Option<Vec<crate::dubbing::DubSegment>>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    use tokio::sync::oneshot;
+
+    let (tx, rx) = oneshot::channel::<Option<std::path::PathBuf>>();
+    app.dialog()
+        .file()
+        .set_title("导入 SRT 字幕")
+        .add_filter("SRT 字幕", &["srt"])
+        .pick_file(move |path| {
+            let _ = tx.send(path.and_then(|p| p.into_path().ok()));
+        });
+    let Some(path) = rx.await.map_err(|e| format!("对话框通道错误: {}", e))? else {
+        return Ok(None);
+    };
+    let bytes = std::fs::read(&path).map_err(|e| format!("读取文件失败: {}", e))?;
+    // 兼容带 BOM 的 UTF-8
+    let body = String::from_utf8_lossy(&bytes).trim_start_matches('\u{feff}').to_string();
+    let segments = crate::dubbing::transcribe::parse_srt(&body);
+    if segments.is_empty() {
+        return Err("没有在文件里找到有效的 SRT 字幕".to_string());
+    }
+    Ok(Some(segments))
 }

@@ -1,53 +1,48 @@
-//! 同声传译：TranslationHub 管理逐窗口翻译槽，译文直接写入共享快照并触发版本信号。
+//! 同声传译。
 //!
-//! 与旧流水线的差异：译文不再经「合并发射器」广播，而是落地即写入
-//! [`SharedState`]（权威快照），随后 bump 版本号触发信号；字幕窗口收到信号后拉取。
-//! 多窗口共享翻译缓存（语言+原文 → 译文），相同内容不重复调用 LLM。
+//! - **按目标语言**建工作者：多个字幕窗口选同一语言只翻译一次；
+//! - 定稿字幕按 ID 翻译（并发受限、带上文），译文写入状态板并回填转录，乱序到达也不会错位；
+//! - 当前行同声预览：每个语言一个节流循环，只翻译最新文本，过期结果按代际丢弃。
 
-use std::collections::{HashMap, VecDeque};
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use async_trait::async_trait;
 use serde::Deserialize;
-use tokio::sync::Mutex;
+use tokio::sync::{watch, Mutex, Semaphore};
+use tokio::task::JoinHandle;
 
 use crate::api::client::HTTP_CLIENT;
 use crate::config::{ConfigManager, SubtitleWindow};
-use crate::subtitle::state::{
-    split_by_width, split_complete_sentences, SharedState, TranslationView, LINE_WIDTH_CHARS,
-};
+use crate::subtitle::state::{Caption, SharedState};
 
-/// 当前行（临时）译文最小请求间隔
-const CURRENT_MIN_INTERVAL_MS: u64 = 1000;
 /// 单次翻译请求超时
-const TRANSLATE_TIMEOUT_SECS: u64 = 15;
-/// 历史行最大保留数
-const HISTORY_LIMIT: usize = 8;
+const TRANSLATE_TIMEOUT: Duration = Duration::from_secs(15);
+/// 同一语言定稿翻译的最大并发
+const FINAL_CONCURRENCY: usize = 3;
+/// 同声预览：最小请求间隔与合帧去抖
+const LIVE_MIN_INTERVAL: Duration = Duration::from_millis(900);
+const LIVE_DEBOUNCE: Duration = Duration::from_millis(180);
+/// 缓存上限
+const CACHE_LIMIT: usize = 2048;
 
-// ==================== 翻译引擎抽象 ====================
+// ==================== 翻译引擎 ====================
 
-/// 翻译引擎接口：每个实现负责把一段文本翻译成目标语言。
 #[async_trait]
 pub trait TranslationEngine: Send + Sync {
-    /// 引擎标识名（与配置中的 engine 对应）
     fn name(&self) -> &'static str;
 
-    /// 翻译一段文本
-    async fn translate(
-        &self,
-        config: &ConfigManager,
-        target_lang: &str,
-        text: &str,
-    ) -> Result<String>;
+    /// 翻译 `text`；`context` 为紧邻的上文原文（仅供理解，不翻译）
+    async fn translate(&self, config: &ConfigManager, target_lang: &str, text: &str, context: &[String]) -> Result<String>;
 }
 
-/// 按配置名解析翻译引擎（返回 None 表示未注册/关闭）
+/// 按配置名解析引擎（None = 关闭或未注册）
 pub fn resolve_engine(name: &str) -> Option<Arc<dyn TranslationEngine>> {
     match name {
         "llm" => Some(Arc::new(LlmTranslationEngine)),
-        // 预留： "aliyun" / "deepl" 实现 trait 后在此注册
         _ => None,
     }
 }
@@ -67,10 +62,16 @@ struct ChatMessage {
     content: String,
 }
 
-/// LLM 翻译引擎：OpenAI 兼容 chat/completions 接口
-///
-/// 接口配置优先级：字幕翻译专用 LLM 配置 → 「LLM 智能校对」配置 → 内置默认（SiliconFlow）。
+/// OpenAI 兼容 chat/completions。
+/// 端点优先级：字幕同传专用配置 → 「LLM 智能校对」配置 → SiliconFlow 默认。
 pub struct LlmTranslationEngine;
+
+const SYSTEM_PROMPT: &str = "你是专业的同声传译员，负责把实时语音识别的文字翻译成目标语言。\
+规则：1. 只输出译文本身，不要解释、引号或任何前后缀；\
+2. 意思完整、符合目标语言的口语习惯，语音识别的同音错字按上下文理解；\
+3. 数字、人名、专有名词保留原样或使用通行译名；\
+4. 原文已是目标语言时原样输出；\
+5. 「上文」只用于理解语境，绝不要翻译或输出上文。";
 
 #[async_trait]
 impl TranslationEngine for LlmTranslationEngine {
@@ -78,427 +79,340 @@ impl TranslationEngine for LlmTranslationEngine {
         "llm"
     }
 
-    async fn translate(
-        &self,
-        config: &ConfigManager,
-        target_lang: &str,
-        text: &str,
-    ) -> Result<String> {
+    async fn translate(&self, config: &ConfigManager, target_lang: &str, text: &str, context: &[String]) -> Result<String> {
         let input = text.trim();
         if input.is_empty() {
             return Ok(String::new());
         }
-
-        let mut url = config.subtitle_translation_llm_api_url();
-        let mut key = config.subtitle_translation_llm_api_key();
-        let mut model = config.subtitle_translation_llm_model();
+        let (url, key, model) = endpoint(config);
         if key.is_empty() {
-            // 回退：复用「LLM 智能校对」的接口配置
-            url = config.llm_post_api_url();
-            key = config.llm_post_api_key();
-            model = config.llm_post_model();
-        }
-        if url.trim().is_empty() {
-            url = "https://api.siliconflow.cn/v1/chat/completions".to_string();
-        }
-        if model.trim().is_empty() {
-            model = "Qwen/Qwen2.5-7B-Instruct".to_string();
-        }
-        if key.is_empty() {
-            anyhow::bail!("同声传译 LLM API Key 未配置（可在字幕设置或「设置-LLM 智能校对」中填写）");
+            anyhow::bail!("同声传译 LLM API Key 未配置（可在字幕「同传」设置或「设置 → LLM 智能校对」中填写）");
         }
 
-        let system = "你是专业的同声传译员，负责把实时语音识别的文字翻译成目标语言。\
-规则：1. 只输出译文本身，不要任何解释、引号或前后缀；\
-2. 保持原意完整，译文符合口语习惯；\
-3. 数字、专有名词原样保留；\
-4. 如果原文已经是目标语言，直接原样输出；\
-5. 输入的可能是未完成的口语片段，请直接翻译其字面意思，不要补充或猜测。";
-
-        let user = format!(
-            "请把下面的语音识别原文翻译成{}。只输出译文本身，不要任何解释、引号或前后缀；若原文已经是{}则原样输出。\n\n原文：\n{}",
-            target_lang, target_lang, input
-        );
+        let mut user = format!("目标语言：{}\n", target_lang);
+        if !context.is_empty() {
+            user.push_str("\n上文（仅供理解，不要翻译）：\n");
+            for c in context {
+                user.push_str("- ");
+                user.push_str(c);
+                user.push('\n');
+            }
+        }
+        user.push_str("\n需要翻译的原文：\n");
+        user.push_str(input);
 
         let body = serde_json::json!({
             "model": model,
             "messages": [
-                { "role": "system", "content": system },
+                { "role": "system", "content": SYSTEM_PROMPT },
                 { "role": "user", "content": user }
             ],
-            "temperature": 0.3,
+            "temperature": 0.2,
             "max_tokens": 1024,
             "stream": false,
         });
 
         let resp = tokio::time::timeout(
-            Duration::from_secs(TRANSLATE_TIMEOUT_SECS),
-            HTTP_CLIENT
-                .post(&url)
-                .header("Authorization", format!("Bearer {}", key))
-                .json(&body)
-                .send(),
+            TRANSLATE_TIMEOUT,
+            HTTP_CLIENT.post(&url).header("Authorization", format!("Bearer {}", key)).json(&body).send(),
         )
         .await
         .map_err(|_| anyhow::anyhow!("翻译请求超时"))??;
 
         if !resp.status().is_success() {
             let status = resp.status();
-            let body_text = resp.text().await.unwrap_or_default();
-            let brief: String = body_text.chars().take(200).collect();
+            let brief: String = resp.text().await.unwrap_or_default().chars().take(200).collect();
             anyhow::bail!("翻译接口错误 {}: {}", status, brief);
         }
-
-        let chat: ChatResponse = resp
-            .json()
-            .await
-            .map_err(|e| anyhow::anyhow!("翻译响应解析失败: {}", e))?;
-        let content = chat
-            .choices
-            .into_iter()
-            .next()
-            .map(|c| c.message.content)
-            .unwrap_or_default();
+        let chat: ChatResponse = resp.json().await.map_err(|e| anyhow::anyhow!("翻译响应解析失败: {}", e))?;
+        let content = chat.choices.into_iter().next().map(|c| c.message.content).unwrap_or_default();
         Ok(clean_translation(&content))
     }
 }
 
-/// 清理引擎输出：去首尾空白/引号/「」/换行
-fn clean_translation(raw: &str) -> String {
+fn endpoint(config: &ConfigManager) -> (String, String, String) {
+    let mut url = config.subtitle_translation_llm_api_url();
+    let mut key = config.subtitle_translation_llm_api_key();
+    let mut model = config.subtitle_translation_llm_model();
+    if key.trim().is_empty() {
+        url = config.llm_post_api_url();
+        key = config.llm_post_api_key();
+        model = config.llm_post_model();
+    }
+    if url.trim().is_empty() {
+        url = "https://api.siliconflow.cn/v1/chat/completions".to_string();
+    }
+    if model.trim().is_empty() {
+        model = "Qwen/Qwen2.5-7B-Instruct".to_string();
+    }
+    (url.trim().to_string(), key.trim().to_string(), model.trim().to_string())
+}
+
+/// 清理模型输出：去首尾空白、成对引号、常见「译文：」前缀
+pub fn clean_translation(raw: &str) -> String {
     let mut s = raw.trim().to_string();
-    if s.len() >= 2 {
-        let first = s.chars().next().unwrap();
-        let last = s.chars().last().unwrap();
-        let paired = (first == '"' && last == '"')
-            || (first == '“' && last == '”')
-            || (first == '「' && last == '」');
+    for prefix in ["译文：", "译文:", "Translation:", "翻译："] {
+        if let Some(rest) = s.strip_prefix(prefix) {
+            s = rest.trim().to_string();
+        }
+    }
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() >= 2 {
+        let paired = matches!((chars[0], chars[chars.len() - 1]), ('"', '"') | ('“', '”') | ('「', '」') | ('\'', '\''));
         if paired {
-            s = s.chars().skip(1).take(s.chars().count() - 2).collect();
-            s = s.trim().to_string();
+            s = chars[1..chars.len() - 1].iter().collect::<String>().trim().to_string();
         }
     }
     s
 }
 
-// ==================== 翻译槽 ====================
+// ==================== 翻译调度 ====================
 
-/// 单个窗口的翻译状态（增量句段 + 当前行预览）
-struct SlotState {
-    /// 已定稿句段译文（按顺序，最多 HISTORY_LIMIT 条）
-    history: VecDeque<String>,
-    /// definite 文本已消费的字符数
-    translated_chars: usize,
-    /// 乱序保护：seq → 译文
-    pending: HashMap<u64, String>,
-    /// 下一个分配的 seq（从 1 开始，0 为 applied_seq 初始值）
-    next_seq: u64,
-    /// 已按序落地的最大 seq
-    applied_seq: u64,
-    /// 当前行译文目标文本（未成句尾部 + 临时文本）
-    current_target: String,
-    /// 当前行译文（同声预览）
-    current: String,
-    /// 当前行代际：只有最新一代的结果才会被采纳
-    current_gen: u64,
-    last_current_at: Option<Instant>,
-}
+/// 译文落地回调（会话层用于回填转录并通知主界面）
+pub type TranslationSink = Arc<dyn Fn(u64, &str, &str) + Send + Sync>;
 
-impl SlotState {
-    fn new() -> Self {
-        Self {
-            history: VecDeque::new(),
-            translated_chars: 0,
-            pending: HashMap::new(),
-            next_seq: 1,
-            applied_seq: 0,
-            current_target: String::new(),
-            current: String::new(),
-            current_gen: 0,
-            last_current_at: None,
-        }
-    }
+type Cache = Arc<Mutex<HashMap<String, String>>>;
 
-    fn view(&self) -> TranslationView {
-        TranslationView {
-            history: self.history.iter().cloned().collect(),
-            current: self.current.clone(),
-        }
-    }
-}
-
-/// 一个窗口的翻译槽
-struct Slot {
-    window_id: String,
+struct LangWorker {
+    lang: String,
     engine: Arc<dyn TranslationEngine>,
-    target_lang: String,
-    interim_enabled: bool,
-    inner: Arc<Mutex<SlotState>>,
+    live_tx: Option<watch::Sender<(u64, String)>>,
+    sem: Arc<Semaphore>,
 }
 
-impl Slot {
-    /// 处理一帧 ASR 结果：更新句段翻译与当前行译文
-    async fn on_frame(
-        &self,
-        config: &Arc<ConfigManager>,
-        cache: &Arc<Mutex<HashMap<String, String>>>,
-        state: &Arc<SharedState>,
-        definite: &str,
-        indefinite: &str,
-    ) {
-        let d = definite.trim();
-        let i = indefinite.trim();
+/// 一次字幕会话的翻译调度器
+pub struct Translator {
+    workers: Vec<Arc<LangWorker>>,
+    config: Arc<ConfigManager>,
+    state: Arc<SharedState>,
+    cache: Cache,
+    sink: TranslationSink,
+    inflight: Arc<AtomicUsize>,
+    live_tasks: StdMutex<Vec<JoinHandle<()>>>,
+}
 
-        let mut segment_spawns: Vec<(u64, String)> = Vec::new();
-        let mut current_spawn: Option<(u64, String)> = None;
+impl Translator {
+    /// 从启用的窗口构建：按目标语言去重；任一窗口开启同声预览则该语言开启
+    pub fn build(config: Arc<ConfigManager>, state: Arc<SharedState>, windows: &[SubtitleWindow], sink: TranslationSink) -> Self {
+        let mut langs: Vec<(String, Arc<dyn TranslationEngine>, bool)> = Vec::new();
+        for w in windows {
+            let Some(engine) = resolve_engine(&w.translation.engine) else { continue };
+            let lang = w.translation.target_lang.trim().to_string();
+            if lang.is_empty() {
+                continue;
+            }
+            match langs.iter_mut().find(|(l, _, _)| *l == lang) {
+                Some(entry) => entry.2 |= w.translation.interim,
+                None => langs.push((lang, engine, w.translation.interim)),
+            }
+        }
+
+        let cache: Cache = Arc::new(Mutex::new(HashMap::new()));
+        let mut workers = Vec::new();
+        let mut live_tasks = Vec::new();
         {
-            let mut st = self.inner.lock().await;
-            let d_chars: Vec<char> = d.chars().collect();
-
-            // ASR 文本异常回退（definite 变短）：重置累计状态
-            if st.translated_chars > d_chars.len() {
-                st.history.clear();
-                st.translated_chars = 0;
-                st.pending.clear();
-                st.applied_seq = st.next_seq.saturating_sub(1);
-                st.current.clear();
-                st.current_target.clear();
-                st.current_gen += 1;
-            }
-
-            let new_part: String = d_chars[st.translated_chars..].iter().collect();
-            let mut complete = Vec::new();
-            let mut tail = String::new();
-            if !new_part.is_empty() {
-                let (comp, t) = split_complete_sentences(&new_part);
-                complete = comp;
-                tail = t;
-                st.translated_chars += new_part.chars().count() - tail.chars().count();
-            }
-
-            for sentence in complete {
-                let seq = st.next_seq;
-                st.next_seq += 1;
-                segment_spawns.push((seq, sentence));
-            }
-
-            // 长尾按行宽强制切行（大量文本自动换行滚动，不再等标点）
-            if tail.chars().count() >= LINE_WIDTH_CHARS {
-                let (lines, new_tail) = split_by_width(&tail, LINE_WIDTH_CHARS);
-                for line in lines {
-                    let seq = st.next_seq;
-                    st.next_seq += 1;
-                    segment_spawns.push((seq, line));
-                }
-                st.translated_chars += tail.chars().count() - new_tail.chars().count();
-                tail = new_tail;
-            }
-
-            // ===== 当前行译文（未成句尾部 + 临时文本，防抖） =====
-            if self.interim_enabled {
-                let new_target = if tail.is_empty() {
-                    i.to_string()
-                } else if i.is_empty() {
-                    tail.clone()
-                } else {
-                    format!("{} {}", tail, i)
-                };
-                let target_changed = new_target != st.current_target;
-                let due = st.last_current_at.map_or(true, |t| {
-                    t.elapsed() >= Duration::from_millis(CURRENT_MIN_INTERVAL_MS)
-                });
-                if !new_target.is_empty() && (target_changed || due) {
-                    st.last_current_at = Some(Instant::now());
-                    st.current_target = new_target.clone();
-                    st.current_gen += 1;
-                    current_spawn = Some((st.current_gen, new_target));
-                } else if new_target.is_empty() && !st.current_target.is_empty() {
-                    // 说话停顿：清空当前行目标（已显示的译文保留到句段定稿）
-                    st.current_target.clear();
-                }
+            let mut board = state.write();
+            for (lang, _, _) in &langs {
+                board.ensure_lang(lang);
             }
         }
-
-        // 锁外派发任务
-        for (seq, sentence) in segment_spawns {
-            self.spawn_definite(config, cache, state, seq, sentence);
+        for (lang, engine, interim) in langs {
+            log::info!("[同传] 目标语言 {}（{}，同声预览 {}）", lang, engine.name(), if interim { "开" } else { "关" });
+            let live_tx = if interim {
+                let (tx, rx) = watch::channel((0u64, String::new()));
+                live_tasks.push(tokio::spawn(live_loop(
+                    lang.clone(),
+                    engine.clone(),
+                    config.clone(),
+                    state.clone(),
+                    cache.clone(),
+                    rx,
+                )));
+                Some(tx)
+            } else {
+                None
+            };
+            workers.push(Arc::new(LangWorker { lang, engine, live_tx, sem: Arc::new(Semaphore::new(FINAL_CONCURRENCY)) }));
         }
-        if let Some((gen, text)) = current_spawn {
-            self.spawn_current(config, cache, state, gen, text);
+
+        Self {
+            workers,
+            config,
+            state,
+            cache,
+            sink,
+            inflight: Arc::new(AtomicUsize::new(0)),
+            live_tasks: StdMutex::new(live_tasks),
         }
     }
 
-    fn spawn_definite(
-        &self,
-        config: &Arc<ConfigManager>,
-        cache: &Arc<Mutex<HashMap<String, String>>>,
-        state: &Arc<SharedState>,
-        seq: u64,
-        sentence: String,
-    ) {
-        let engine = self.engine.clone();
-        let inner = self.inner.clone();
-        let config = config.clone();
-        let cache = cache.clone();
-        let state = state.clone();
-        let lang = self.target_lang.clone();
-        let window_id = self.window_id.clone();
-        tokio::spawn(async move {
-            let translated = translate_with_cache(&config, &cache, engine.as_ref(), &lang, &sentence)
-                .await
-                .unwrap_or_else(|e| {
-                    log::warn!("[同声传译] 句段翻译失败: {}", e);
-                    String::new()
-                });
-            {
-                let mut st = inner.lock().await;
-                // 过期任务（状态已重置）直接丢弃
-                if seq <= st.applied_seq {
-                    return;
-                }
-                st.pending.insert(seq, translated);
-                // 按序落地
-                loop {
-                    let next = st.applied_seq + 1;
-                    match st.pending.remove(&next) {
-                        Some(t) => {
-                            if !t.is_empty() {
-                                if st.history.len() >= HISTORY_LIMIT {
-                                    st.history.pop_front();
-                                }
-                                st.history.push_back(t);
-                            }
-                            st.applied_seq = next;
+    pub fn is_empty(&self) -> bool {
+        self.workers.is_empty()
+    }
+
+    /// A 源新定稿一行：各语言翻译后写入状态板并回调
+    pub fn on_caption(&self, caption: &Caption, context: Vec<String>) {
+        for w in &self.workers {
+            let worker = w.clone();
+            let config = self.config.clone();
+            let state = self.state.clone();
+            let cache = self.cache.clone();
+            let sink = self.sink.clone();
+            let inflight = self.inflight.clone();
+            let id = caption.id;
+            let text = caption.text.clone();
+            let context = context.clone();
+            inflight.fetch_add(1, Ordering::SeqCst);
+            tokio::spawn(async move {
+                let result = async {
+                    let _permit = worker.sem.acquire().await.ok()?;
+                    match translate_cached(&cache, worker.engine.as_ref(), &config, &worker.lang, &text, &context).await {
+                        Ok(t) if !t.is_empty() => Some(t),
+                        Ok(_) => None,
+                        Err(e) => {
+                            log::warn!("[同传] 翻译失败（{}）: {}", worker.lang, e);
+                            None
                         }
-                        None => break,
                     }
                 }
-            }
-            // 写入权威快照并触发信号
-            let view = { inner.lock().await.view() };
-            state.set_translation(&window_id, view);
-            state.bump();
-        });
-    }
-
-    fn spawn_current(
-        &self,
-        config: &Arc<ConfigManager>,
-        cache: &Arc<Mutex<HashMap<String, String>>>,
-        state: &Arc<SharedState>,
-        gen: u64,
-        text: String,
-    ) {
-        let engine = self.engine.clone();
-        let inner = self.inner.clone();
-        let config = config.clone();
-        let cache = cache.clone();
-        let state = state.clone();
-        let lang = self.target_lang.clone();
-        let window_id = self.window_id.clone();
-        tokio::spawn(async move {
-            let translated = translate_with_cache(&config, &cache, engine.as_ref(), &lang, &text)
-                .await
-                .unwrap_or_else(|e| {
-                    log::debug!("[同声传译] 当前行翻译失败: {}", e);
-                    String::new()
-                });
-            {
-                let mut st = inner.lock().await;
-                if st.current_gen == gen && !translated.is_empty() {
-                    st.current = translated;
-                }
-            }
-            let view = { inner.lock().await.view() };
-            state.set_translation(&window_id, view);
-            state.bump();
-        });
-    }
-}
-
-// ==================== 翻译枢纽 ====================
-
-/// 逐窗口翻译管理：构建槽位、喂入 A 源帧。
-pub struct TranslationHub {
-    slots: Vec<Arc<Slot>>,
-    cache: Arc<Mutex<HashMap<String, String>>>,
-    state: Arc<SharedState>,
-    config: Arc<ConfigManager>,
-}
-
-impl TranslationHub {
-    /// 从启用的窗口列表构建枢纽（engine=none 的窗口不建槽）
-    pub fn build(
-        config: Arc<ConfigManager>,
-        state: Arc<SharedState>,
-        windows: &[SubtitleWindow],
-    ) -> Self {
-        let cache: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
-        let mut slots = Vec::new();
-        for w in windows {
-            let Some(engine) = resolve_engine(&w.translation.engine) else {
-                continue;
-            };
-            log::debug!("[字幕] 窗口 {} 使用翻译引擎: {}", w.id, engine.name());
-            let slot = Arc::new(Slot {
-                window_id: w.id.clone(),
-                engine,
-                target_lang: w.translation.target_lang.clone(),
-                interim_enabled: w.translation.interim,
-                inner: Arc::new(Mutex::new(SlotState::new())),
-            });
-            // 预置空视图，保证快照中窗口存在翻译条目
-            state.set_translation(
-                &w.id,
-                slot.inner
-                    .try_lock()
-                    .map(|s| s.view())
-                    .unwrap_or_default(),
-            );
-            slots.push(slot);
-        }
-        Self {
-            slots,
-            cache,
-            state,
-            config,
-        }
-    }
-
-    /// 喂入一帧 A 源识别结果（锁外派发各槽任务）
-    pub async fn on_frame(&self, definite: &str, indefinite: &str) {
-        for slot in &self.slots {
-            slot.on_frame(&self.config, &self.cache, &self.state, definite, indefinite)
                 .await;
+                if let Some(translated) = result {
+                    {
+                        let mut board = state.write();
+                        // 已被裁出最近行的字幕不再写回状态板（转录照常回填）
+                        if board.captions.iter().any(|c| c.id == id) {
+                            board.translations.entry(worker.lang.clone()).or_default().finals.insert(id, translated.clone());
+                        }
+                    }
+                    state.bump();
+                    sink(id, &worker.lang, &translated);
+                }
+                inflight.fetch_sub(1, Ordering::SeqCst);
+            });
+        }
+    }
+
+    /// A 源当前行变化：交给各语言的节流循环（只保留最新文本）
+    pub fn on_live(&self, gen: u64, text: &str) {
+        for w in &self.workers {
+            if let Some(tx) = &w.live_tx {
+                let next = (gen, text.trim().to_string());
+                tx.send_if_modified(|cur| {
+                    if *cur != next {
+                        *cur = next.clone();
+                        true
+                    } else {
+                        false
+                    }
+                });
+            }
+        }
+    }
+
+    /// 等待在途定稿翻译落地（会话结束时调用，避免最后几句没有译文）
+    pub async fn drain(&self, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
+        while self.inflight.load(Ordering::SeqCst) > 0 && Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    pub fn shutdown(&self) {
+        for t in self.live_tasks.lock().unwrap_or_else(|e| e.into_inner()).drain(..) {
+            t.abort();
         }
     }
 }
 
-/// 带缓存翻译：先查缓存，未命中则调用引擎并写入缓存
-async fn translate_with_cache(
-    config: &Arc<ConfigManager>,
-    cache: &Arc<Mutex<HashMap<String, String>>>,
+impl Drop for Translator {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+/// 同声预览循环：去抖 + 最小间隔，只翻译最新文本；代际不符（该行已定稿）则丢弃
+async fn live_loop(
+    lang: String,
+    engine: Arc<dyn TranslationEngine>,
+    config: Arc<ConfigManager>,
+    state: Arc<SharedState>,
+    cache: Cache,
+    mut rx: watch::Receiver<(u64, String)>,
+) {
+    let mut last_request: Option<Instant> = None;
+    loop {
+        if rx.changed().await.is_err() {
+            break;
+        }
+        tokio::time::sleep(LIVE_DEBOUNCE).await;
+        if let Some(t) = last_request {
+            let wait = LIVE_MIN_INTERVAL.saturating_sub(t.elapsed());
+            if !wait.is_zero() {
+                tokio::time::sleep(wait).await;
+            }
+        }
+        let (gen, text) = rx.borrow_and_update().clone();
+        if text.is_empty() {
+            continue;
+        }
+        last_request = Some(Instant::now());
+        let translated = match translate_cached(&cache, engine.as_ref(), &config, &lang, &text, &[]).await {
+            Ok(t) if !t.is_empty() => t,
+            Ok(_) => continue,
+            Err(e) => {
+                log::debug!("[同传] 同声预览翻译失败（{}）: {}", lang, e);
+                continue;
+            }
+        };
+        let applied = {
+            let mut board = state.write();
+            if board.live_gen == gen && board.running {
+                board.translations.entry(lang.clone()).or_default().live = translated;
+                true
+            } else {
+                false
+            }
+        };
+        if applied {
+            state.bump();
+        }
+    }
+}
+
+async fn translate_cached(
+    cache: &Cache,
     engine: &dyn TranslationEngine,
-    target_lang: &str,
+    config: &ConfigManager,
+    lang: &str,
     text: &str,
+    context: &[String],
 ) -> Result<String> {
     let input = text.trim();
     if input.is_empty() {
         return Ok(String::new());
     }
-    let cache_key = format!("{}\u{1}{}", target_lang, input);
-    {
-        let c = cache.lock().await;
-        if let Some(hit) = c.get(&cache_key) {
-            return Ok(hit.clone());
-        }
+    let key = format!("{}\u{1}{}", lang, input);
+    if let Some(hit) = cache.lock().await.get(&key) {
+        return Ok(hit.clone());
     }
-
-    let translated = engine.translate(config, target_lang, input).await?;
-
+    let out = engine.translate(config, lang, input, context).await?;
     let mut c = cache.lock().await;
-    if c.len() > 2048 {
+    if c.len() >= CACHE_LIMIT {
         c.clear();
     }
-    c.insert(cache_key, translated.clone());
-    Ok(translated)
+    c.insert(key, out.clone());
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clean_translation_strips_quotes_and_prefix() {
+        assert_eq!(clean_translation("  \"Hello.\"  "), "Hello.");
+        assert_eq!(clean_translation("译文：你好"), "你好");
+        assert_eq!(clean_translation("“A”"), "A");
+        assert_eq!(clean_translation("He said \"hi\""), "He said \"hi\"");
+    }
 }

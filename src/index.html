@@ -143,463 +143,240 @@
                     <div class="view-header">
                         <div class="view-heading">
                             <h2>实时字幕</h2>
-                            <p class="view-desc">悬浮字幕窗口，支持同声传译与 OBS 窗口采集</p>
+                            <p class="view-desc">流式识别 · 同声传译 · 悬浮字幕窗口，OBS 直接窗口采集</p>
                         </div>
                         <div class="view-header-actions">
-                            <button class="secondary-btn" id="btn-apply-subtitle" title="保存并应用到字幕窗口">应用设置</button>
-                            <button class="primary-btn" id="toggle-subtitle-btn"><span class="btn-indicator"></span>开启实时字幕</button>
+                            <span class="sv-save-state" id="sv-save-state" aria-live="polite"></span>
+                            <kbd class="sv-hotkey-chip" id="sv-hotkey-chip" title="全局开关快捷键（在「输入」中修改）">F7</kbd>
+                            <button class="primary-btn" id="toggle-subtitle-btn" type="button"><span class="btn-indicator"></span><span class="btn-label">开启实时字幕</span></button>
                         </div>
                     </div>
 
-                    <div class="view-body subtitle-scroll-area">
-                        <div class="subtitle-scene-bar">
-                            <div class="subtitle-scene-picker">
-                                <span class="scene-label">字幕窗口</span>
-                                <select class="text-input scene-select" id="subtitle-window-select" title="每个窗口对应一个独立的字幕窗口"></select>
-                                <input type="text" class="text-input scene-name-input" id="subtitle-window-name" placeholder="窗口名称">
-                            </div>
-                            <div class="subtitle-scene-actions">
-                                <button class="secondary-btn" id="btn-add-subtitle-window" type="button" title="以当前窗口样式新建一个窗口">新建</button>
-                                <button class="secondary-btn" id="btn-duplicate-subtitle-window" type="button" title="复制当前窗口">复制</button>
-                                <button class="secondary-btn scene-btn-danger" id="btn-remove-subtitle-window" type="button" title="删除当前窗口（默认窗口不可删除）">删除</button>
-                            </div>
-                            <p class="subtitle-tip subtitle-tip-left scene-tip">每个窗口独立设置样式、位置、置顶/穿透与翻译目标语言；窗口可自由拖动，位置自动记忆。</p>
+                    <div class="view-body sv-body">
+                        <div class="sv-notice" id="sv-notice" hidden>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+                            <span class="sv-notice-text" id="sv-notice-text"></span>
+                            <button class="ghost-btn btn-sm" id="sv-notice-action" type="button">前往设置</button>
                         </div>
 
-                        <div class="subtitle-preview-section">
-                            <div class="subtitle-preview" id="subtitle-preview">
-                                <div class="subtitle-preview-box" id="subtitle-preview-box"></div>
-                            </div>
-                        </div>
-
-                        <div class="subtitle-cards">
-                            <div class="subtitle-card">
-                                <h4 class="subtitle-card-title">音源与全局</h4>
-                                <div class="subtitle-grid">
-                                    <div class="control-group span-full">
-                                        <label>音源类型</label>
-                                        <div class="segmented-control" id="subtitle-audio-source">
-                                            <button class="seg-btn active" data-source="microphone" type="button">麦克风输入</button>
-                                            <button class="seg-btn" data-source="system" type="button">系统扬声器</button>
-                                            <button class="seg-btn" data-source="dual" type="button">同传模式</button>
-                                        </div>
-                                    </div>
-                                    <div class="control-group">
-                                        <label>字幕开关热键</label>
-                                        <input type="text" class="text-input hotkey-input" id="subtitle-hotkey" value="F7" placeholder="点击后按键" readonly>
-                                    </div>
-                                    <div class="control-group" id="subtitle-mic-device-group">
-                                        <label>音频输入设备</label>
-                                        <select class="text-input" id="setting-subtitle-input-device" title="实时字幕识别使用的音频源，可选立体声混音等系统音频设备">
-                                            <option value="">系统默认</option>
-                                        </select>
-                                    </div>
-                                    <div class="control-group span-full" id="subtitle-system-hint" style="display: none;">
-                                        <p class="subtitle-tip subtitle-tip-left">已选择系统扬声器音源，将直接捕获电脑正在播放的声音（WASAPI loopback），无需选择设备。</p>
-                                    </div>
-                                    <div class="control-group span-full" id="subtitle-dual-hint" style="display: none;">
-                                        <p class="subtitle-tip subtitle-tip-left">同传模式：捕获系统播放的声音作为主音源（识别并翻译为译文），同时用下方选择的麦克风设备录制原声作为副字幕，并写入转录记录。</p>
-                                    </div>
-                                    <div class="control-group span-full">
-                                        <label>同声传译 LLM 接口地址（全局共享）</label>
-                                        <input type="text" class="text-input" id="subtitle-llm-url" placeholder="如 https://api.siliconflow.cn/v1/chat/completions">
-                                    </div>
-                                    <div class="control-group">
-                                        <label>LLM API Key（留空复用智能校对配置）</label>
-                                        <input type="password" class="text-input" id="subtitle-llm-key" placeholder="sk-...">
-                                    </div>
-                                    <div class="control-group">
-                                        <label>LLM 模型名</label>
-                                        <input type="text" class="text-input" id="subtitle-llm-model" placeholder="如 Qwen/Qwen2.5-7B-Instruct">
-                                    </div>
+                        <!-- 舞台：真实渲染器（subtitle.html?embed=1）1:1 预览 -->
+                        <div class="sv-stage-card">
+                            <div class="sv-stage-bar">
+                                <div class="sv-window-chips" id="sv-window-chips" role="tablist" aria-label="字幕窗口"></div>
+                                <button class="icon-btn sv-add-window" id="sv-add-window" type="button" title="新建字幕窗口">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                                </button>
+                                <div class="sv-stage-bar-spacer"></div>
+                                <div class="sv-backdrops" id="sv-backdrops" title="预览背景">
+                                    <button class="sv-backdrop-btn active" data-backdrop="scene" type="button" aria-label="画面背景"></button>
+                                    <button class="sv-backdrop-btn" data-backdrop="dark" type="button" aria-label="深色背景"></button>
+                                    <button class="sv-backdrop-btn" data-backdrop="light" type="button" aria-label="浅色背景"></button>
                                 </div>
+                                <span class="sv-live-pill" id="sv-live-pill"><span class="sv-live-dot"></span><span class="sv-live-text">示例预览</span></span>
+                            </div>
+                            <div class="sv-stage" id="sv-stage" data-backdrop="scene">
+                                <iframe class="sv-preview-frame" id="sv-preview-frame" src="subtitle.html?embed=1" title="字幕预览" tabindex="-1"></iframe>
+                            </div>
+                            <div class="sv-stage-foot">
+                                <span class="sv-stage-meta" id="sv-stage-meta"></span>
+                                <button class="ghost-btn btn-sm" id="sv-window-visibility" type="button">显示窗口</button>
                             </div>
                         </div>
 
-                        <div class="subtitle-cards">
-                            <div class="subtitle-card" id="card-appearance">
-                                <h4 class="subtitle-card-title">外观样式</h4>
-                                <p class="subtitle-tip subtitle-tip-left">「预设模板」一键套用整体方案，应用后仍可在下方微调；选择「自定义」则完全由你控制。</p>
-                                <div class="subtitle-grid">
-                                    <div class="control-group span-full">
-                                        <label>预设模板</label>
-                                        <div class="segmented-control" id="subtitle-preset">
-                                            <button class="seg-btn" data-preset="clean" type="button">纯净</button>
-                                            <button class="seg-btn" data-preset="bilingual" type="button">双语</button>
-                                            <button class="seg-btn" data-preset="meeting" type="button">会议</button>
-                                            <button class="seg-btn" data-preset="live" type="button">直播</button>
-                                            <button class="seg-btn active" data-preset="custom" type="button">自定义</button>
-                                        </div>
-                                    </div>
+                        <div class="sv-columns">
+                            <!-- 检查器 -->
+                            <div class="sv-card sv-inspector">
+                                <div class="segmented-control sv-tabs" id="sv-tabs" role="tablist">
+                                    <button class="seg-btn active" data-tab="style" type="button">外观</button>
+                                    <button class="seg-btn" data-tab="elements" type="button">元素</button>
+                                    <button class="seg-btn" data-tab="translate" type="button">同传</button>
+                                    <button class="seg-btn" data-tab="input" type="button">输入</button>
+                                    <button class="seg-btn" data-tab="window" type="button">窗口</button>
                                 </div>
 
-                                <section class="subtitle-subsection">
-                                    <h5 class="subtitle-sub-title">字体</h5>
-                                    <div class="subtitle-grid subtitle-grid-3">
-                                        <div class="control-group">
-                                            <label>字体族</label>
-                                            <select class="text-input" id="subtitle-font-family">
+                                <!-- 外观 -->
+                                <div class="sv-pane active" data-pane="style">
+                                    <div class="sv-presets" id="sv-presets">
+                                        <button class="sv-preset" data-preset="clean" type="button"><b>纯净</b><span>只有原文</span></button>
+                                        <button class="sv-preset" data-preset="bilingual" type="button"><b>双语</b><span>原文 + 译文</span></button>
+                                        <button class="sv-preset" data-preset="meeting" type="button"><b>会议</b><span>带说话人</span></button>
+                                        <button class="sv-preset" data-preset="live" type="button"><b>直播</b><span>左右双语</span></button>
+                                    </div>
+
+                                    <div class="sv-group">
+                                        <div class="sv-group-title">文字</div>
+                                        <div class="sv-row"><label>字体</label><div class="sv-ctl">
+                                            <select class="text-input" data-bind="theme.fontFamily">
                                                 <option value="Microsoft YaHei">微软雅黑</option>
+                                                <option value="Microsoft YaHei UI">微软雅黑 UI</option>
                                                 <option value="SimHei">黑体</option>
                                                 <option value="SimSun">宋体</option>
                                                 <option value="KaiTi">楷体</option>
                                                 <option value="FangSong">仿宋</option>
-                                                <option value="Microsoft YaHei UI">Microsoft YaHei UI</option>
-                                                <option value="Arial">Arial</option>
-                                                <option value="Segoe UI">Segoe UI</option>
-                                                <option value="PingFang SC">苹方 (PingFang SC)</option>
-                                                <option value="Hiragino Sans GB">冬青黑体</option>
                                                 <option value="Source Han Sans SC">思源黑体</option>
                                                 <option value="Source Han Serif SC">思源宋体</option>
+                                                <option value="PingFang SC">苹方</option>
+                                                <option value="Segoe UI">Segoe UI</option>
+                                                <option value="Arial">Arial</option>
                                             </select>
-                                        </div>
-                                        <div class="control-group">
-                                            <label>字号</label>
-                                            <input type="range" min="12" max="96" value="32" class="slider" id="subtitle-font-size">
-                                            <span class="value-display">32px</span>
-                                        </div>
-                                        <div class="control-group">
-                                            <label>字重</label>
-                                            <select class="text-input" id="subtitle-font-weight">
-                                                <option value="100">极细 100</option>
-                                                <option value="200">特细 200</option>
-                                                <option value="300">细体 300</option>
-                                                <option value="400" selected>常规 400</option>
-                                                <option value="500">中等 500</option>
-                                                <option value="600">半粗 600</option>
-                                                <option value="700">粗体 700</option>
-                                                <option value="800">特粗 800</option>
-                                                <option value="900">超粗 900</option>
+                                        </div></div>
+                                        <div class="sv-row"><label>字号</label><div class="sv-ctl"><input type="range" min="12" max="96" step="1" data-bind="theme.fontSize" data-type="int"><output data-fmt="px"></output></div></div>
+                                        <div class="sv-row"><label>字重</label><div class="sv-ctl">
+                                            <select class="text-input" data-bind="theme.fontWeight" data-type="int" data-options="weight"></select>
+                                            <div class="switch sv-inline-switch" data-bind="theme.italic" data-type="bool" title="斜体"><div class="switch-knob"></div></div><span class="sv-inline-label">斜体</span>
+                                        </div></div>
+                                        <div class="sv-row"><label>颜色</label><div class="sv-ctl"><input type="color" class="color-input" data-bind="theme.fontColor"><span class="sv-sub">临时</span><input type="color" class="color-input" data-bind="theme.interimColor"></div></div>
+                                        <div class="sv-row"><label>临时文字</label><div class="sv-ctl"><input type="range" min="0" max="1" step="0.05" data-bind="theme.interimOpacity" data-type="float"><output data-fmt="pct"></output></div></div>
+                                        <div class="sv-row"><label>对齐</label><div class="sv-ctl">
+                                            <div class="segmented-control" data-bind="theme.textAlign">
+                                                <button class="seg-btn" data-value="left" type="button">左</button>
+                                                <button class="seg-btn" data-value="center" type="button">中</button>
+                                                <button class="seg-btn" data-value="right" type="button">右</button>
+                                            </div>
+                                        </div></div>
+                                        <div class="sv-row"><label>行高</label><div class="sv-ctl"><input type="range" min="0.8" max="3" step="0.1" data-bind="theme.lineHeight" data-type="float"><output data-fmt="x1"></output></div></div>
+                                        <div class="sv-row"><label>字间距</label><div class="sv-ctl"><input type="range" min="-2" max="20" step="0.5" data-bind="theme.letterSpacing" data-type="float"><output data-fmt="px"></output></div></div>
+                                        <div class="sv-row"><label>描边</label><div class="sv-ctl"><input type="color" class="color-input" data-bind="theme.textShadowColor"><input type="range" min="0" max="10" step="1" data-bind="theme.textShadowStrength" data-type="int"><output></output></div></div>
+                                    </div>
+
+                                    <div class="sv-group">
+                                        <div class="sv-group-title">背景</div>
+                                        <div class="sv-row"><label>颜色</label><div class="sv-ctl"><input type="color" class="color-input" data-bind="theme.bgColor"><input type="range" min="0" max="1" step="0.05" data-bind="theme.bgOpacity" data-type="float"><output data-fmt="pct"></output></div></div>
+                                        <div class="sv-row"><label>水平内距</label><div class="sv-ctl"><input type="range" min="0" max="60" step="1" data-bind="theme.paddingX" data-type="int"><output data-fmt="px"></output></div></div>
+                                        <div class="sv-row"><label>垂直内距</label><div class="sv-ctl"><input type="range" min="0" max="40" step="1" data-bind="theme.paddingY" data-type="int"><output data-fmt="px"></output></div></div>
+                                    </div>
+
+                                    <div class="sv-group">
+                                        <div class="sv-group-title">排版</div>
+                                        <div class="sv-row"><label>显示行数</label><div class="sv-ctl"><input type="range" min="1" max="6" step="1" data-bind="theme.maxLines" data-type="int"><output data-fmt="lines"></output></div></div>
+                                        <div class="sv-row"><label>换行方式</label><div class="sv-ctl">
+                                            <div class="segmented-control" data-bind="theme.autoWrap" data-type="bool">
+                                                <button class="seg-btn" data-value="false" type="button" title="所有文字连成一段，超出行数从开头滚走">连续滚动</button>
+                                                <button class="seg-btn" data-value="true" type="button" title="每句一行，旧句渐隐上移">逐句换行</button>
+                                            </div>
+                                        </div></div>
+                                        <div class="sv-row"><label>元素排列</label><div class="sv-ctl">
+                                            <div class="segmented-control" data-bind="theme.layout">
+                                                <button class="seg-btn" data-value="vertical" type="button">上下</button>
+                                                <button class="seg-btn" data-value="horizontal" type="button">左右</button>
+                                            </div>
+                                        </div></div>
+                                        <div class="sv-row"><label>窗口内位置</label><div class="sv-ctl sv-anchor">
+                                            <div class="sv-anchor-grid" id="sv-anchor-grid" title="字幕卡片在窗口中的位置"></div>
+                                            <div class="sv-anchor-side"><span class="sv-sub">卡片宽度</span><input type="range" min="30" max="100" step="5" data-bind="theme.maxWidthPct" data-type="int"><output data-fmt="pct100"></output></div>
+                                        </div></div>
+                                    </div>
+                                </div>
+
+                                <!-- 元素 -->
+                                <div class="sv-pane" data-pane="elements">
+                                    <p class="sv-hint">从上到下即显示顺序。点击元素展开它的样式；自定义文本支持 <code>{time}</code> <code>{date}</code> <code>{text}</code> <code>{translation}</code> <code>{speaker}</code>。</p>
+                                    <div class="sv-elements" id="sv-elements"></div>
+                                    <div class="sv-element-add">
+                                        <button class="secondary-btn btn-sm" data-add-element="text" type="button">+ 文本</button>
+                                        <button class="secondary-btn btn-sm" data-add-element="divider" type="button">+ 分隔线</button>
+                                        <button class="secondary-btn btn-sm" data-add-element="spacer" type="button">+ 间距</button>
+                                    </div>
+                                </div>
+
+                                <!-- 同传 -->
+                                <div class="sv-pane" data-pane="translate">
+                                    <div class="sv-group">
+                                        <div class="sv-group-title">当前窗口</div>
+                                        <div class="sv-row"><label>同声传译</label><div class="sv-ctl">
+                                            <div class="switch" data-bind="window.translation.engine" data-type="engine"><div class="switch-knob"></div></div>
+                                            <span class="sv-sub" id="sv-translate-state"></span>
+                                        </div></div>
+                                        <div class="sv-row" data-requires="translate"><label>目标语言</label><div class="sv-ctl">
+                                            <select class="text-input" data-bind="window.translation.targetLang">
+                                                <option value="中文">中文（简体）</option>
+                                                <option value="英文">英文 English</option>
+                                                <option value="日文">日文 日本語</option>
+                                                <option value="韩文">韩文 한국어</option>
+                                                <option value="法文">法文 Français</option>
+                                                <option value="德文">德文 Deutsch</option>
+                                                <option value="西班牙文">西班牙文 Español</option>
+                                                <option value="俄文">俄文 Русский</option>
                                             </select>
-                                        </div>
-                                        <div class="control-group switch-row">
-                                            <label>斜体</label>
-                                            <div class="switch" id="subtitle-italic" data-on="false">
-                                                <div class="switch-knob"></div>
-                                            </div>
-                                        </div>
-                                        <div class="control-group">
-                                            <label>行高</label>
-                                            <input type="range" min="0.8" max="3" step="0.1" value="1.4" class="slider" id="subtitle-line-height">
-                                            <span class="value-display">1.4</span>
-                                        </div>
-                                        <div class="control-group">
-                                            <label>字间距</label>
-                                            <input type="range" min="-2" max="20" step="0.5" value="0" class="slider" id="subtitle-letter-spacing">
-                                            <span class="value-display">0px</span>
-                                        </div>
+                                        </div></div>
+                                        <div class="sv-row" data-requires="translate"><label>同声预览</label><div class="sv-ctl">
+                                            <div class="switch" data-bind="window.translation.interim" data-type="bool"><div class="switch-knob"></div></div>
+                                            <span class="sv-sub">说话过程中先给出当前句的译文草稿</span>
+                                        </div></div>
+                                        <p class="sv-hint">多个窗口可以各自翻译成不同语言；同一语言只翻译一次。</p>
                                     </div>
-                                </section>
+                                    <div class="sv-group">
+                                        <div class="sv-group-title">翻译模型（所有窗口共用）</div>
+                                        <div class="sv-row"><label>接口地址</label><div class="sv-ctl"><input type="text" class="text-input" data-bind="global.translationLlm.apiUrl" placeholder="留空：复用智能校对，否则用硅基流动"></div></div>
+                                        <div class="sv-row"><label>API Key</label><div class="sv-ctl"><input type="password" class="text-input" data-bind="global.translationLlm.apiKey" placeholder="留空：复用智能校对的 Key"></div></div>
+                                        <div class="sv-row"><label>模型</label><div class="sv-ctl"><input type="text" class="text-input" data-bind="global.translationLlm.model" placeholder="Qwen/Qwen2.5-7B-Instruct"></div></div>
+                                    </div>
+                                </div>
 
-                                <section class="subtitle-subsection">
-                                    <h5 class="subtitle-sub-title">文字</h5>
-                                    <div class="subtitle-grid subtitle-grid-3">
-                                        <div class="control-group">
-                                            <label>文字颜色</label>
-                                            <input type="color" class="color-input" id="subtitle-font-color" value="#ffffff">
-                                        </div>
-                                        <div class="control-group">
-                                            <label>对齐方式</label>
-                                            <div class="segmented-control" id="subtitle-text-align">
-                                                <button class="seg-btn" data-mode="left" type="button">左</button>
-                                                <button class="seg-btn active" data-mode="center" type="button">中</button>
-                                                <button class="seg-btn" data-mode="right" type="button">右</button>
-                                            </div>
-                                        </div>
-                                        <div class="control-group">
-                                            <label>阴影颜色</label>
-                                            <input type="color" class="color-input" id="subtitle-text-shadow-color" value="#000000">
-                                        </div>
-                                        <div class="control-group">
-                                            <label>阴影强度</label>
-                                            <input type="range" min="0" max="10" value="4" class="slider" id="subtitle-text-shadow-strength">
-                                            <span class="value-display">4</span>
-                                        </div>
-                                        <div class="control-group">
-                                            <label>显示行数（含当前行）</label>
-                                            <input type="range" min="1" max="6" value="3" class="slider" id="subtitle-lines">
-                                            <span class="value-display">3 行</span>
-                                        </div>
-                                        <div class="control-group">
-                                            <label>临时文字颜色</label>
-                                            <input type="color" class="color-input" id="subtitle-interim-color" value="#ffffff">
-                                        </div>
-                                        <div class="control-group">
-                                            <label>临时文字透明度</label>
-                                            <input type="range" min="0" max="100" value="70" class="slider" id="subtitle-interim-opacity">
-                                            <span class="value-display">70%</span>
-                                        </div>
+                                <!-- 输入 -->
+                                <div class="sv-pane" data-pane="input">
+                                    <div class="sv-sources" id="sv-sources">
+                                        <button class="sv-source" data-source="microphone" type="button">
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
+                                            <b>麦克风</b><span>识别你说的话</span>
+                                        </button>
+                                        <button class="sv-source" data-source="system" type="button">
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+                                            <b>系统声音</b><span>电脑里的声音</span>
+                                        </button>
+                                        <button class="sv-source" data-source="dual" type="button">
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10"/><path d="m14 4 3 3-3 3"/><path d="M17 17H7"/><path d="m10 14-3 3 3 3"/></svg>
+                                            <b>双向同传</b><span>对方 + 我</span>
+                                        </button>
                                     </div>
-                                </section>
+                                    <p class="sv-hint" id="sv-source-hint"></p>
+                                    <div class="sv-group">
+                                        <div class="sv-row" id="sv-device-row"><label>麦克风</label><div class="sv-ctl">
+                                            <select class="text-input" id="setting-subtitle-input-device" data-bind="global.inputDevice"><option value="">系统默认</option></select>
+                                        </div></div>
+                                        <div class="sv-row"><label>开关快捷键</label><div class="sv-ctl">
+                                            <input type="text" class="text-input hotkey-input" id="subtitle-hotkey" data-capture="own" value="F7" readonly>
+                                            <span class="sv-sub">全局生效，切到其他软件也能开关</span>
+                                        </div></div>
+                                        <div class="sv-row"><label>识别引擎</label><div class="sv-ctl">
+                                            <span class="sv-engine" id="sv-engine-state"></span>
+                                        </div></div>
+                                    </div>
+                                </div>
 
-                                <section class="subtitle-subsection">
-                                    <h5 class="subtitle-sub-title">背景</h5>
-                                    <div class="subtitle-grid subtitle-grid-3">
-                                        <div class="control-group">
-                                            <label>背景颜色</label>
-                                            <input type="color" class="color-input" id="subtitle-bg-color" value="#000000">
-                                        </div>
-                                        <div class="control-group">
-                                            <label>背景透明度</label>
-                                            <input type="range" min="0" max="100" value="60" class="slider" id="subtitle-opacity">
-                                            <span class="value-display">60%</span>
-                                        </div>
-                                        <div class="control-group">
-                                            <label>背景模糊</label>
-                                            <input type="range" min="0" max="40" value="20" class="slider" id="subtitle-blur">
-                                            <span class="value-display">20px</span>
-                                        </div>
-                                        <div class="control-group">
-                                            <label>内边距 X</label>
-                                            <input type="range" min="0" max="60" value="24" class="slider" id="subtitle-padding-x">
-                                            <span class="value-display">24px</span>
-                                        </div>
-                                        <div class="control-group">
-                                            <label>内边距 Y</label>
-                                            <input type="range" min="0" max="40" value="12" class="slider" id="subtitle-padding-y">
-                                            <span class="value-display">12px</span>
-                                        </div>
+                                <!-- 窗口 -->
+                                <div class="sv-pane" data-pane="window">
+                                    <div class="sv-group">
+                                        <div class="sv-row"><label>名称</label><div class="sv-ctl"><input type="text" class="text-input" data-bind="window.name" maxlength="24"></div></div>
+                                        <div class="sv-row"><label>始终置顶</label><div class="sv-ctl"><div class="switch" data-bind="window.alwaysOnTop" data-type="bool" data-flag="always_on_top"><div class="switch-knob"></div></div></div></div>
+                                        <div class="sv-row"><label>鼠标穿透</label><div class="sv-ctl"><div class="switch" data-bind="window.clickThrough" data-type="bool" data-flag="click_through"><div class="switch-knob"></div></div><span class="sv-sub">开启后字幕不挡点击，需在这里关闭才能拖动</span></div></div>
+                                        <div class="sv-row"><label>高度自适应</label><div class="sv-ctl"><div class="switch" data-bind="window.autoFit" data-type="bool"><div class="switch-knob"></div></div><span class="sv-sub">内容放不下时自动加高窗口</span></div></div>
+                                        <div class="sv-row"><label>OBS 兼容</label><div class="sv-ctl"><div class="switch" data-bind="window.obsMode" data-type="bool" data-flag="obs_mode"><div class="switch-knob"></div></div><span class="sv-sub">窗口采集时用近黑背景，抠像干净</span></div></div>
                                     </div>
-                                </section>
-
-                                <section class="subtitle-subsection">
-                                    <h5 class="subtitle-sub-title">布局</h5>
-                                    <div class="subtitle-grid subtitle-grid-3">
-                                        <div class="control-group">
-                                            <label>布局方向</label>
-                                            <div class="segmented-control" id="subtitle-layout">
-                                                <button class="seg-btn active" data-mode="vertical" type="button">垂直</button>
-                                                <button class="seg-btn" data-mode="horizontal" type="button">水平</button>
-                                            </div>
-                                        </div>
-                                        <div class="control-group">
-                                            <label>窗口内水平位置</label>
-                                            <div class="segmented-control" id="subtitle-anchor-x">
-                                                <button class="seg-btn" data-mode="left" type="button">靠左</button>
-                                                <button class="seg-btn active" data-mode="center" type="button">居中</button>
-                                                <button class="seg-btn" data-mode="right" type="button">靠右</button>
-                                            </div>
-                                        </div>
-                                        <div class="control-group">
-                                            <label>窗口内垂直位置</label>
-                                            <div class="segmented-control" id="subtitle-anchor-y">
-                                                <button class="seg-btn" data-mode="top" type="button">顶部</button>
-                                                <button class="seg-btn" data-mode="center" type="button">居中</button>
-                                                <button class="seg-btn active" data-mode="bottom" type="button">底部</button>
-                                            </div>
-                                        </div>
-                                        <div class="control-group">
-                                            <label>卡片最大宽度</label>
-                                            <input type="range" min="30" max="100" value="100" class="slider" id="subtitle-max-width">
-                                            <span class="value-display">100%</span>
-                                        </div>
-                                        <div class="control-group switch-row span-2">
-                                            <label title="关闭（默认）：所有文字保持在当前行连续显示；开启：完成句段跳到上方历史行">完成句段自动分行（历史行）</label>
-                                            <div class="switch" id="subtitle-auto-wrap" data-on="false">
-                                                <div class="switch-knob"></div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </section>
-                            </div>
-                        </div>
-
-                        <div class="subtitle-cards">
-                            <div class="subtitle-card" id="card-translation-engine">
-                                <h4 class="subtitle-card-title">同声传译（当前窗口）</h4>
-                                <p class="subtitle-tip subtitle-tip-left">把识别原文实时翻译成目标语言显示在「译文」元素中（增量句段翻译 + 中间结果同声预览）。接口地址 / API Key / 模型名在「音源与全局」中全局共享。</p>
-                                <div class="subtitle-grid subtitle-grid-3">
-                                    <div class="control-group">
-                                        <label>翻译引擎</label>
-                                        <select class="text-input" id="subtitle-translation-engine">
-                                            <option value="none">关闭</option>
-                                            <option value="llm">LLM 同声传译（OpenAI 兼容）</option>
-                                        </select>
-                                    </div>
-                                    <div class="control-group" id="subtitle-translation-lang-group">
-                                        <label>目标语言</label>
-                                        <select class="text-input" id="subtitle-translation-lang">
-                                            <option value="中文">中文（简体）</option>
-                                            <option value="英文">英文 English</option>
-                                            <option value="日文">日文 日本語</option>
-                                            <option value="韩文">韩文 한국어</option>
-                                            <option value="法文">法文 Français</option>
-                                            <option value="德文">德文 Deutsch</option>
-                                            <option value="西班牙文">西班牙文 Español</option>
-                                            <option value="俄文">俄文 Русский</option>
-                                        </select>
-                                    </div>
-                                    <div class="control-group switch-row" id="subtitle-translation-interim-group">
-                                        <label>翻译中间结果（同声预览）</label>
-                                        <div class="switch" id="subtitle-translation-interim" data-on="true">
-                                            <div class="switch-knob"></div>
-                                        </div>
+                                    <div class="sv-window-actions">
+                                        <button class="secondary-btn btn-sm" id="sv-duplicate-window" type="button">复制此窗口</button>
+                                        <button class="secondary-btn btn-sm scene-btn-danger" id="sv-remove-window" type="button">删除此窗口</button>
                                     </div>
                                 </div>
                             </div>
-                        </div>
 
-                        <div class="subtitle-cards">
-                            <div class="subtitle-card" id="card-element-styles">
-                                <h4 class="subtitle-card-title">元素样式（译文 / 说话人 / 时间戳）</h4>
-                                <p class="subtitle-tip subtitle-tip-left">以下样式作用于「译文」「说话人」「时间戳」固定元素；各元素的开关与顺序在下方「显示元素」中配置。</p>
-
-                                <section class="subtitle-subsection">
-                                    <h5 class="subtitle-sub-title">译文</h5>
-                                    <div class="subtitle-grid subtitle-grid-3">
-                                        <div class="control-group">
-                                            <label>译文颜色</label>
-                                            <input type="color" class="color-input" id="subtitle-translation-color" value="#ffffff">
-                                        </div>
-                                        <div class="control-group">
-                                            <label>译文字号</label>
-                                            <input type="range" min="8" max="96" value="24" class="slider" id="subtitle-translation-size">
-                                            <span class="value-display">24px</span>
-                                        </div>
-                                        <div class="control-group">
-                                            <label>译文字重</label>
-                                            <select class="text-input" id="subtitle-translation-weight">
-                                                <option value="100">极细 100</option>
-                                                <option value="200">特细 200</option>
-                                                <option value="300">细体 300</option>
-                                                <option value="400" selected>常规 400</option>
-                                                <option value="500">中等 500</option>
-                                                <option value="600">半粗 600</option>
-                                                <option value="700">粗体 700</option>
-                                                <option value="800">特粗 800</option>
-                                                <option value="900">超粗 900</option>
-                                            </select>
-                                        </div>
-                                        <div class="control-group">
-                                            <label>译文透明度</label>
-                                            <input type="range" min="0" max="100" value="85" class="slider" id="subtitle-translation-opacity">
-                                            <span class="value-display">85%</span>
-                                        </div>
-                                        <div class="control-group span-2">
-                                            <label>译文前缀（可选）</label>
-                                            <input type="text" class="text-input" id="subtitle-translation-prefix" placeholder="如 译: " value="">
-                                        </div>
-                                    </div>
-                                </section>
-
-                                <section class="subtitle-subsection">
-                                    <h5 class="subtitle-sub-title">说话人</h5>
-                                    <div class="subtitle-grid subtitle-grid-3">
-                                        <div class="control-group">
-                                            <label>说话人颜色</label>
-                                            <input type="color" class="color-input" id="subtitle-speaker-color" value="#818cf8">
-                                        </div>
-                                        <div class="control-group">
-                                            <label>说话人字号</label>
-                                            <input type="range" min="8" max="48" value="16" class="slider" id="subtitle-speaker-size">
-                                            <span class="value-display">16px</span>
-                                        </div>
-                                        <div class="control-group">
-                                            <label>说话人前缀（可选）</label>
-                                            <input type="text" class="text-input" id="subtitle-speaker-prefix" placeholder="如 说话人: " value="">
-                                        </div>
-                                    </div>
-                                </section>
-
-                                <section class="subtitle-subsection">
-                                    <h5 class="subtitle-sub-title">时间戳</h5>
-                                    <div class="subtitle-grid subtitle-grid-3">
-                                        <div class="control-group">
-                                            <label>时间戳颜色</label>
-                                            <input type="color" class="color-input" id="subtitle-timestamp-color" value="#a1a1aa">
-                                        </div>
-                                        <div class="control-group">
-                                            <label>时间戳字号</label>
-                                            <input type="range" min="8" max="48" value="14" class="slider" id="subtitle-timestamp-size">
-                                            <span class="value-display">14px</span>
-                                        </div>
-                                        <div class="control-group">
-                                            <label>时间戳格式</label>
-                                            <select class="text-input" id="subtitle-timestamp-format">
-                                                <option value="HH:MM:SS" selected>时:分:秒</option>
-                                                <option value="MM:SS">分:秒</option>
-                                                <option value="none">不显示</option>
-                                            </select>
-                                        </div>
-                                    </div>
-                                </section>
-                            </div>
-                        </div>
-
-                        <div class="subtitle-cards subtitle-cards-full">
-                            <div class="subtitle-card" id="card-elements">
-                                <h4 class="subtitle-card-title">显示元素（顺序即显示顺序）</h4>
-                                <p class="subtitle-tip subtitle-tip-left">固定元素（说话人/原文/译文/副原文/时间戳）仅可开关与排序，样式在上方卡片配置；自定义元素（文本/分隔线/间距）可增删。文本支持占位符 <code>{time}</code> <code>{date}</code> <code>{datetime}</code> <code>{text}</code> <code>{translation}</code> <code>{speaker}</code>。</p>
-                                <div class="element-editor-list" id="subtitle-element-editor"></div>
-                                <div class="custom-element-actions">
-                                    <button class="secondary-btn" id="btn-add-element-text" type="button">+ 文本</button>
-                                    <button class="secondary-btn" id="btn-add-element-divider" type="button">+ 分隔线</button>
-                                    <button class="secondary-btn" id="btn-add-element-spacer" type="button">+ 间距</button>
-                                    <button class="secondary-btn scene-btn-danger" id="btn-delete-element" type="button" disabled>删除所选</button>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="subtitle-cards subtitle-cards-full">
-                            <div class="subtitle-card">
-                                <h4 class="subtitle-card-title">窗口控制</h4>
-                                <p class="subtitle-tip subtitle-tip-left">字幕窗口是普通窗口，OBS 直接「窗口采集」即可。OBS 兼容模式开/关显示一致（近黑背景、采集干净）。窗口被手动关闭后，此处状态会同步更新。</p>
-                                <div class="subtitle-grid subtitle-grid-window-ctrl">
-                                    <div class="control-group switch-row">
-                                        <label>窗口置顶</label>
-                                        <div class="switch" id="subtitle-always-on-top" data-on="true">
-                                            <div class="switch-knob"></div>
-                                        </div>
-                                    </div>
-                                    <div class="control-group switch-row">
-                                        <label>点击穿透</label>
-                                        <div class="switch" id="subtitle-click-through" data-on="false">
-                                            <div class="switch-knob"></div>
-                                        </div>
-                                    </div>
-                                    <div class="control-group switch-row">
-                                        <label>OBS 捕捉兼容模式</label>
-                                        <div class="switch" id="subtitle-obs-mode" data-on="true">
-                                            <div class="switch-knob"></div>
-                                        </div>
-                                    </div>
-                                    <div class="control-group switch-row">
-                                        <label>窗口高度自适应内容</label>
-                                        <div class="switch" id="subtitle-auto-fit" data-on="true">
-                                            <div class="switch-knob"></div>
-                                        </div>
-                                    </div>
-                                    <div class="control-group subtitle-action-row">
-                                        <label>字幕窗口</label>
-                                        <div class="window-ctrl-buttons">
-                                            <button class="secondary-btn" id="btn-show-subtitle-window" type="button">显示窗口</button>
-                                            <button class="secondary-btn" id="btn-hide-subtitle-window" type="button">隐藏窗口</button>
-                                            <span class="transcript-status" id="subtitle-window-status"></span>
-                                        </div>
+                            <!-- 转录 -->
+                            <div class="sv-card sv-transcript-card">
+                                <div class="sv-card-head">
+                                    <div class="sv-card-title">转录<span class="sv-count" id="sv-transcript-count"></span></div>
+                                    <div class="sv-card-actions">
+                                        <button class="ghost-btn btn-sm" id="sv-transcript-copy" type="button" title="复制全部文字">复制</button>
+                                        <button class="ghost-btn btn-sm" data-export="srt" type="button" title="导出 SRT 字幕">SRT</button>
+                                        <button class="ghost-btn btn-sm" data-export="txt" type="button" title="导出纯文本">TXT</button>
+                                        <button class="ghost-btn btn-sm" data-export="md" type="button" title="导出 Markdown 纪要">MD</button>
+                                        <button class="icon-btn" id="sv-transcript-clear" type="button" title="清空">
+                                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4h6v3"/></svg>
+                                        </button>
                                     </div>
                                 </div>
+                                <div class="sv-transcript" id="sv-transcript"></div>
+                                <button class="sv-jump" id="sv-transcript-jump" type="button" hidden>↓ 最新</button>
                             </div>
-                        </div>
-
-                        <div class="subtitle-cards subtitle-cards-full">
-                            <div class="subtitle-card" id="card-transcript">
-                                <h4 class="subtitle-card-title">实时转录（本次会话）</h4>
-                                <p class="subtitle-tip subtitle-tip-left">会话期间定稿的句段自动记录于此，可导出为 TXT / SRT / Markdown 用作会议纪要或视频字幕。</p>
-                                <div class="transcript-toolbar">
-                                    <button class="secondary-btn" id="btn-export-transcript-txt" type="button">导出 TXT</button>
-                                    <button class="secondary-btn" id="btn-export-transcript-srt" type="button">导出 SRT</button>
-                                    <button class="secondary-btn" id="btn-export-transcript-md" type="button">导出 Markdown</button>
-                                    <button class="secondary-btn scene-btn-danger" id="btn-clear-transcript" type="button">清空</button>
-                                    <span class="transcript-status" id="transcript-status"></span>
-                                </div>
-                                <div class="transcript-list" id="subtitle-transcript-list">
-                                    <div class="transcript-empty">开启实时字幕后，定稿句段将显示在这里</div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="subtitle-toggle-section">
-                            <p class="subtitle-tip">点击右上角「开启实时字幕」（或按字幕开关热键）开始 / 停止</p>
                         </div>
                     </div>
                 </section>
@@ -759,32 +536,171 @@
                     <div class="view-header">
                         <div class="view-heading">
                             <h2>视频配音</h2>
-                            <p class="view-desc">识别 → 编辑 → 合成 → 混流，一条流水线换掉整段原声</p>
+                            <p class="view-desc">识别原声字幕 → 逐句修改 → 换一个声音重新配 → 导出成片</p>
                         </div>
-                        <div class="view-header-actions dub-toolbar">
-                            <span class="tts-status" id="dub-status">就绪</span>
-                            <button class="secondary-btn" id="btn-dub-run-prepare" disabled>识别字幕</button>
-                            <button class="primary-btn" id="btn-dub-run-generate" disabled>▶ 生成配音</button>
-                            <button class="ghost-btn" id="btn-dub-cancel" style="display:none">取消</button>
+                        <div class="view-header-actions">
+                            <button class="ghost-btn" id="dv-cancel" type="button" hidden>取消</button>
+                            <button class="secondary-btn" id="dv-close-project" type="button" hidden title="关闭当前视频">关闭视频</button>
                         </div>
                     </div>
-                    <div class="view-body dub-body">
-                        <div class="dub-canvas-wrap" id="dub-canvas-wrap">
-                            <svg class="dub-wires" id="dub-wires"></svg>
-                            <div class="dub-canvas" id="dub-canvas"><!-- 节点由 JS 注入 --></div>
+
+                    <div class="view-body dv-body">
+                        <!-- 空状态 -->
+                        <div class="dv-empty" id="dv-empty">
+                            <div class="dv-drop" id="dv-drop">
+                                <div class="dv-drop-icon">
+                                    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="15" height="14" rx="3"/><path d="m17.5 10 4-2.5v9l-4-2.5"/><path d="M7 10.5v3"/><path d="M10 9v6"/><path d="M13 11v2"/></svg>
+                                </div>
+                                <h3>把视频拖到这里</h3>
+                                <p>或者点击选择文件 · 支持 mp4 / mkv / mov / webm 等</p>
+                                <button class="primary-btn btn-lg" id="dv-pick" type="button">选择视频</button>
+                            </div>
+                            <ol class="dv-steps-intro">
+                                <li><b>识别</b><span>云端识别原声，句级 + 词级时间轴</span></li>
+                                <li><b>编辑</b><span>边看视频边改字幕，语速超标会提醒</span></li>
+                                <li><b>配音</b><span>选一个音色，逐句合成并自动对齐口型时间</span></li>
+                                <li><b>导出</b><span>替换或保留背景原声，附带 SRT 字幕</span></li>
+                            </ol>
                         </div>
-                        <div class="dub-editor" id="dub-editor" hidden>
-                            <div class="dub-editor-head">
-                                <b>字幕编辑</b>
-                                <span class="dub-editor-stat" id="dub-editor-stat"></span>
-                                <div class="dub-editor-tools">
-                                    每段 ≤ <input type="number" id="dub-seg-chars" value="20" min="4" max="80"> 字
-                                    最短 <input type="number" id="dub-seg-mindur" value="800" min="0" step="100"> ms
-                                    <button class="secondary-btn btn-sm" id="btn-dub-reseg">应用重分段</button>
-                                    <button class="secondary-btn btn-sm" id="btn-dub-add-seg">+ 新增分段</button>
+
+                        <!-- 工作区 -->
+                        <div class="dv-workspace" id="dv-workspace" hidden>
+                            <div class="dv-stepper" id="dv-stepper" role="tablist">
+                                <button class="dv-step" data-step="video" type="button"><span class="dv-step-no">1</span><span class="dv-step-text"><b>视频</b><small data-step-sub="video"></small></span></button>
+                                <button class="dv-step" data-step="asr" type="button"><span class="dv-step-no">2</span><span class="dv-step-text"><b>识别字幕</b><small data-step-sub="asr"></small></span></button>
+                                <button class="dv-step" data-step="voice" type="button"><span class="dv-step-no">3</span><span class="dv-step-text"><b>配音</b><small data-step-sub="voice"></small></span></button>
+                                <button class="dv-step" data-step="export" type="button"><span class="dv-step-no">4</span><span class="dv-step-text"><b>导出</b><small data-step-sub="export"></small></span></button>
+                            </div>
+
+                            <div class="dv-top">
+                                <!-- 监视器 -->
+                                <div class="dv-monitor">
+                                    <div class="dv-player" id="dv-player">
+                                        <video id="dv-video" preload="metadata" playsinline></video>
+                                        <div class="dv-player-caption" id="dv-player-caption"></div>
+                                        <div class="dv-player-msg" id="dv-player-msg" hidden></div>
+                                        <div class="dv-source-switch" id="dv-source-switch" hidden>
+                                            <button class="active" data-src="original" type="button">原片</button>
+                                            <button data-src="output" type="button">成片</button>
+                                        </div>
+                                    </div>
+                                    <div class="dv-transport">
+                                        <button class="icon-btn" id="dv-play" type="button" title="播放 / 暂停（空格）">
+                                            <svg class="i-play" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15a1 1 0 0 0 1.5.9l12-7.5a1 1 0 0 0 0-1.8l-12-7.5A1 1 0 0 0 7 4.5Z"/></svg>
+                                            <svg class="i-pause" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4.5" width="4" height="15" rx="1.2"/><rect x="14" y="4.5" width="4" height="15" rx="1.2"/></svg>
+                                        </button>
+                                        <span class="dv-time" id="dv-time">00:00 / 00:00</span>
+                                        <div class="dv-timeline" id="dv-timeline" title="点击跳转">
+                                            <div class="dv-timeline-blocks" id="dv-timeline-blocks"></div>
+                                            <div class="dv-playhead" id="dv-playhead"></div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 检查器：随步骤切换 -->
+                                <div class="dv-inspector">
+                                    <div class="dv-pane" data-pane="video">
+                                        <div class="dv-file">
+                                            <div class="dv-file-name" id="dv-file-name"></div>
+                                            <div class="dv-file-meta" id="dv-file-meta"></div>
+                                        </div>
+                                        <div class="dv-actions-col">
+                                            <button class="secondary-btn" id="dv-change-video" type="button">更换视频</button>
+                                            <button class="secondary-btn" id="dv-import-srt" type="button">导入已有 SRT 字幕</button>
+                                        </div>
+                                        <p class="dv-hint">已经有字幕文件？导入后可以跳过识别，直接配音。</p>
+                                        <button class="primary-btn dv-next" data-goto="asr" type="button">下一步：识别字幕</button>
+                                    </div>
+
+                                    <div class="dv-pane" data-pane="asr">
+                                        <div class="dv-field"><label>识别引擎</label>
+                                            <select class="text-input" id="dv-asr-provider">
+                                                <option value="ali-dashscope">阿里云百炼 · 句/词级时间轴</option>
+                                                <option value="global-compat">跟随「整段识别」设置</option>
+                                            </select>
+                                        </div>
+                                        <p class="dv-hint" id="dv-asr-hint"></p>
+                                        <div class="dv-field" data-ali-only><label>视频语言</label>
+                                            <select class="text-input" id="dv-asr-lang">
+                                                <option value="">自动检测</option>
+                                                <option value="zh">中文</option><option value="yue">粤语</option>
+                                                <option value="en">English</option><option value="ja">日本語</option>
+                                                <option value="ko">한국어</option><option value="de">Deutsch</option>
+                                                <option value="fr">Français</option><option value="es">Español</option>
+                                                <option value="ru">Русский</option>
+                                            </select>
+                                        </div>
+                                        <div class="dv-switch-row" data-ali-only><span>词级时间戳<small>拆句、重分段更精确</small></span><div class="switch" id="dv-asr-words" data-on="true"><div class="switch-knob"></div></div></div>
+                                        <div class="dv-switch-row" data-ali-only><span>数字规范化<small>「二零二六」→「2026」</small></span><div class="switch" id="dv-asr-itn" data-on="true"><div class="switch-knob"></div></div></div>
+                                        <div class="dv-progress" id="dv-asr-progress" hidden><div class="dv-progress-bar"><i></i></div><span></span></div>
+                                        <button class="primary-btn dv-next" id="dv-run-asr" type="button">开始识别</button>
+                                    </div>
+
+                                    <div class="dv-pane" data-pane="voice">
+                                        <div class="dv-voice">
+                                            <div class="dv-voice-avatar" id="dv-voice-avatar">声</div>
+                                            <div class="dv-voice-info"><b id="dv-voice-name">默认音色</b><small id="dv-voice-sub">Fish Audio</small></div>
+                                            <button class="secondary-btn btn-sm" id="dv-voice-pick" type="button">更换</button>
+                                        </div>
+                                        <div class="dv-field"><label>模型</label>
+                                            <select class="text-input" id="dv-tts-model">
+                                                <option value="s2.1-pro-free">S2.1 Pro Free</option>
+                                                <option value="s2.1-pro">S2.1 Pro</option>
+                                                <option value="s2-pro">S2 Pro</option>
+                                                <option value="s1">S1（情感）</option>
+                                            </select>
+                                        </div>
+                                        <div class="dv-field"><label>基础语速</label><div class="dv-range"><input type="range" id="dv-tts-speed" min="0.7" max="1.5" step="0.05" value="1"><output id="dv-tts-speed-v">1.00×</output></div></div>
+                                        <div class="dv-field"><label>音量</label><div class="dv-range"><input type="range" id="dv-tts-volume" min="-10" max="10" step="1" value="0"><output id="dv-tts-volume-v">0 dB</output></div></div>
+                                        <div class="dv-field"><label>保留原声</label><div class="dv-range"><input type="range" id="dv-bg-volume" min="0" max="0.6" step="0.05" value="0"><output id="dv-bg-volume-v">不保留</output></div></div>
+                                        <p class="dv-hint">保留原声会把原视频声音压低垫在配音下面，适合有背景音乐的视频。</p>
+                                        <details class="dv-advanced">
+                                            <summary>高级</summary>
+                                            <div class="dv-field"><label>温度</label><div class="dv-range"><input type="range" id="dv-tts-temp" min="0" max="1" step="0.05" value="0.7"><output id="dv-tts-temp-v">0.70</output></div></div>
+                                            <div class="dv-field"><label>top_p</label><div class="dv-range"><input type="range" id="dv-tts-top-p" min="0" max="1" step="0.05" value="0.7"><output id="dv-tts-top-p-v">0.70</output></div></div>
+                                            <div class="dv-switch-row"><span>文本归一化</span><div class="switch" id="dv-tts-normalize" data-on="true"><div class="switch-knob"></div></div></div>
+                                            <div class="dv-field"><label>输出目录</label><div class="dv-dir"><input type="text" class="text-input" id="dv-out-dir" placeholder="默认：视频所在目录"><button class="secondary-btn btn-sm" id="dv-pick-dir" type="button">浏览</button></div></div>
+                                        </details>
+                                        <div class="dv-progress" id="dv-tts-progress" hidden><div class="dv-progress-bar"><i></i></div><span></span></div>
+                                        <button class="primary-btn dv-next" id="dv-run-tts" type="button">生成配音</button>
+                                    </div>
+
+                                    <div class="dv-pane" data-pane="export">
+                                        <div class="dv-result" id="dv-result">
+                                            <div class="dv-result-icon">
+                                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>
+                                            </div>
+                                            <b>配音完成</b>
+                                            <div class="dv-result-path" id="dv-result-path"></div>
+                                            <div class="dv-result-stats" id="dv-result-stats"></div>
+                                        </div>
+                                        <div class="dv-result-empty" id="dv-result-empty">生成配音后，成片和字幕会出现在这里。</div>
+                                        <div class="dv-actions-col">
+                                            <button class="primary-btn" id="dv-open-folder" type="button">打开所在文件夹</button>
+                                            <button class="secondary-btn" id="dv-export-srt" type="button">另存字幕 SRT</button>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="dub-editor-list" id="dub-editor-list"></div>
+
+                            <!-- 字幕列表 -->
+                            <div class="dv-list-card">
+                                <div class="dv-list-head">
+                                    <div class="dv-list-title">字幕<span class="dv-count" id="dv-count"></span><span class="dv-warn-count" id="dv-warn-count" hidden></span></div>
+                                    <div class="dv-list-tools">
+                                        <label class="dv-follow" title="播放时自动滚动到当前句"><input type="checkbox" id="dv-follow" checked> 跟随播放</label>
+                                        <button class="ghost-btn btn-sm" id="dv-reseg" type="button" title="按字数与最短时长重新切句">重新分段</button>
+                                        <button class="ghost-btn btn-sm" id="dv-add" type="button">+ 添加一句</button>
+                                        <button class="ghost-btn btn-sm" id="dv-export-srt-2" type="button">导出 SRT</button>
+                                    </div>
+                                </div>
+                                <div class="dv-reseg-panel" id="dv-reseg-panel" hidden>
+                                    每句最多 <input type="number" class="text-input" id="dv-reseg-chars" value="20" min="6" max="80"> 字，
+                                    最短 <input type="number" class="text-input" id="dv-reseg-min" value="1.0" min="0" max="10" step="0.1"> 秒
+                                    <button class="secondary-btn btn-sm" id="dv-reseg-apply" type="button">应用</button>
+                                </div>
+                                <div class="dv-list" id="dv-list"></div>
+                            </div>
                         </div>
                     </div>
                 </section>
@@ -1370,5 +1286,7 @@
         </div>
     </div>
     <script src="app.js"></script>
+    <script src="subtitle-view.js"></script>
+    <script src="dubbing-view.js"></script>
 </body>
 </html>

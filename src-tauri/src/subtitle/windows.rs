@@ -10,11 +10,11 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use once_cell::sync::Lazy;
 use tauri::{
-    AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    AppHandle, Emitter, EventTarget, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
 
 use crate::config::{ConfigManager, SubtitleWindow, PRIMARY_WINDOW_ID};
@@ -29,6 +29,16 @@ use crate::config::{ConfigManager, SubtitleWindow, PRIMARY_WINDOW_ID};
 /// 最终位置永远不会被保存。）
 static GEO_DEBOUNCE_GEN: Lazy<StdMutex<HashMap<String, u64>>> =
     Lazy::new(|| StdMutex::new(HashMap::new()));
+
+/// 只向指定 label 的 WebView 发送 `subtitle-signal`。
+/// Tauri 2 的 `emit` 是全局广播：N 个字幕窗口时每次变化会让每个窗口收到 N 份信号。
+pub fn signal<R: tauri::Runtime, E: Emitter<R>>(emitter: &E, label: &str, kind: &str, version: u64) {
+    let _ = emitter.emit_to(
+        EventTarget::labeled(label),
+        "subtitle-signal",
+        serde_json::json!({ "type": kind, "version": version }),
+    );
+}
 
 /// 窗口 ID → label 映射（主窗口复用静态 "subtitle"，其余动态命名）
 pub fn window_label(window_id: &str) -> String {
@@ -169,10 +179,7 @@ pub fn attach_window_events(
         tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
             debounce_save_geometry(&win, &id, &config);
             // 页面内部已对拉取做 rAF 合流，高频事件不会引发渲染风暴
-            let _ = win_signal.emit(
-                "subtitle-signal",
-                serde_json::json!({ "type": "text", "version": 0 }),
-            );
+            signal(&win_signal, win_signal.label(), "text", 0);
         }
         _ => {}
     });

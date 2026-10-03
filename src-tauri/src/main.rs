@@ -127,6 +127,7 @@ fn main() {
             commands::subtitle_set_window_flag,
             commands::subtitle_show_window,
             commands::subtitle_push_theme,
+            commands::subtitle_save_settings,
             commands::get_subtitle_transcript,
             commands::clear_subtitle_transcript,
             commands::export_subtitle_transcript,
@@ -141,6 +142,9 @@ fn main() {
             commands::dubbing_generate,
             commands::dubbing_cancel,
             commands::dubbing_status,
+            commands::dubbing_preview_segment,
+            commands::dubbing_export_srt,
+            commands::dubbing_import_srt,
         ])
         .setup(move |app| {
             let app_handle = app.handle();

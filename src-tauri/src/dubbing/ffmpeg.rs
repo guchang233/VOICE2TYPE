@@ -330,6 +330,43 @@ pub fn extract_audio_chunks(
     Ok(chunks)
 }
 
+/// 导出配音视频：`bg_volume` 为 0 时完全替换原声；大于 0 时把原声压低到该音量
+/// 垫在配音下面（保留背景音乐与环境声）。原视频没有音轨等导致混音失败时回退为替换。
+pub fn mux_dub_audio(
+    ffmpeg: &Path,
+    video: &Path,
+    audio_wav: &Path,
+    output: &Path,
+    bg_volume: f32,
+) -> Result<()> {
+    if bg_volume <= 0.0 {
+        return mux_replace_audio(ffmpeg, video, audio_wav, output);
+    }
+    // amix 会按输入数均分音量，末尾 ×2 还原：配音 1.0，原声 bg_volume
+    let filter = format!(
+        "[0:a:0]volume={:.3}[bg];[1:a:0][bg]amix=inputs=2:duration=longest:dropout_transition=0,volume=2[a]",
+        bg_volume
+    );
+    let out = hidden_command(ffmpeg)
+        .args(["-y", "-hide_banner", "-i"])
+        .arg(video)
+        .args(["-i"])
+        .arg(audio_wav)
+        .args(["-filter_complex", &filter])
+        .args(["-map", "0:v:0", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart"])
+        .arg(output)
+        .output()
+        .context("启动 ffmpeg 混音失败")?;
+    if out.status.success() && output.is_file() {
+        return Ok(());
+    }
+    log::warn!(
+        "[dubbing] 保留原声混音失败，改为替换原声: {}",
+        last_stderr_lines(&String::from_utf8_lossy(&out.stderr))
+    );
+    mux_replace_audio(ffmpeg, video, audio_wav, output)
+}
+
 /// 将配音音轨替换进视频（先尝试视频流直拷贝，失败时降级为全量重编码）
 pub fn mux_replace_audio(
     ffmpeg: &Path,

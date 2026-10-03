@@ -730,6 +730,20 @@ impl SubtitleWindow {
     }
 }
 
+/// 窗口位置/尺寸由拖动实时持久化、启用状态由显示/关闭窗口维护，
+/// 前端提交的模型里这些值可能已过期：同 ID 的窗口一律沿用当前值。
+fn keep_subtitle_window_state(current: &SubtitleSettings, incoming: &mut SubtitleSettings) {
+    for w in incoming.windows.iter_mut() {
+        if let Some(cur) = current.windows.iter().find(|c| c.id == w.id) {
+            w.x = cur.x;
+            w.y = cur.y;
+            w.width = cur.width;
+            w.height = cur.height;
+            w.enabled = cur.enabled;
+        }
+    }
+}
+
 /// 实时字幕设置（v3）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -1334,8 +1348,9 @@ impl ConfigManager {
         self.config.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
-    pub fn set_config(&self, new_config: AppConfig) {
+    pub fn set_config(&self, mut new_config: AppConfig) {
         let mut cfg = self.config.lock().unwrap_or_else(|e| e.into_inner());
+        keep_subtitle_window_state(&cfg.subtitle, &mut new_config.subtitle);
         *cfg = new_config;
         cfg.basic.model_name = cfg.model_selection.batch_model.clone();
         cfg.subtitle.normalize();
@@ -1718,6 +1733,16 @@ impl ConfigManager {
 
     pub fn get_subtitle_windows(&self) -> Vec<SubtitleWindow> {
         self.config.lock().unwrap_or_else(|e| e.into_inner()).subtitle.windows.clone()
+    }
+
+    /// 用前端提交的字幕设置整体替换 subtitle 段（实时字幕页自动保存），返回归一化结果。
+    /// 窗口几何与启用状态以后端为准，见 [`keep_subtitle_window_state`]。
+    pub fn update_subtitle_settings(&self, mut incoming: SubtitleSettings) -> SubtitleSettings {
+        let mut cfg = self.config.lock().unwrap_or_else(|e| e.into_inner());
+        keep_subtitle_window_state(&cfg.subtitle, &mut incoming);
+        incoming.normalize();
+        cfg.subtitle = incoming;
+        cfg.subtitle.clone()
     }
 
     /// 新增字幕窗口（复制当前窗口），返回新窗口 ID
@@ -2129,6 +2154,27 @@ impl ConfigManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saving_subtitle_settings_keeps_backend_window_state() {
+        let mut current = SubtitleSettings::default();
+        current.windows[0].x = 300;
+        current.windows[0].y = 900;
+        current.windows[0].width = 1400;
+        current.windows[0].enabled = false;
+        let mut incoming = SubtitleSettings::default();
+        incoming.windows[0].theme.font_size = 48;
+        incoming.windows[0].x = -1;
+        let mut extra = SubtitleWindow::default();
+        extra.id = "w_new".into();
+        extra.x = 10;
+        incoming.windows.push(extra);
+        keep_subtitle_window_state(&current, &mut incoming);
+        let w = &incoming.windows[0];
+        assert_eq!((w.x, w.y, w.width, w.enabled), (300, 900, 1400, false));
+        assert_eq!(w.theme.font_size, 48, "样式以前端为准");
+        assert_eq!(incoming.windows[1].x, 10, "新窗口不受影响");
+    }
 
     #[test]
     fn subtitle_v3_defaults() {
