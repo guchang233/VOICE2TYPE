@@ -17,7 +17,6 @@
         config: null,
         unlisteners: [],
         isMouseDown: false,
-        settingsDirty: false,
         populatingSettings: false,
         tts: {
             voicePage: 1,
@@ -43,6 +42,17 @@
             srtPath: null
         }
     };
+
+    // 未保存标记：同步到 body.has-unsaved，「保存设置 / 应用设置」按钮上显示提示点
+    let settingsDirtyFlag = false;
+    Object.defineProperty(state, 'settingsDirty', {
+        enumerable: true,
+        get() { return settingsDirtyFlag; },
+        set(v) {
+            settingsDirtyFlag = !!v;
+            if (document.body) document.body.classList.toggle('has-unsaved', settingsDirtyFlag);
+        }
+    });
 
     let invoke = null;
     let listen = null;
@@ -92,6 +102,52 @@
         indicator.classList.add('visible');
     }
 
+    const SEG_CONTAINERS = '.segmented-control, .log-level-filter, .theme-selector';
+
+    /// 为所有分段控件补齐滑动指示器节点（静态 HTML 不再内置，避免遗漏导致选中态不可见）
+    function ensureSegIndicators() {
+        $$(SEG_CONTAINERS).forEach(container => {
+            if (container.querySelector(':scope > .seg-indicator')) return;
+            const indicator = document.createElement('div');
+            indicator.className = 'seg-indicator';
+            container.insertBefore(indicator, container.firstChild);
+        });
+    }
+
+    /// 按当前值同步滑块填充进度（CSS 用 --fill 绘制已选轨道）
+    function syncSliderFill(slider) {
+        if (!slider || slider.type !== 'range') return;
+        const min = parseFloat(slider.min) || 0;
+        const max = parseFloat(slider.max) || 100;
+        const val = parseFloat(slider.value);
+        const pct = max > min ? ((val - min) / (max - min)) * 100 : 0;
+        slider.style.setProperty('--fill', pct + '%');
+    }
+
+    /// 程序化赋值不会触发 input 事件，回填配置后统一刷新一次
+    function refreshSliderFills(root) {
+        (root || document).querySelectorAll('input[type="range"]').forEach(syncSliderFill);
+    }
+
+    /// 轻量通知（替代原生 alert，不阻塞界面）
+    function showToast(message, type, duration) {
+        const stack = $('#toast-stack');
+        if (!stack) return;
+        const kind = type || 'info';
+        const icons = { success: '✓', error: '!', warn: '!', info: 'i' };
+        const el = document.createElement('div');
+        el.className = 'toast ' + kind;
+        el.innerHTML = `<span class="toast-icon">${icons[kind] || 'i'}</span><span class="toast-msg"></span>`;
+        el.querySelector('.toast-msg').textContent = String(message);
+        stack.appendChild(el);
+        while (stack.children.length > 4) stack.firstElementChild.remove();
+        const ttl = duration || (kind === 'error' ? 6000 : 2400);
+        setTimeout(() => {
+            el.classList.add('leaving');
+            el.addEventListener('animationend', () => el.remove(), { once: true });
+        }, ttl);
+    }
+
     /**
      * 刷新所有可见的滑动指示器位置（用于窗口尺寸变化、侧边栏切换、视图切换后）。
      */
@@ -100,8 +156,8 @@
         const activeNav = $('.nav-item.active');
         if (activeNav) moveNavIndicator(activeNav);
 
-        // 所有可见的 segmented control / log-level-filter
-        $$('.segmented-control, .log-level-filter').forEach(container => {
+        // 所有可见的 segmented control / log-level-filter / 主题选择器
+        $$(SEG_CONTAINERS).forEach(container => {
             // 只刷新当前可见视图内的容器（避免为隐藏视图计算错误的尺寸）
             const view = container.closest('.view');
             if (view && !view.classList.contains('active')) return;
@@ -189,6 +245,19 @@
         if (appStatusDot && dotColors[status]) {
             appStatusDot.style.background = dotColors[status];
         }
+        const appIndicator = $('#app-status-indicator');
+        if (appIndicator) appIndicator.dataset.status = status;
+
+        // 麦克风按钮同步「识别中 / 出错」视觉态
+        const micBtn = $('#mic-btn');
+        if (micBtn) {
+            micBtn.classList.toggle('processing', status === 'processing');
+            if (status === 'error') {
+                micBtn.classList.remove('error');
+                void micBtn.offsetWidth; // 重新触发抖动动画
+                micBtn.classList.add('error');
+            }
+        }
 
         if (text) {
             if (statusText) statusText.textContent = text;
@@ -206,6 +275,8 @@
             if (result === 'cancel') return;
             if (result === 'save') {
                 await saveSettings();
+            } else if (result === 'discard') {
+                discardSettingsDraft();
             }
             state.settingsDirty = false;
         }
@@ -249,6 +320,11 @@
         requestAnimationFrame(refreshAllIndicators);
     }
 
+    /// 「不保存」：用最后一次保存的配置重填界面与窗口模型，丢弃内存中的草稿
+    function discardSettingsDraft() {
+        if (state.config) populateSettings(state.config);
+    }
+
     function showSettings() {
         switchView('settings');
     }
@@ -290,7 +366,8 @@
 
         try {
             if (micBtn) micBtn.classList.remove('recording');
-            if (micHint) micHint.textContent = '点击开始录音';
+            // 原先固定写「点击开始录音」，按住模式下文案错误
+            if (micHint) micHint.textContent = state.triggerMode === 'hold' ? '按住开始录音' : '点击开始录音';
             setStatus('processing', '正在识别...');
             const result = await invoke('stop_recording');
             if (result && result.trim()) {
@@ -316,6 +393,9 @@
             output.textContent = text;
         }
         output.scrollTop = output.scrollHeight;
+        output.classList.remove('flash');
+        void output.offsetWidth;
+        output.classList.add('flash');
     }
 
     async function toggleSubtitle() {
@@ -909,7 +989,7 @@
             addLog('info', '已添加字幕窗口', 'subtitle');
         } catch (err) {
             console.error('Failed to add subtitle window:', err);
-            alert('添加窗口失败: ' + err);
+            showToast('添加窗口失败: ' + err, 'error');
         }
     }
 
@@ -922,7 +1002,7 @@
             addLog('info', '已复制字幕窗口', 'subtitle');
         } catch (err) {
             console.error('Failed to duplicate subtitle window:', err);
-            alert('复制窗口失败: ' + err);
+            showToast('复制窗口失败: ' + err, 'error');
         }
     }
 
@@ -941,7 +1021,7 @@
             addLog('info', '已删除字幕窗口', 'subtitle');
         } catch (err) {
             console.error('Failed to remove subtitle window:', err);
-            alert('删除窗口失败: ' + err);
+            showToast('删除窗口失败: ' + err, 'error');
         }
     }
 
@@ -1066,7 +1146,7 @@
         }
         win.theme.preset = preset;
         // 重新同步 UI（含预设/布局/引擎/元素开关）并刷新预览
-        if (state.config) populateSubtitleUiFromWindow(win, state.config);
+        populateSubtitleUiFromWindow(win, state.config || {});
         updateSubtitlePreview();
     }
 
@@ -1304,18 +1384,11 @@
         updateSubtitlePreview();
     }
 
-    // 初始化所有滑块的填充进度
+    // 初始化所有滑块的填充进度；事件委托同时覆盖之后动态生成的滑块
     function initSliderFills() {
-        $$('input[type="range"]').forEach(slider => {
-            const update = () => {
-                const min = parseFloat(slider.min) || 0;
-                const max = parseFloat(slider.max) || 100;
-                const val = parseFloat(slider.value);
-                const pct = max > min ? ((val - min) / (max - min)) * 100 : 0;
-                slider.style.setProperty('--fill', pct + '%');
-            };
-            update();
-            slider.addEventListener('input', update);
+        refreshSliderFills();
+        document.addEventListener('input', (e) => {
+            if (e.target && e.target.type === 'range') syncSliderFill(e.target);
         });
     }
 
@@ -1684,7 +1757,7 @@
             if (String(err).includes('取消')) {
                 addLog('info', `已取消下载: ${modelKey}`, 'settings');
             } else {
-                alert('模型下载失败: ' + err);
+                showToast('模型下载失败: ' + err, 'error');
             }
         } finally {
             downloadingModel = null;
@@ -1719,7 +1792,7 @@
             addLog('info', `已切换本地模型: ${fileName}`, 'settings');
         } catch (err) {
             console.error('[setModelAsCurrent] 失败:', err);
-            alert('设为当前失败: ' + err);
+            showToast('设为当前失败: ' + err, 'error');
         }
     }
 
@@ -1738,7 +1811,7 @@
             addLog('info', `已删除模型: ${fileName}`, 'settings');
         } catch (err) {
             console.error('[deleteModel] 失败:', err);
-            alert('删除失败: ' + err);
+            showToast('删除失败: ' + err, 'error');
         }
     }
 
@@ -1759,7 +1832,7 @@
             }
         } catch (err) {
             console.error('[openModelsDirectory] 失败:', err);
-            alert('打开目录失败: ' + err);
+            showToast('打开目录失败: ' + err, 'error');
         }
     }
 
@@ -1785,18 +1858,20 @@
                 </div>
             `;
             document.body.appendChild(overlay);
-            const close = (result) => { overlay.remove(); resolve(result); };
+            // 任一路径关闭都要注销 keydown，否则监听器随每次弹窗累积泄漏
+            const onKey = (e) => { if (e.key === 'Escape') close('cancel'); };
+            const close = (result) => {
+                document.removeEventListener('keydown', onKey);
+                overlay.remove();
+                resolve(result);
+            };
             overlay.querySelector('[data-action="save"]').addEventListener('click', () => close('save'));
             overlay.querySelector('[data-action="discard"]').addEventListener('click', () => close('discard'));
             overlay.querySelector('[data-action="cancel"]').addEventListener('click', () => close('cancel'));
             overlay.addEventListener('click', (e) => { if (e.target === overlay) close('cancel'); });
-            const onKey = (e) => {
-                if (e.key === 'Escape') {
-                    document.removeEventListener('keydown', onKey);
-                    close('cancel');
-                }
-            };
             document.addEventListener('keydown', onKey);
+            const saveBtn = overlay.querySelector('[data-action="save"]');
+            if (saveBtn) saveBtn.focus();
         });
     }
 
@@ -1855,7 +1930,9 @@
             `;
             document.body.appendChild(overlay);
 
+            const onKey = (e) => { if (e.key === 'Escape') close({ confirmed: false }); };
             const close = (result) => {
+                document.removeEventListener('keydown', onKey);
                 overlay.remove();
                 resolve(result);
             };
@@ -1867,13 +1944,9 @@
             overlay.addEventListener('click', (e) => {
                 if (e.target === overlay) close({ confirmed: false });
             });
-            const onKey = (e) => {
-                if (e.key === 'Escape') {
-                    document.removeEventListener('keydown', onKey);
-                    close({ confirmed: false });
-                }
-            };
             document.addEventListener('keydown', onKey);
+            const confirmBtn = overlay.querySelector('[data-action="confirm"]');
+            if (confirmBtn) confirmBtn.focus();
         });
     }
 
@@ -1885,6 +1958,14 @@
             state.subtitleWindows = [defaultSubtitleWindow()];
             state.currentWindowId = 'primary';
         }
+        renderWindowList();
+        state.populatingSettings = true;
+        try {
+            populateSubtitleUiFromWindow(getCurrentSubtitleWindow(), state.config || {});
+        } finally {
+            state.populatingSettings = false;
+        }
+        renderModelCards();
     }
 
     /// 填充字幕全局设置（音源/热键/设备/LLM 接口，所有窗口共享）
@@ -2034,9 +2115,15 @@
 
     function populateSettings(config) {
         state.populatingSettings = true;
-        _doPopulateSettings(config);
-        state.populatingSettings = false;
+        try {
+            _doPopulateSettings(config);
+        } finally {
+            state.populatingSettings = false;
+        }
         state.settingsDirty = false;
+        // 配置异步到达：触发模式/主题等选中项可能已变化，滑块值也是程序化写入
+        refreshSliderFills();
+        requestAnimationFrame(refreshAllIndicators);
     }
 
     function _doPopulateSettings(config) {
@@ -2157,6 +2244,8 @@
             $$('#trigger-mode .seg-btn').forEach(btn => {
                 btn.classList.toggle('active', btn.dataset.mode === triggerMode);
             });
+            const triggerActiveBtn = $(`#trigger-mode .seg-btn[data-mode="${triggerMode}"]`);
+            if (triggerActiveBtn) moveSegIndicator(triggerActiveBtn);
             updateMicHint();
         }
 
@@ -2230,6 +2319,7 @@
                 const card = title.closest('.subtitle-card');
                 if (!card) return;
                 card.classList.toggle('collapsed');
+                requestAnimationFrame(refreshAllIndicators);
             });
         });
 
@@ -2263,7 +2353,7 @@
     function initSettingsDirtyTracking() {
         // 设置页与字幕页都包含可保存的设置控件（开机自启动即时生效，不参与保存流程）
         const handler = (e) => {
-            if (e.target && e.target.id === 'setting-autostart') return;
+            if (e.target && (e.target.id === 'setting-autostart' || e.target.id === 'subtitle-window-select')) return;
             if (!state.populatingSettings) {
                 state.settingsDirty = true;
             }
@@ -2369,7 +2459,10 @@
                 e.stopPropagation();
                 const theme = btn.dataset.theme;
                 btns.forEach(b => b.classList.toggle('active', b === btn));
+                moveSegIndicator(btn);
                 applyTheme(theme, true);
+                // 主题切换后配音连线颜色取自 CSS 变量，需重绘
+                requestAnimationFrame(drawDubWires);
             });
         });
     }
@@ -2384,10 +2477,17 @@
         }
     }
 
-    function updateHotkeyHint() {
+    /// 快捷键提示：按键渲染为键帽样式
+    function renderHotkeyHint(keyName) {
         const hint = $('.hotkey-hint');
         if (!hint) return;
         const modeLabel = state.dictationMode === 'stream' ? '流式' : '整段';
+        hint.innerHTML = `快捷键 <kbd>${escapeHtml(keyName || 'F2')}</kbd> · ${modeLabel}`;
+    }
+
+    function updateHotkeyHint() {
+        const hint = $('.hotkey-hint');
+        if (!hint) return;
         // 从配置或设置输入框读取实际快捷键，避免硬编码 F2
         let keyName = 'F2';
         if (state.config && state.config.basic && state.config.basic.hotkey) {
@@ -2398,7 +2498,7 @@
         if (hotkeyInput && hotkeyInput.value && hotkeyInput.dataset.listening !== 'true') {
             keyName = hotkeyInput.value;
         }
-        hint.textContent = `快捷键: ${keyName} (${modeLabel})`;
+        renderHotkeyHint(keyName);
     }
 
     function updateModelBadge() {
@@ -2408,10 +2508,13 @@
         let modelName = 'SenseVoiceSmall';
         if (state.config.model_selection && state.config.model_selection.batch_model) {
             const m = state.config.model_selection.batch_model;
-            if (m.includes('SenseVoice')) modelName = 'SenseVoiceSmall';
+            // 先判断 local：'local-whisper' 同样包含 'whisper'
+            if (m === 'local-whisper') modelName = '本地 Whisper';
+            else if (m === 'custom') modelName = (state.config.model && state.config.model.custom_model_name) || '自定义';
+            else if (m.includes('SenseVoice')) modelName = 'SenseVoiceSmall';
             else if (m.includes('TeleSpeech')) modelName = 'TeleSpeech';
-            else if (m.includes('whisper')) modelName = 'Whisper';
-            else if (m.includes('local')) modelName = '本地 Whisper';
+            else if (m.includes('whisper')) modelName = 'Whisper Large v3';
+            else modelName = m;
         }
         badge.textContent = modelName;
     }
@@ -2494,11 +2597,7 @@
             if (vk) {
                 newConfig.basic.hotkey = vk;
                 // 同步更新 hotkey 提示文本
-                const hint = $('.hotkey-hint');
-                if (hint) {
-                    const modeLabel = state.dictationMode === 'stream' ? '流式' : '整段';
-                    hint.textContent = `快捷键: ${hotkeyInput.value} (${modeLabel})`;
-                }
+                renderHotkeyHint(hotkeyInput.value);
             }
         }
 
@@ -2610,11 +2709,29 @@
             }
 
             historyList.innerHTML = history.map((text, i) => `
-                <div class="history-item" data-index="${i}" data-text="${escapeHtml(text)}">
+                <div class="history-item" data-index="${i}" data-text="${escapeHtml(text)}" style="animation-delay:${Math.min(i, 12) * 18}ms">
                     <span class="history-item-index">${String(i + 1).padStart(2, '0')}</span>
                     <span class="history-item-text">${escapeHtml(text)}</span>
+                    <span class="history-item-hint">单击复制</span>
                 </div>
             `).join('');
+
+            historyList.querySelectorAll('.history-item').forEach(item => {
+                // 单击复制（拖选部分文字时不触发，保留原生选择）
+                item.addEventListener('click', async () => {
+                    const sel = window.getSelection();
+                    if (sel && sel.toString()) return;
+                    if (await copyToClipboard(item.dataset.text)) {
+                        const hint = item.querySelector('.history-item-hint');
+                        item.classList.add('copied');
+                        if (hint) hint.textContent = '已复制';
+                        setTimeout(() => {
+                            item.classList.remove('copied');
+                            if (hint) hint.textContent = '单击复制';
+                        }, 1400);
+                    }
+                });
+            });
 
             // 右键菜单
             historyList.querySelectorAll('.history-item').forEach(item => {
@@ -2625,7 +2742,7 @@
                     showContextMenu(e.clientX, e.clientY, [
                         {
                             label: '复制',
-                            onClick: () => copyToClipboard(text)
+                            onClick: async () => { if (await copyToClipboard(text)) showToast('已复制到剪贴板', 'success'); }
                         },
                         { divider: true },
                         {
@@ -2690,12 +2807,21 @@
         }, 0);
     }
 
+    /// 复制到剪贴板，返回是否成功（调用方据此给出反馈）
     async function copyToClipboard(text) {
-        if (!invoke) return;
         try {
-            await invoke('copy_to_clipboard', { text });
+            if (invoke) {
+                await invoke('copy_to_clipboard', { text });
+            } else if (navigator.clipboard) {
+                await navigator.clipboard.writeText(text);
+            } else {
+                return false;
+            }
+            return true;
         } catch (err) {
             console.error('Failed to copy:', err);
+            showToast('复制失败: ' + err, 'error');
+            return false;
         }
     }
 
@@ -2733,6 +2859,8 @@
                     if (result === 'cancel') return;
                     if (result === 'save') {
                         await saveSettings();
+                    } else if (result === 'discard') {
+                        discardSettingsDraft();
                     }
                     state.settingsDirty = false;
                 }
@@ -2762,6 +2890,33 @@
                 }
             });
         }
+
+        const maximizeBtn = $('#btn-maximize');
+        const syncMaximized = async () => {
+            if (!getCurrentWindow) return;
+            try {
+                const maximized = await getCurrentWindow().isMaximized();
+                document.body.classList.toggle('is-maximized', maximized);
+                if (maximizeBtn) maximizeBtn.title = maximized ? '还原' : '最大化';
+            } catch (err) { /* 忽略：无权限或窗口已销毁 */ }
+        };
+        if (maximizeBtn) {
+            maximizeBtn.addEventListener('click', async () => {
+                if (!getCurrentWindow) return;
+                try {
+                    await getCurrentWindow().toggleMaximize();
+                } catch (err) {
+                    console.log('Window toggle maximize:', err);
+                }
+                syncMaximized();
+            });
+        }
+        let maxSyncTimer = null;
+        window.addEventListener('resize', () => {
+            clearTimeout(maxSyncTimer);
+            maxSyncTimer = setTimeout(syncMaximized, 120);
+        });
+        syncMaximized();
     }
 
     function initNavigation() {
@@ -2770,6 +2925,12 @@
                 const view = item.dataset.view;
                 if (view) {
                     await switchView(view);
+                }
+            });
+            item.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    item.click();
                 }
             });
         });
@@ -2881,13 +3042,22 @@
                 state.dictationMode = btn.dataset.mode;
                 updateHotkeyHint();
                 moveSegIndicator(btn);
-                // 立即保存到后端，便于 F2 切换后即时生效
-                if (invoke && state.config) {
-                    const cfg = JSON.parse(JSON.stringify(state.config));
-                    cfg.basic.dictation_mode = state.dictationMode;
-                    invoke('save_config', { newConfig: cfg }).then(() => {
-                        state.config = cfg;
-                    }).catch(err => console.error('Failed to save dictation mode:', err));
+                // 立即保存到后端，便于 F2 切换后即时生效（配置未就绪时先拉取，避免丢失本次切换）
+                if (invoke) {
+                    (async () => {
+                        if (!state.config) {
+                            try { state.config = await invoke('get_config'); } catch (e) { return; }
+                        }
+                        const cfg = JSON.parse(JSON.stringify(state.config));
+                        if (!cfg.basic) cfg.basic = {};
+                        cfg.basic.dictation_mode = state.dictationMode;
+                        try {
+                            await invoke('save_config', { newConfig: cfg });
+                            state.config = cfg;
+                        } catch (err) {
+                            console.error('Failed to save dictation mode:', err);
+                        }
+                    })();
                 }
             });
         });
@@ -3266,11 +3436,15 @@
         if (clearBtn) {
             clearBtn.addEventListener('click', async () => {
                 if (!invoke) return;
+                const { confirmed } = await showConfirmDialog('清空历史记录', '确定清空全部历史记录吗？此操作不可恢复。', '清空');
+                if (!confirmed) return;
                 try {
                     await invoke('clear_history');
                     loadHistory();
+                    showToast('历史记录已清空', 'success');
                 } catch (err) {
                     console.error('Failed to clear history:', err);
+                    showToast('清空失败: ' + err, 'error');
                 }
             });
         }
@@ -3391,7 +3565,7 @@
                     await checkEngineStatus();
                 } catch (err) {
                     console.error('引擎下载失败:', err);
-                    alert('引擎下载失败: ' + err);
+                    showToast('引擎下载失败: ' + err, 'error');
                     await checkEngineStatus();
                 } finally {
                     if (unlisten) unlisten();
@@ -3607,7 +3781,7 @@
                 const filtered = getFilteredLogs();
                 if (filtered.length === 0) return;
                 const text = filtered.map(formatLogLine).join('\n');
-                copyToClipboard(text);
+                copyToClipboard(text).then(ok => { if (ok) showToast(`已复制 ${filtered.length} 条日志`, 'success'); });
             });
         }
 
@@ -3704,6 +3878,7 @@
                 keyName = specialKeys[e.key] || e.key;
             }
 
+            if (keyName !== input.dataset.original) state.settingsDirty = true;
             input.value = keyName;
             input.dataset.listening = 'false';
             delete input.dataset.original;
@@ -3850,9 +4025,17 @@
 
     function initOutput() {
         const output = $('#dictation-output');
-        if (output) {
-            output.addEventListener('focus', () => {
+        const copyBtn = $('#btn-copy-output');
+        const clearBtn = $('#btn-clear-output');
+        if (copyBtn && output) {
+            copyBtn.addEventListener('click', async () => {
+                const text = output.textContent.trim();
+                if (!text) { showToast('暂无可复制的内容'); return; }
+                if (await copyToClipboard(text)) showToast('识别结果已复制', 'success');
             });
+        }
+        if (clearBtn && output) {
+            clearBtn.addEventListener('click', () => { output.textContent = ''; });
         }
     }
 
@@ -4105,6 +4288,7 @@
         updateTtsSliderLabels();
         updateTtsModelBadge();
         updateTtsBitrateVisibility();
+        refreshSliderFills($('#view-tts'));
     }
 
     function updateTtsModelBadge() {
@@ -4631,18 +4815,19 @@
             const a = dubNodeEl(chain[i]), b = dubNodeEl(chain[i + 1]);
             if (!a || !b) continue;
             const st = state.dubbing.nodeStatus[chain[i + 1]] || 'pending';
-            // 端口：out 在右缘、in 在左缘，垂直取头部中心（画布内容坐标）
-            const ax = a.offsetLeft + a.offsetWidth - 3;
-            const ay = a.offsetTop + 21;
-            const bx = b.offsetLeft + 3;
-            const by = b.offsetTop + 21;
+            // 端口：out 在右缘、in 在左缘，取端口圆心（画布内容坐标），样式调整后连线仍对齐
+            const pa = a.querySelector('.port-out');
+            const pb = b.querySelector('.port-in');
+            const ax = a.offsetLeft + (pa ? pa.offsetLeft + pa.offsetWidth / 2 : a.offsetWidth);
+            const ay = a.offsetTop + (pa ? pa.offsetTop + pa.offsetHeight / 2 : 21);
+            const bx = b.offsetLeft + (pb ? pb.offsetLeft + pb.offsetWidth / 2 : 0);
+            const by = b.offsetTop + (pb ? pb.offsetTop + pb.offsetHeight / 2 : 21);
             const dx = Math.max(46, Math.abs(bx - ax) * 0.45);
-            const color = st === 'running' ? getCssVar('--accent-blue')
+            const color = st === 'running' ? getCssVar('--accent')
                 : st === 'done' ? getCssVar('--accent-green')
-                : st === 'error' ? getCssVar('--accent-red') : getCssVar('--border-color');
+                : st === 'error' ? getCssVar('--accent-red') : getCssVar('--wire-idle');
             html += `<path d="M ${ax} ${ay} C ${ax + dx} ${ay}, ${bx - dx} ${by}, ${bx} ${by}"
-                fill="none" stroke="${color}" stroke-width="2" opacity="0.9"/>`;
-            html += `<circle cx="${bx}" cy="${by}" r="3.4" fill="${color}"/>`;
+                fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round"${st === 'running' ? ' stroke-dasharray="6 6" class="dub-wire-flow"' : ''}/>`;
         }
         svg.removeAttribute('viewBox');
         svg.removeAttribute('preserveAspectRatio');
@@ -4730,6 +4915,7 @@
         const provSel = $('#dub-asr-provider');
         if (provSel) provSel.value = (cfg.dubbing && cfg.dubbing.asr_provider) || 'ali-dashscope';
         updateDubSpeedLabels();
+        refreshSliderFills($('#dub-canvas'));
     }
 
     function updateDubSpeedLabels() {
@@ -4771,16 +4957,20 @@
     /// 实时转写预览：增量到达时刷新编辑器（若已展开）与编辑节点统计
     function renderDubTranscript() {
         const panel = $('#dub-editor');
-        if (panel && !panel.hidden) renderDubEditor();
+        if (panel && !panel.hidden) renderDubEditor({ follow: true });
         const stat = $('#dub-edit-stat');
         if (stat) stat.textContent = state.dubbing.segments.length ? `${state.dubbing.segments.length} 段` : '未识别';
     }
 
-    function renderDubEditor() {
+    /// opts.follow：实时转写追加时，若用户本就停在底部则跟随到底；
+    /// 其他场景（合并/拆分/删除/重分段）保持当前滚动位置，避免编辑中途跳到列表末尾
+    function renderDubEditor(opts) {
         const list = $('#dub-editor-list');
         const stat = $('#dub-edit-stat');
         const estat = $('#dub-editor-stat');
         if (!list) return;
+        const prevScroll = list.scrollTop;
+        const wasAtBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
         const segs = state.dubbing.segments;
         if (stat) stat.textContent = segs.length ? `${segs.length} 段` : '未识别';
         if (estat) estat.textContent = segs.length
@@ -4821,7 +5011,7 @@
             frag.appendChild(row);
         });
         list.appendChild(frag);
-        list.scrollTop = list.scrollHeight;
+        list.scrollTop = (opts && opts.follow && wasAtBottom) ? list.scrollHeight : prevScroll;
     }
 
     function markDubEdited() {
@@ -5245,7 +5435,6 @@
             if (state.dubbing.segments.length) resegmentDub(chars, mindur);
         });
         bind('btn-dub-add-seg', 'click', addDubSegment);
-        bind('dub-canvas-wrap', 'scroll', drawDubWires);
 
         // 字幕列表右键菜单：在光标处拆分 / 合并 / 删除（行为静态容器，行由 JS 重建，用委托）
         const editorList = $('#dub-editor-list');
@@ -5320,6 +5509,12 @@
             text.addEventListener('input', () => {
                 const cc = $('#tts-char-count');
                 if (cc) cc.textContent = text.value.length + ' 字';
+            });
+            text.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                    e.preventDefault();
+                    synthesizeTts();
+                }
             });
         }
 
@@ -5407,6 +5602,7 @@
             if (cached) document.documentElement.setAttribute('data-theme', cached);
         } catch (e) {}
 
+        ensureSegIndicators();
         initLogs();
         initWindowControls();
         initNavigation();
@@ -5431,9 +5627,29 @@
         // 禁用 WebView 默认右键菜单（刷新、检查、另存为等），
         // 历史记录项的 contextmenu 监听器已自行处理 preventDefault，不受影响。
         document.addEventListener('contextmenu', (e) => {
-            if (!e.target.closest('.history-item')) {
-                e.preventDefault();
+            if (e.target.closest('.history-item')) return;
+            // 文本输入框保留原生菜单（剪切 / 复制 / 粘贴 / 全选）
+            if (isTextField(e.target)) return;
+            e.preventDefault();
+        });
+
+        function isTextField(target) {
+            if (!target) return false;
+            if (target.tagName === 'TEXTAREA') return !target.readOnly;
+            if (target.tagName === 'INPUT') {
+                const textTypes = ['text', 'password', 'search', 'url', 'email', 'number'];
+                return textTypes.includes(target.type) && !target.readOnly;
             }
+            return !!target.isContentEditable;
+        }
+
+        // Esc 关闭静态弹窗（音色库 / 本地模型教程）
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'Escape') return;
+            const voiceModal = $('#tts-voice-modal');
+            if (voiceModal && voiceModal.style.display !== 'none') { closeVoiceLib(); return; }
+            const helpModal = $('#help-modal');
+            if (helpModal && helpModal.style.display !== 'none') closeHelpModal();
         });
 
         // 禁用常用浏览器快捷键，避免干扰应用使用

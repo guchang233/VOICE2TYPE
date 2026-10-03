@@ -1,135 +1,177 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="light" class=""><head>
+<html lang="zh-CN" data-theme="dark">
+<head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Voice2Type</title>
+    <script>
+        // 首帧前应用缓存的主题，避免启动时闪烁
+        try { var t = localStorage.getItem('v2t-theme'); if (t) document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+    </script>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <div class="app-container">
-        <div id="titlebar" data-tauri-drag-region="" style="position: relative;">
-            <div class="titlebar-left">
-                <span class="app-title">Voice2Type</span>
+        <header id="titlebar" data-tauri-drag-region>
+            <div class="titlebar-left" data-tauri-drag-region>
+                <div class="brand-mark" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 10.5v3"/><path d="M7.5 8v8"/><path d="M11 5v14"/><path d="M16.5 6.5v11"/><path d="M14.5 6.5h4"/><path d="M14.5 17.5h4"/></svg>
+                </div>
+                <span class="app-title" data-tauri-drag-region>Voice2Type</span>
             </div>
             <div class="titlebar-right">
-                <div class="traffic-lights">
-                    <button class="traffic-btn minimize" id="btn-minimize" title="最小化">
-                        <svg width="10" height="10" viewBox="0 0 10 10"><path d="M1,5 L9,5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"></path></svg>
+                <div class="caption-buttons">
+                    <button class="caption-btn" id="btn-minimize" title="最小化" aria-label="最小化">
+                        <svg width="10" height="10" viewBox="0 0 10 10"><path d="M0.5 5h9" stroke="currentColor" stroke-width="1"/></svg>
                     </button>
-                    <button class="traffic-btn close" id="btn-close" title="关闭">
-                        <svg width="10" height="10" viewBox="0 0 10 10"><path d="M1,1 L9,9 M9,1 L1,9" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"></path></svg>
+                    <button class="caption-btn" id="btn-maximize" title="最大化" aria-label="最大化">
+                        <svg class="icon-max" width="10" height="10" viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1"/></svg>
+                        <svg class="icon-restore" width="10" height="10" viewBox="0 0 10 10"><rect x="0.5" y="2.5" width="7" height="7" rx="1.2" fill="none" stroke="currentColor" stroke-width="1"/><path d="M2.5 2.5V1.8A1.3 1.3 0 0 1 3.8 0.5h4.4a1.3 1.3 0 0 1 1.3 1.3v4.4a1.3 1.3 0 0 1-1.3 1.3H7.5" fill="none" stroke="currentColor" stroke-width="1"/></svg>
+                    </button>
+                    <button class="caption-btn close" id="btn-close" title="关闭" aria-label="关闭">
+                        <svg width="10" height="10" viewBox="0 0 10 10"><path d="M0.6 0.6l8.8 8.8M9.4 0.6L0.6 9.4" stroke="currentColor" stroke-width="1"/></svg>
                     </button>
                 </div>
             </div>
-        </div>
+        </header>
 
         <div class="app-body">
             <nav id="sidebar" class="expanded">
-                <div class="nav-indicator visible" id="nav-indicator" style="transform: translateY(56px); height: 42px;"></div>
-                <div class="nav-item" data-view="dictation">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+                <div class="nav-indicator" id="nav-indicator"></div>
+
+                <div class="nav-group-label">工作台</div>
+                <div class="nav-item active" data-view="dictation" tabindex="0" title="语音输入">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z"/><path d="M19 11a7 7 0 0 1-14 0"/><path d="M12 18v3"/></svg>
                     <span class="nav-label">语音输入</span>
                 </div>
-                <div class="nav-item active" data-view="subtitle">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+                <div class="nav-item" data-view="subtitle" tabindex="0" title="实时字幕">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M7 11h2"/><path d="M12 11h5"/><path d="M7 15h5"/><path d="M15 15h2"/></svg>
                     <span class="nav-label">实时字幕</span>
                 </div>
-                <div class="nav-item" data-view="tts">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>
+                <div class="nav-item" data-view="tts" tabindex="0" title="语音合成">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
                     <span class="nav-label">语音合成</span>
                 </div>
-                <div class="nav-item" data-view="dubbing">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="2" width="20" height="20" rx="2.18"></rect><line x1="7" y1="2" x2="7" y2="22"></line><line x1="17" y1="2" x2="17" y2="22"></line><line x1="2" y1="12" x2="22" y2="12"></line><line x1="2" y1="7" x2="22" y2="7"></line><line x1="2" y1="17" x2="22" y2="17"></line></svg>
+                <div class="nav-item" data-view="dubbing" tabindex="0" title="视频配音">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7.5 4v16"/><path d="M16.5 4v16"/><path d="M3 9.5h4.5"/><path d="M3 14.5h4.5"/><path d="M16.5 9.5H21"/><path d="M16.5 14.5H21"/></svg>
                     <span class="nav-label">视频配音</span>
                 </div>
-                <div class="nav-item" data-view="history">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+
+                <div class="nav-group-label">记录</div>
+                <div class="nav-item" data-view="history" tabindex="0" title="历史记录">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v4h4"/><path d="M12 8v4l3 2"/></svg>
                     <span class="nav-label">历史记录</span>
                 </div>
-                <div class="nav-item" data-view="logs">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+                <div class="nav-item" data-view="logs" tabindex="0" title="日志">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7.5 9.5 2.5 2.5-2.5 2.5"/><path d="M13 14.5h3.5"/></svg>
                     <span class="nav-label">日志</span>
                 </div>
-                <div class="nav-item" data-view="settings">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+
+                <div class="nav-spacer"></div>
+
+                <div class="nav-item" data-view="settings" tabindex="0" title="设置">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h9"/><path d="M17 7h3"/><circle cx="15" cy="7" r="2"/><path d="M4 17h3"/><path d="M11 17h9"/><circle cx="9" cy="17" r="2"/></svg>
                     <span class="nav-label">设置</span>
                 </div>
                 <div class="sidebar-toggle" id="sidebar-toggle" title="展开/收起侧边栏">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/><path d="m15 10-2 2 2 2"/></svg>
                 </div>
             </nav>
 
             <main id="main-content">
-                <div class="view" id="view-dictation">
+                <!-- ============ 语音输入 ============ -->
+                <section class="view active" id="view-dictation">
                     <div class="view-header">
-                        <h2>语音输入</h2>
+                        <div class="view-heading">
+                            <h2>语音输入</h2>
+                            <p class="view-desc">在任意输入框中按住快捷键说话，松开即自动输入</p>
+                        </div>
                         <div class="view-header-actions">
-                            <label class="toggle-group">
-                                <span>识别模式</span>
+                            <div class="toggle-group">
+                                <span>识别</span>
                                 <div class="segmented-control" id="dictation-mode">
-                                    <div class="seg-indicator visible" style="transform: translate(2px, 2px); width: 52px; height: 27px;"></div>
                                     <button class="seg-btn active" data-mode="batch">整段</button>
                                     <button class="seg-btn" data-mode="stream">流式</button>
                                 </div>
-                            </label>
-                            <label class="toggle-group">
-                                <span>触发模式</span>
+                            </div>
+                            <div class="toggle-group">
+                                <span>触发</span>
                                 <div class="segmented-control" id="trigger-mode">
-                                    <div class="seg-indicator visible" style="transform: translate(2px, 2px); width: 52px; height: 27px;"></div>
                                     <button class="seg-btn active" data-mode="hold">按住</button>
                                     <button class="seg-btn" data-mode="toggle">切换</button>
                                 </div>
-                            </label>
+                            </div>
                         </div>
                     </div>
 
-                    <div class="dictation-center">
-                        <div class="mic-button-container">
-                            <button class="mic-button" id="mic-btn">
-                                <div class="mic-ring"></div>
-                                <div class="mic-ring-outer"></div>
-                                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
-                            </button>
+                    <div class="view-body dictation-center">
+                        <div class="mic-stage">
+                            <div class="mic-button-container">
+                                <div class="mic-halo" aria-hidden="true"></div>
+                                <button class="mic-button" id="mic-btn" aria-label="录音">
+                                    <div class="mic-ring"></div>
+                                    <div class="mic-ring-outer"></div>
+                                    <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z"/><path d="M19 11a7 7 0 0 1-14 0"/><path d="M12 18v3"/></svg>
+                                </button>
+                            </div>
+                            <div class="mic-wave" aria-hidden="true">
+                                <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+                            </div>
                             <p class="mic-hint">按住开始录音</p>
-                            <p class="hotkey-hint">快捷键: F2 (整段)</p>
-                        </div>
-
-                        <div class="status-panel" id="dictation-status">
-                            <div class="status-dot idle"></div>
-                            <span class="status-text">就绪</span>
+                            <p class="hotkey-hint">快捷键 <kbd>F2</kbd> · 整段</p>
+                            <div class="status-panel" id="dictation-status">
+                                <div class="status-dot idle"></div>
+                                <span class="status-text">就绪</span>
+                            </div>
                         </div>
 
                         <div class="output-area">
-                            <div class="output-label">识别结果</div>
-                            <div class="output-text" id="dictation-output" data-placeholder="识别的文字将显示在这里..."></div>
+                            <div class="output-head">
+                                <div class="output-label">识别结果</div>
+                                <div class="output-actions">
+                                    <button class="ghost-btn btn-sm" id="btn-copy-output" type="button">复制</button>
+                                    <button class="ghost-btn btn-sm" id="btn-clear-output" type="button">清空</button>
+                                </div>
+                            </div>
+                            <div class="output-text" id="dictation-output" data-placeholder="识别的文字将显示在这里…"></div>
                         </div>
                     </div>
-                </div>
+                </section>
 
-                <div class="view active" id="view-subtitle">
+                <!-- ============ 实时字幕 ============ -->
+                <section class="view" id="view-subtitle">
                     <div class="view-header">
-                        <h2>实时字幕</h2>
+                        <div class="view-heading">
+                            <h2>实时字幕</h2>
+                            <p class="view-desc">悬浮字幕窗口，支持同声传译与 OBS 窗口采集</p>
+                        </div>
                         <div class="view-header-actions">
-                            <button class="primary-btn" id="btn-apply-subtitle" title="保存并应用到字幕窗口">应用设置</button>
-                            <button class="primary-btn" id="toggle-subtitle-btn" style="position: relative;"><span class="btn-indicator"></span>开启实时字幕</button>
+                            <button class="secondary-btn" id="btn-apply-subtitle" title="保存并应用到字幕窗口">应用设置</button>
+                            <button class="primary-btn" id="toggle-subtitle-btn"><span class="btn-indicator"></span>开启实时字幕</button>
                         </div>
                     </div>
 
-                    <div class="subtitle-scene-bar">
-                        <div class="subtitle-scene-picker">
-                            <span class="scene-label">字幕窗口</span>
-                            <select class="text-input scene-select" id="subtitle-window-select" title="每个窗口对应一个独立的字幕窗口"></select>
-                            <input type="text" class="text-input scene-name-input" id="subtitle-window-name" placeholder="窗口名称">
+                    <div class="view-body subtitle-scroll-area">
+                        <div class="subtitle-scene-bar">
+                            <div class="subtitle-scene-picker">
+                                <span class="scene-label">字幕窗口</span>
+                                <select class="text-input scene-select" id="subtitle-window-select" title="每个窗口对应一个独立的字幕窗口"></select>
+                                <input type="text" class="text-input scene-name-input" id="subtitle-window-name" placeholder="窗口名称">
+                            </div>
+                            <div class="subtitle-scene-actions">
+                                <button class="secondary-btn" id="btn-add-subtitle-window" type="button" title="以当前窗口样式新建一个窗口">新建</button>
+                                <button class="secondary-btn" id="btn-duplicate-subtitle-window" type="button" title="复制当前窗口">复制</button>
+                                <button class="secondary-btn scene-btn-danger" id="btn-remove-subtitle-window" type="button" title="删除当前窗口（默认窗口不可删除）">删除</button>
+                            </div>
+                            <p class="subtitle-tip subtitle-tip-left scene-tip">每个窗口独立设置样式、位置、置顶/穿透与翻译目标语言；窗口可自由拖动，位置自动记忆。</p>
                         </div>
-                        <div class="subtitle-scene-actions">
-                            <button class="secondary-btn" id="btn-add-subtitle-window" type="button" title="以当前窗口样式新建一个窗口">+ 新窗口</button>
-                            <button class="secondary-btn" id="btn-duplicate-subtitle-window" type="button" title="复制当前窗口">复制</button>
-                            <button class="secondary-btn scene-btn-danger" id="btn-remove-subtitle-window" type="button" title="删除当前窗口（默认窗口不可删除）">删除</button>
-                        </div>
-                        <p class="subtitle-tip subtitle-tip-left" style="flex-basis: 100%; margin: 0;">每个窗口对应一个独立的字幕窗口：可单独设置样式、位置、置顶/穿透，以及翻译目标语言。窗口可自由拖动，位置自动记忆。</p>
-                    </div>
 
-                    <div class="subtitle-scroll-area" style="position: relative;">
+                        <div class="subtitle-preview-section">
+                            <div class="subtitle-preview" id="subtitle-preview">
+                                <div class="subtitle-preview-box" id="subtitle-preview-box"></div>
+                            </div>
+                        </div>
+
                         <div class="subtitle-cards">
                             <div class="subtitle-card">
                                 <h4 class="subtitle-card-title">音源与全局</h4>
@@ -163,20 +205,14 @@
                                         <input type="text" class="text-input" id="subtitle-llm-url" placeholder="如 https://api.siliconflow.cn/v1/chat/completions">
                                     </div>
                                     <div class="control-group">
-                                        <label>同声传译 LLM API Key（留空则复用 LLM 智能校对配置）</label>
+                                        <label>LLM API Key（留空复用智能校对配置）</label>
                                         <input type="password" class="text-input" id="subtitle-llm-key" placeholder="sk-...">
                                     </div>
                                     <div class="control-group">
-                                        <label>同声传译 LLM 模型名</label>
+                                        <label>LLM 模型名</label>
                                         <input type="text" class="text-input" id="subtitle-llm-model" placeholder="如 Qwen/Qwen2.5-7B-Instruct">
                                     </div>
                                 </div>
-                            </div>
-                        </div>
-
-                        <div class="subtitle-preview-section">
-                            <div class="subtitle-preview" id="subtitle-preview">
-                                <div class="subtitle-preview-box" id="subtitle-preview-box"></div>
                             </div>
                         </div>
 
@@ -192,7 +228,7 @@
                                             <button class="seg-btn" data-preset="bilingual" type="button">双语</button>
                                             <button class="seg-btn" data-preset="meeting" type="button">会议</button>
                                             <button class="seg-btn" data-preset="live" type="button">直播</button>
-                                            <button class="seg-btn" data-preset="custom" type="button">自定义</button>
+                                            <button class="seg-btn active" data-preset="custom" type="button">自定义</button>
                                         </div>
                                     </div>
                                 </div>
@@ -228,7 +264,7 @@
                                                 <option value="100">极细 100</option>
                                                 <option value="200">特细 200</option>
                                                 <option value="300">细体 300</option>
-                                                <option value="400" selected="">常规 400</option>
+                                                <option value="400" selected>常规 400</option>
                                                 <option value="500">中等 500</option>
                                                 <option value="600">半粗 600</option>
                                                 <option value="700">粗体 700</option>
@@ -236,13 +272,11 @@
                                                 <option value="900">超粗 900</option>
                                             </select>
                                         </div>
-                                        <div class="control-group-inline">
-                                            <label class="toggle-group">
-                                                <span>斜体</span>
-                                                <div class="switch" id="subtitle-italic" data-on="false">
-                                                    <div class="switch-knob"></div>
-                                                </div>
-                                            </label>
+                                        <div class="control-group switch-row">
+                                            <label>斜体</label>
+                                            <div class="switch" id="subtitle-italic" data-on="false">
+                                                <div class="switch-knob"></div>
+                                            </div>
                                         </div>
                                         <div class="control-group">
                                             <label>行高</label>
@@ -267,9 +301,9 @@
                                         <div class="control-group">
                                             <label>对齐方式</label>
                                             <div class="segmented-control" id="subtitle-text-align">
-                                                <button class="seg-btn" data-mode="left">左</button>
-                                                <button class="seg-btn active" data-mode="center">中</button>
-                                                <button class="seg-btn" data-mode="right">右</button>
+                                                <button class="seg-btn" data-mode="left" type="button">左</button>
+                                                <button class="seg-btn active" data-mode="center" type="button">中</button>
+                                                <button class="seg-btn" data-mode="right" type="button">右</button>
                                             </div>
                                         </div>
                                         <div class="control-group">
@@ -334,24 +368,24 @@
                                         <div class="control-group">
                                             <label>布局方向</label>
                                             <div class="segmented-control" id="subtitle-layout">
-                                                <button class="seg-btn active" data-mode="vertical">垂直堆叠</button>
-                                                <button class="seg-btn" data-mode="horizontal">水平排列</button>
+                                                <button class="seg-btn active" data-mode="vertical" type="button">垂直</button>
+                                                <button class="seg-btn" data-mode="horizontal" type="button">水平</button>
                                             </div>
                                         </div>
                                         <div class="control-group">
                                             <label>窗口内水平位置</label>
                                             <div class="segmented-control" id="subtitle-anchor-x">
-                                                <button class="seg-btn" data-mode="left">靠左</button>
-                                                <button class="seg-btn active" data-mode="center">居中</button>
-                                                <button class="seg-btn" data-mode="right">靠右</button>
+                                                <button class="seg-btn" data-mode="left" type="button">靠左</button>
+                                                <button class="seg-btn active" data-mode="center" type="button">居中</button>
+                                                <button class="seg-btn" data-mode="right" type="button">靠右</button>
                                             </div>
                                         </div>
                                         <div class="control-group">
                                             <label>窗口内垂直位置</label>
                                             <div class="segmented-control" id="subtitle-anchor-y">
-                                                <button class="seg-btn" data-mode="top">顶部</button>
-                                                <button class="seg-btn" data-mode="center">居中</button>
-                                                <button class="seg-btn active" data-mode="bottom">底部</button>
+                                                <button class="seg-btn" data-mode="top" type="button">顶部</button>
+                                                <button class="seg-btn" data-mode="center" type="button">居中</button>
+                                                <button class="seg-btn active" data-mode="bottom" type="button">底部</button>
                                             </div>
                                         </div>
                                         <div class="control-group">
@@ -359,7 +393,7 @@
                                             <input type="range" min="30" max="100" value="100" class="slider" id="subtitle-max-width">
                                             <span class="value-display">100%</span>
                                         </div>
-                                        <div class="control-group switch-row">
+                                        <div class="control-group switch-row span-2">
                                             <label title="关闭（默认）：所有文字保持在当前行连续显示；开启：完成句段跳到上方历史行">完成句段自动分行（历史行）</label>
                                             <div class="switch" id="subtitle-auto-wrap" data-on="false">
                                                 <div class="switch-knob"></div>
@@ -373,7 +407,7 @@
                         <div class="subtitle-cards">
                             <div class="subtitle-card" id="card-translation-engine">
                                 <h4 class="subtitle-card-title">同声传译（当前窗口）</h4>
-                                <p class="subtitle-tip subtitle-tip-left">把识别原文实时翻译成目标语言显示在「译文」元素中（增量句段翻译 + 中间结果同声预览）。接口地址 / API Key / 模型名在上方「音源与全局」中全局共享。</p>
+                                <p class="subtitle-tip subtitle-tip-left">把识别原文实时翻译成目标语言显示在「译文」元素中（增量句段翻译 + 中间结果同声预览）。接口地址 / API Key / 模型名在「音源与全局」中全局共享。</p>
                                 <div class="subtitle-grid subtitle-grid-3">
                                     <div class="control-group">
                                         <label>翻译引擎</label>
@@ -428,7 +462,7 @@
                                                 <option value="100">极细 100</option>
                                                 <option value="200">特细 200</option>
                                                 <option value="300">细体 300</option>
-                                                <option value="400" selected="">常规 400</option>
+                                                <option value="400" selected>常规 400</option>
                                                 <option value="500">中等 500</option>
                                                 <option value="600">半粗 600</option>
                                                 <option value="700">粗体 700</option>
@@ -441,7 +475,7 @@
                                             <input type="range" min="0" max="100" value="85" class="slider" id="subtitle-translation-opacity">
                                             <span class="value-display">85%</span>
                                         </div>
-                                        <div class="control-group span-full">
+                                        <div class="control-group span-2">
                                             <label>译文前缀（可选）</label>
                                             <input type="text" class="text-input" id="subtitle-translation-prefix" placeholder="如 译: " value="">
                                         </div>
@@ -460,7 +494,7 @@
                                             <input type="range" min="8" max="48" value="16" class="slider" id="subtitle-speaker-size">
                                             <span class="value-display">16px</span>
                                         </div>
-                                        <div class="control-group span-full">
+                                        <div class="control-group">
                                             <label>说话人前缀（可选）</label>
                                             <input type="text" class="text-input" id="subtitle-speaker-prefix" placeholder="如 说话人: " value="">
                                         </div>
@@ -482,7 +516,7 @@
                                         <div class="control-group">
                                             <label>时间戳格式</label>
                                             <select class="text-input" id="subtitle-timestamp-format">
-                                                <option value="HH:MM:SS" selected="">时:分:秒</option>
+                                                <option value="HH:MM:SS" selected>时:分:秒</option>
                                                 <option value="MM:SS">分:秒</option>
                                                 <option value="none">不显示</option>
                                             </select>
@@ -495,13 +529,13 @@
                         <div class="subtitle-cards subtitle-cards-full">
                             <div class="subtitle-card" id="card-elements">
                                 <h4 class="subtitle-card-title">显示元素（顺序即显示顺序）</h4>
-                                <p class="subtitle-tip subtitle-tip-left">固定元素（说话人/原文/译文/副原文/时间戳）仅可开关与排序，其样式在上方卡片配置；自定义元素（文本/分隔线/间距）可增删。文本支持占位符 {time} {date} {datetime} {text} {translation} {speaker}。</p>
+                                <p class="subtitle-tip subtitle-tip-left">固定元素（说话人/原文/译文/副原文/时间戳）仅可开关与排序，样式在上方卡片配置；自定义元素（文本/分隔线/间距）可增删。文本支持占位符 <code>{time}</code> <code>{date}</code> <code>{datetime}</code> <code>{text}</code> <code>{translation}</code> <code>{speaker}</code>。</p>
                                 <div class="element-editor-list" id="subtitle-element-editor"></div>
                                 <div class="custom-element-actions">
                                     <button class="secondary-btn" id="btn-add-element-text" type="button">+ 文本</button>
                                     <button class="secondary-btn" id="btn-add-element-divider" type="button">+ 分隔线</button>
                                     <button class="secondary-btn" id="btn-add-element-spacer" type="button">+ 间距</button>
-                                    <button class="secondary-btn scene-btn-danger" id="btn-delete-element" type="button" disabled>删除所选自定义元素</button>
+                                    <button class="secondary-btn scene-btn-danger" id="btn-delete-element" type="button" disabled>删除所选</button>
                                 </div>
                             </div>
                         </div>
@@ -509,7 +543,7 @@
                         <div class="subtitle-cards subtitle-cards-full">
                             <div class="subtitle-card">
                                 <h4 class="subtitle-card-title">窗口控制</h4>
-                                <p class="subtitle-tip subtitle-tip-left">字幕窗口是完整的普通窗口，OBS 直接做「窗口采集」即可。OBS 兼容模式开/关显示完全一致（均为近黑背景、视觉等同纯黑、采集干净），开关切换不会影响文字显示。窗口被手动关闭后，此处的状态会同步更新。</p>
+                                <p class="subtitle-tip subtitle-tip-left">字幕窗口是普通窗口，OBS 直接「窗口采集」即可。OBS 兼容模式开/关显示一致（近黑背景、采集干净）。窗口被手动关闭后，此处状态会同步更新。</p>
                                 <div class="subtitle-grid subtitle-grid-window-ctrl">
                                     <div class="control-group switch-row">
                                         <label>窗口置顶</label>
@@ -524,7 +558,7 @@
                                         </div>
                                     </div>
                                     <div class="control-group switch-row">
-                                        <label>OBS 捕捉兼容模式（纯黑背景）</label>
+                                        <label>OBS 捕捉兼容模式</label>
                                         <div class="switch" id="subtitle-obs-mode" data-on="true">
                                             <div class="switch-knob"></div>
                                         </div>
@@ -536,10 +570,10 @@
                                         </div>
                                     </div>
                                     <div class="control-group subtitle-action-row">
-                                        <label>字幕窗口显示</label>
+                                        <label>字幕窗口</label>
                                         <div class="window-ctrl-buttons">
-                                            <button class="secondary-btn" id="btn-show-subtitle-window">显示字幕窗口</button>
-                                            <button class="secondary-btn" id="btn-hide-subtitle-window">隐藏字幕窗口</button>
+                                            <button class="secondary-btn" id="btn-show-subtitle-window" type="button">显示窗口</button>
+                                            <button class="secondary-btn" id="btn-hide-subtitle-window" type="button">隐藏窗口</button>
                                             <span class="transcript-status" id="subtitle-window-status"></span>
                                         </div>
                                     </div>
@@ -565,42 +599,46 @@
                         </div>
 
                         <div class="subtitle-toggle-section">
-                            <p class="subtitle-tip">点击右上角「开启实时字幕」按钮（或按字幕开关热键）开始 / 停止</p>
+                            <p class="subtitle-tip">点击右上角「开启实时字幕」（或按字幕开关热键）开始 / 停止</p>
                         </div>
                     </div>
-                </div>
+                </section>
 
-                <div class="view" id="view-tts">
+                <!-- ============ 语音合成 ============ -->
+                <section class="view" id="view-tts">
                     <div class="view-header">
-                        <h2>语音合成</h2>
+                        <div class="view-heading">
+                            <h2>语音合成</h2>
+                            <p class="view-desc">Fish Audio 驱动的自然语音，海量官方音色一键试听</p>
+                        </div>
                         <div class="view-header-actions">
                             <span class="tts-status" id="tts-status">就绪</span>
                         </div>
                     </div>
-                    <div class="tts-layout">
+                    <div class="view-body tts-layout">
                         <div class="tts-main">
                             <div class="tts-textarea-wrap">
-                                <textarea id="tts-text" class="tts-textarea" placeholder="输入要合成语音的文本，支持中英日等多语言..."></textarea>
+                                <textarea id="tts-text" class="tts-textarea" placeholder="输入要合成语音的文本，支持中英日等多语言…"></textarea>
                                 <div class="tts-text-meta">
                                     <span id="tts-char-count">0 字</span>
-                                    <span class="tts-hint">Fish Audio · <span id="tts-model-badge">s2.1-pro-free</span></span>
+                                    <span class="tts-hint"><kbd>Ctrl</kbd><span class="tts-hint-shortcut">+</span><kbd>Enter</kbd><span class="tts-hint-shortcut">生成 ·</span> Fish Audio · <span id="tts-model-badge">s2.1-pro-free</span></span>
                                 </div>
                             </div>
                             <div class="tts-actions">
-                                <button class="solid-btn" id="btn-tts-synthesize">
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4"></path><path d="M12 18v4"></path><path d="M4.93 4.93l2.83 2.83"></path><path d="M16.24 16.24l2.83 2.83"></path><path d="M2 12h4"></path><path d="M18 12h4"></path><path d="M4.93 19.07l2.83-2.83"></path><path d="M16.24 7.76l2.83-2.83"></path></svg>
+                                <button class="primary-btn btn-lg" id="btn-tts-synthesize">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/><path d="M19 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg>
                                     生成
                                 </button>
-                                <button class="solid-btn" id="btn-tts-download" disabled>
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                <button class="secondary-btn btn-lg" id="btn-tts-download" disabled>
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/></svg>
                                     下载
                                 </button>
                             </div>
                             <div class="tts-player-wrap" id="tts-player-wrap" style="display:none">
-                                <audio id="tts-audio" controls style="width:100%"></audio>
+                                <audio id="tts-audio" controls></audio>
                             </div>
                             <div class="tts-empty-hint" id="tts-empty-hint">
-                                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.3"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>
+                                <div class="tts-empty-wave" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
                                 <p>输入文本后点击「生成」合成语音</p>
                             </div>
                         </div>
@@ -620,9 +658,9 @@
                                                 <div class="tts-voice-sub" id="tts-voice-sub">使用模型默认音色</div>
                                             </div>
                                         </div>
-                                        <button class="ghost-btn" id="btn-tts-voice-lib">音色库</button>
+                                        <button class="secondary-btn btn-sm" id="btn-tts-voice-lib">音色库</button>
                                     </div>
-                                    <button class="ghost-btn tts-clear-voice" id="btn-tts-clear-voice" style="display:none">清除选择</button>
+                                    <button class="ghost-btn btn-sm tts-clear-voice" id="btn-tts-clear-voice" style="display:none">清除选择</button>
                                 </div>
                             </div>
 
@@ -654,7 +692,7 @@
                                         <span>MP3 码率</span>
                                         <select id="tts-mp3-bitrate" class="tts-select">
                                             <option value="64">64 kbps</option>
-                                            <option value="128">128 kbps</option>
+                                            <option value="128" selected>128 kbps</option>
                                             <option value="192">192 kbps</option>
                                         </select>
                                     </label>
@@ -708,175 +746,104 @@
                                     <svg class="section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
                                 </div>
                                 <div class="section-body">
-                                    <input type="password" id="tts-api-key" class="tts-input" placeholder="Fish Audio API Key" autocomplete="off">
+                                    <input type="password" id="tts-api-key" class="tts-input text-input" placeholder="Fish Audio API Key" autocomplete="off">
                                     <p class="tts-tip">在 <a href="#" id="tts-api-link">fish.audio/app/api-keys</a> 获取密钥。免费层使用 s2.1-pro-free 模型。</p>
                                 </div>
                             </div>
                         </div>
                     </div>
-                </div>
+                </section>
 
-                <div class="view" id="view-dubbing">
+                <!-- ============ 视频配音 ============ -->
+                <section class="view" id="view-dubbing">
                     <div class="view-header">
-                        <h2>视频配音</h2>
+                        <div class="view-heading">
+                            <h2>视频配音</h2>
+                            <p class="view-desc">识别 → 编辑 → 合成 → 混流，一条流水线换掉整段原声</p>
+                        </div>
                         <div class="view-header-actions dub-toolbar">
                             <span class="tts-status" id="dub-status">就绪</span>
-                            <button class="solid-btn" id="btn-dub-run-prepare" disabled>① 识别字幕</button>
-                            <button class="solid-btn" id="btn-dub-run-generate" disabled>▶ 生成配音</button>
+                            <button class="secondary-btn" id="btn-dub-run-prepare" disabled>识别字幕</button>
+                            <button class="primary-btn" id="btn-dub-run-generate" disabled>▶ 生成配音</button>
                             <button class="ghost-btn" id="btn-dub-cancel" style="display:none">取消</button>
                         </div>
                     </div>
-                    <div class="dub-canvas-wrap">
-                        <svg class="dub-wires" id="dub-wires"></svg>
-                        <div class="dub-canvas" id="dub-canvas"><!-- 节点由 JS 注入 --></div>
-                    </div>
-                    <div class="dub-editor" id="dub-editor" hidden>
-                        <div class="dub-editor-head">
-                            <b>字幕编辑</b>
-                            <span class="dub-editor-stat" id="dub-editor-stat"></span>
-                            <div class="dub-editor-tools">
-                                自动分段：每段≤<input type="number" id="dub-seg-chars" value="20" min="4" max="80"> 字
-                                最短<input type="number" id="dub-seg-mindur" value="800" min="0" step="100"> ms
-                                <button class="ghost-btn" id="btn-dub-reseg">应用重分段</button>
-                                <button class="ghost-btn" id="btn-dub-add-seg">+ 新增分段</button>
+                    <div class="view-body dub-body">
+                        <div class="dub-canvas-wrap" id="dub-canvas-wrap">
+                            <svg class="dub-wires" id="dub-wires"></svg>
+                            <div class="dub-canvas" id="dub-canvas"><!-- 节点由 JS 注入 --></div>
+                        </div>
+                        <div class="dub-editor" id="dub-editor" hidden>
+                            <div class="dub-editor-head">
+                                <b>字幕编辑</b>
+                                <span class="dub-editor-stat" id="dub-editor-stat"></span>
+                                <div class="dub-editor-tools">
+                                    每段 ≤ <input type="number" id="dub-seg-chars" value="20" min="4" max="80"> 字
+                                    最短 <input type="number" id="dub-seg-mindur" value="800" min="0" step="100"> ms
+                                    <button class="secondary-btn btn-sm" id="btn-dub-reseg">应用重分段</button>
+                                    <button class="secondary-btn btn-sm" id="btn-dub-add-seg">+ 新增分段</button>
+                                </div>
                             </div>
+                            <div class="dub-editor-list" id="dub-editor-list"></div>
                         </div>
-                        <div class="dub-editor-list" id="dub-editor-list"></div>
                     </div>
-                </div>
+                </section>
 
-                <div class="view" id="view-history">
+                <!-- ============ 历史记录 ============ -->
+                <section class="view" id="view-history">
                     <div class="view-header">
-                        <h2>历史记录</h2>
+                        <div class="view-heading">
+                            <h2>历史记录</h2>
+                            <p class="view-desc">最近的识别结果，单击复制，右键更多操作</p>
+                        </div>
                         <div class="view-header-actions">
-                            <button class="solid-btn" id="btn-clear-history">清空</button>
+                            <button class="secondary-btn scene-btn-danger" id="btn-clear-history">清空</button>
                         </div>
                     </div>
-                    <div class="history-list" id="history-list">
+                    <div class="view-body history-list" id="history-list">
                         <div class="empty-state">
-                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.3"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v4h4"/><path d="M12 8v4l3 2"/></svg>
                             <p>暂无历史记录</p>
                         </div>
                     </div>
-                </div>
+                </section>
 
-                <div class="view" id="view-logs">
+                <!-- ============ 日志 ============ -->
+                <section class="view" id="view-logs">
                     <div class="view-header">
-                        <h2>日志</h2>
+                        <div class="view-heading">
+                            <h2>日志</h2>
+                            <p class="view-desc">前后端运行日志，排查问题时可一键复制</p>
+                        </div>
                         <div class="view-header-actions">
-                            <span class="logs-count" id="logs-count">18 条</span>
+                            <span class="logs-count" id="logs-count">0 条</span>
                             <div class="log-level-filter">
-                                <div class="seg-indicator visible" style="transform: translate(2px, 2px); width: 42px; height: 21px;"></div>
                                 <button class="log-level-btn active" data-level="all">全部</button>
                                 <button class="log-level-btn" data-level="info">INFO</button>
                                 <button class="log-level-btn" data-level="warn">WARN</button>
                                 <button class="log-level-btn" data-level="error">ERROR</button>
                             </div>
-                            <button class="solid-btn" id="btn-copy-logs">复制全部</button>
-                            <button class="solid-btn" id="btn-clear-logs">清空</button>
+                            <button class="secondary-btn" id="btn-copy-logs">复制</button>
+                            <button class="secondary-btn" id="btn-clear-logs">清空</button>
                         </div>
                     </div>
-                    <div class="logs-container" id="logs-container"><div class="log-line info">
-                <span class="log-time">08-10 19:04:46.584</span>
-                <span class="log-level-tag info">info</span>
-                
-                <span class="log-message">Tauri event listener not available</span>
-            </div><div class="log-line info">
-                <span class="log-time">08-10 19:04:46.603</span>
-                <span class="log-level-tag info">info</span>
-                
-                <span class="log-message">Running in browser mode - Tauri API not available</span>
-            </div><div class="log-line info">
-                <span class="log-time">08-10 19:04:46.604</span>
-                <span class="log-level-tag info">info</span>
-                
-                <span class="log-message">Voice2Type UI initialized</span>
-            </div><div class="log-line info">
-                <span class="log-time">08-10 19:04:47.902</span>
-                <span class="log-level-tag info">info</span>
-                
-                <span class="log-message">Tauri API not available, using defaults</span>
-            </div><div class="log-line info">
-                <span class="log-time">08-10 19:04:48.980</span>
-                <span class="log-level-tag info">info</span>
-                
-                <span class="log-message">[DomSelection] Starting initialization...</span>
-            </div><div class="log-line info">
-                <span class="log-time">08-10 19:04:48.980</span>
-                <span class="log-level-tag info">info</span>
-                
-                <span class="log-message">[DomSelection] connection object: {"targetOrigin":"*","listeners":{}}</span>
-            </div><div class="log-line info">
-                <span class="log-time">08-10 19:04:48.981</span>
-                <span class="log-level-tag info">info</span>
-                
-                <span class="log-message">[DomSelection] Registering ENABLE_INSPECT listener, EVENT_ENABLE_INSPECT= ENABLE_INSPECT</span>
-            </div><div class="log-line info">
-                <span class="log-time">08-10 19:04:48.981</span>
-                <span class="log-level-tag info">info</span>
-                
-                <span class="log-message">[DomSelection] Initialization completed</span>
-            </div><div class="log-line info">
-                <span class="log-time">08-10 19:04:48.981</span>
-                <span class="log-level-tag info">info</span>
-                
-                <span class="log-message">[TextSelection] Starting initialization...</span>
-            </div><div class="log-line info">
-                <span class="log-time">08-10 19:04:48.981</span>
-                <span class="log-level-tag info">info</span>
-                
-                <span class="log-message">[TextSelection] Initialization completed</span>
-            </div><div class="log-line info">
-                <span class="log-time">08-10 19:04:48.982</span>
-                <span class="log-level-tag info">info</span>
-                
-                <span class="log-message">[ImageDownload] Initialized</span>
-            </div><div class="log-line info">
-                <span class="log-time">08-10 19:04:48.990</span>
-                <span class="log-level-tag info">info</span>
-                
-                <span class="log-message">[DomSelection] Received ENABLE_INSPECT event, enable=false</span>
-            </div><div class="log-line info">
-                <span class="log-time">08-10 19:05:32.465</span>
-                <span class="log-level-tag info">info</span>
-                
-                <span class="log-message">[DomSelection] Received ENABLE_INSPECT event, enable=false</span>
-            </div><div class="log-line info">
-                <span class="log-time">08-10 19:05:34.270</span>
-                <span class="log-level-tag info">info</span>
-                
-                <span class="log-message">[DomSelection] Received ENABLE_INSPECT event, enable=false</span>
-            </div><div class="log-line info">
-                <span class="log-time">08-10 19:05:51.220</span>
-                <span class="log-level-tag info">info</span>
-                
-                <span class="log-message">[DomSelection] Received ENABLE_INSPECT event, enable=false</span>
-            </div><div class="log-line info">
-                <span class="log-time">08-10 19:06:17.963</span>
-                <span class="log-level-tag info">info</span>
-                
-                <span class="log-message">[DomSelection] Received ENABLE_INSPECT event, enable=false</span>
-            </div><div class="log-line info">
-                <span class="log-time">08-10 19:07:08.653</span>
-                <span class="log-level-tag info">info</span>
-                
-                <span class="log-message">[DomSelection] Received ENABLE_INSPECT event, enable=false</span>
-            </div><div class="log-line info">
-                <span class="log-time">08-10 19:07:16.449</span>
-                <span class="log-level-tag info">info</span>
-                
-                <span class="log-message">[DomSelection] Received ENABLE_INSPECT event, enable=false</span>
-            </div></div>
-                </div>
+                    <div class="view-body logs-body">
+                        <div class="logs-container" id="logs-container"></div>
+                    </div>
+                </section>
 
-                <div class="view" id="view-settings">
+                <!-- ============ 设置 ============ -->
+                <section class="view" id="view-settings">
                     <div class="view-header">
-                        <h2>设置</h2>
+                        <div class="view-heading">
+                            <h2>设置</h2>
+                            <p class="view-desc">识别引擎、密钥、快捷键与输出偏好</p>
+                        </div>
                         <div class="view-header-actions">
                             <button class="primary-btn" id="btn-save-settings">保存设置</button>
                         </div>
                     </div>
-                    <div class="settings-content">
+                    <div class="view-body settings-content">
                         <div class="settings-section">
                             <div class="section-header">
                                 <h3>外观</h3>
@@ -887,15 +854,15 @@
                                     <label>主题</label>
                                     <div class="theme-selector" id="theme-selector">
                                         <button class="seg-btn" data-theme="dark">深色</button>
-                                        <button class="seg-btn active" data-theme="light">浅色</button>
+                                        <button class="seg-btn" data-theme="light">浅色</button>
                                         <button class="seg-btn" data-theme="eye-care">护眼</button>
-                                        <button class="seg-btn" data-theme="auto">自动</button>
+                                        <button class="seg-btn active" data-theme="auto">跟随系统</button>
                                     </div>
                                 </div>
                             </div>
                         </div>
 
-                        <div class="settings-section collapsed">
+                        <div class="settings-section">
                             <div class="section-header">
                                 <h3>语音识别模型</h3>
                                 <svg class="section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
@@ -994,10 +961,10 @@
                                     <div class="input-with-btn">
                                         <input type="password" class="text-input" id="setting-sf-key" placeholder="sk-...">
                                         <button class="apply-link-btn" data-url="https://cloud.siliconflow.cn/" title="申请 SiliconFlow Key">
-                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7"/><path d="M8 7h9v9"/></svg>
                                         </button>
                                         <button class="toggle-eye-btn" data-target="setting-sf-key" title="显示/隐藏">
-                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
                                         </button>
                                     </div>
                                 </div>
@@ -1006,10 +973,10 @@
                                     <div class="input-with-btn">
                                         <input type="password" class="text-input" id="setting-groq-key" placeholder="gsk_...">
                                         <button class="apply-link-btn" data-url="https://console.groq.com/keys" title="申请 Groq Key">
-                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7"/><path d="M8 7h9v9"/></svg>
                                         </button>
                                         <button class="toggle-eye-btn" data-target="setting-groq-key" title="显示/隐藏">
-                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
                                         </button>
                                     </div>
                                 </div>
@@ -1018,10 +985,10 @@
                                     <div class="input-with-btn">
                                         <input type="password" class="text-input" id="setting-doubao-key" placeholder="...">
                                         <button class="apply-link-btn" data-url="https://console.volcengine.com/speech/app" title="申请豆包 Key">
-                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7"/><path d="M8 7h9v9"/></svg>
                                         </button>
                                         <button class="toggle-eye-btn" data-target="setting-doubao-key" title="显示/隐藏">
-                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
                                         </button>
                                     </div>
                                 </div>
@@ -1030,10 +997,10 @@
                                     <div class="input-with-btn">
                                         <input type="password" class="text-input" id="setting-dashscope-key" placeholder="sk-...">
                                         <button class="apply-link-btn" data-url="https://bailian.console.aliyun.com/?apiKey=1" title="申请阿里云百炼 Key">
-                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7"/><path d="M8 7h9v9"/></svg>
                                         </button>
                                         <button class="toggle-eye-btn" data-target="setting-dashscope-key" title="显示/隐藏">
-                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
                                         </button>
                                     </div>
                                 </div>
@@ -1060,7 +1027,7 @@
                                     <div class="input-with-btn">
                                         <input type="password" class="text-input" id="setting-custom-key" placeholder="sk-...">
                                         <button class="toggle-eye-btn" data-target="setting-custom-key" title="显示/隐藏">
-                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
                                         </button>
                                     </div>
                                 </div>
@@ -1075,7 +1042,7 @@
                             <div class="section-body">
                                 <div class="setting-row">
                                     <label>语音输入</label>
-                                    <input type="text" class="text-input hotkey-input" id="setting-hotkey-batch" value="F2" readonly="">
+                                    <input type="text" class="text-input hotkey-input" id="setting-hotkey-batch" value="F2" readonly>
                                 </div>
                             </div>
                         </div>
@@ -1104,46 +1071,36 @@
                                 <div class="setting-row toggle-row">
                                     <label>自动添加标点</label>
                                     <label class="switch">
-                                        <input type="checkbox" id="setting-punctuation" checked="">
+                                        <input type="checkbox" id="setting-punctuation" checked>
                                         <span class="switch-slider"></span>
                                     </label>
                                 </div>
                                 <div class="setting-row toggle-row">
                                     <label>保留表情符号</label>
                                     <label class="switch">
-                                        <input type="checkbox" id="setting-emoji" checked="">
+                                        <input type="checkbox" id="setting-emoji" checked>
                                         <span class="switch-slider"></span>
                                     </label>
                                 </div>
                                 <div class="setting-row toggle-row">
-                                    <label>增强后处理</label>
+                                    <div class="setting-label-stack">
+                                        <label>增强后处理</label>
+                                        <span class="setting-hint">错别字修正、中文标点归一、代码模式等高级后处理</span>
+                                    </div>
                                     <label class="switch">
                                         <input type="checkbox" id="setting-post-processor">
                                         <span class="switch-slider"></span>
                                     </label>
                                 </div>
-                                <div class="setting-hint" style="padding-left:12px;color:var(--text-muted);font-size:12px;margin-top:-4px;">
-                                    开启后启用错别字修正、中文标点归一、代码模式等高级后处理
-                                </div>
                                 <div class="setting-row toggle-row">
-                                    <label>LLM 智能校对</label>
+                                    <div class="setting-label-stack">
+                                        <label>LLM 智能校对</label>
+                                        <span class="setting-hint">使用 LLM 对识别文本做智能校对（需配置 OpenAI 兼容 Chat 接口）</span>
+                                    </div>
                                     <label class="switch">
                                         <input type="checkbox" id="setting-llm-post-enable">
                                         <span class="switch-slider"></span>
                                     </label>
-                                </div>
-                                <div class="setting-hint" style="padding-left:12px;color:var(--text-muted);font-size:12px;margin-top:-4px;">
-                                    开启后使用 LLM 对识别文本做智能校对（需配置下方 OpenAI 兼容 Chat 接口）
-                                </div>
-                                <div class="setting-row toggle-row">
-                                    <label>开机自启动</label>
-                                    <label class="switch">
-                                        <input type="checkbox" id="setting-autostart">
-                                        <span class="switch-slider"></span>
-                                    </label>
-                                </div>
-                                <div class="setting-hint" style="padding-left:12px;color:var(--text-muted);font-size:12px;margin-top:-4px;">
-                                    登录 Windows 后自动在后台启动 Voice2Type（托盘常驻，切换立即生效）
                                 </div>
                                 <div id="llm-post-config" class="llm-post-config" style="display:none;">
                                     <div class="setting-row">
@@ -1155,23 +1112,31 @@
                                         <input type="password" class="text-input" id="setting-llm-api-key" placeholder="sk-...（硅基流动在 siliconflow.cn 申请）">
                                     </div>
                                     <div class="setting-row">
-                                        <label>模型</label>
+                                        <div class="setting-label-stack">
+                                            <label>模型</label>
+                                            <span class="setting-hint">默认硅基流动免费模型</span>
+                                        </div>
                                         <input type="text" class="text-input" id="setting-llm-model" placeholder="Qwen/Qwen2.5-7B-Instruct">
                                     </div>
-                                    <div class="setting-hint" style="color:var(--text-muted);font-size:12px;margin-top:-4px;">
-                                        默认硅基流动免费模型
-                                    </div>
-                                    <div class="setting-row setting-row-vertical" style="margin-top:8px;">
+                                    <div class="setting-row setting-row-vertical">
                                         <label>系统提示词</label>
                                         <textarea class="text-input" id="setting-llm-system-prompt" rows="6" placeholder="留空使用内置默认提示词（修正 ASR 同音错字并补全标点）
 可自定义校对风格，例如：
 - 更激进的错字修正
 - 保留口语化表达
 - 特定领域术语修正"></textarea>
-                                        <div class="setting-hint" style="color:var(--text-muted);font-size:12px;margin-top:4px;">
-                                            留空使用内置默认提示词。自定义后 LLM 将按你的指令校对文本
-                                        </div>
+                                        <span class="setting-hint">留空使用内置默认提示词。自定义后 LLM 将按你的指令校对文本</span>
                                     </div>
+                                </div>
+                                <div class="setting-row toggle-row">
+                                    <div class="setting-label-stack">
+                                        <label>开机自启动</label>
+                                        <span class="setting-hint">登录 Windows 后在后台启动（托盘常驻，切换立即生效）</span>
+                                    </div>
+                                    <label class="switch">
+                                        <input type="checkbox" id="setting-autostart">
+                                        <span class="switch-slider"></span>
+                                    </label>
                                 </div>
                             </div>
                         </div>
@@ -1184,12 +1149,12 @@
                             <div class="section-body">
                                 <div class="setting-row">
                                     <label>灵敏度</label>
-                                    <input type="range" min="0" max="100" value="50" class="slider" id="setting-vad-sensitivity" style="--fill: 50%;">
+                                    <input type="range" min="0" max="100" value="50" class="slider" id="setting-vad-sensitivity">
                                     <span class="value-display">50%</span>
                                 </div>
                                 <div class="setting-row">
                                     <label>静音断句时长</label>
-                                    <input type="range" min="300" max="2000" value="800" step="100" class="slider" id="setting-vad-silence" style="--fill: 29.411764705882355%;">
+                                    <input type="range" min="300" max="2000" value="800" step="100" class="slider" id="setting-vad-silence">
                                     <span class="value-display">800ms</span>
                                 </div>
                             </div>
@@ -1197,14 +1162,16 @@
 
                         <div class="settings-section">
                             <div class="section-header">
-                                <h3>本地模型管理<button class="help-btn" id="btn-local-model-help" title="本地模型使用教程" data-no-toggle="">?</button></h3>
+                                <h3>本地模型管理<button class="help-btn" id="btn-local-model-help" title="本地模型使用教程" data-no-toggle>?</button></h3>
                                 <svg class="section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
                             </div>
                             <div class="section-body">
                                 <div class="mm-storage">
                                     <div class="mm-storage-row">
                                         <div class="mm-storage-label">
-                                            <span class="mm-storage-icon" title="模型目录">📁</span>
+                                            <span class="mm-storage-icon" title="模型目录">
+                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+                                            </span>
                                             <div class="mm-storage-text">
                                                 <div class="mm-storage-title">模型目录</div>
                                                 <div class="mm-storage-path" id="models-dir-path">运行时加载</div>
@@ -1249,7 +1216,7 @@
                                         <div class="mm-advanced-hint">线程数 0=自动（物理核上限 8）；贪婪/关闭回退更快但中文准确率可能下降，默认关</div>
                                         <div class="mm-advanced-row">
                                             <label>线程数 (-t)</label>
-                                            <input type="number" class="text-input" id="setting-whisper-threads" min="0" max="8" step="1" value="0" style="width:80px" title="0=自动">
+                                            <input type="number" class="text-input mm-num-input" id="setting-whisper-threads" min="0" max="8" step="1" value="0" title="0=自动">
                                         </div>
                                         <div class="mm-advanced-row">
                                             <label>贪婪解码 (-bs 1 -bo 1)</label>
@@ -1270,7 +1237,7 @@
                             </div>
                         </div>
 
-                        <div class="settings-section collapsed">
+                        <div class="settings-section">
                             <div class="section-header">
                                 <h3>关于与更新</h3>
                                 <svg class="section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
@@ -1306,26 +1273,26 @@
                                 </div>
                             </div>
                         </div>
-
                     </div>
-                </div>
+                </section>
             </main>
         </div>
 
-        <div id="statusbar">
+        <footer id="statusbar">
             <div class="status-left">
-                <div class="status-indicator" id="app-status-indicator">
-                    <div class="pulse-dot" style="background: var(--text-tertiary);"></div>
+                <div class="status-indicator" id="app-status-indicator" data-status="idle">
+                    <div class="pulse-dot"></div>
                     <span id="app-status-text">就绪</span>
                 </div>
             </div>
             <div class="status-right">
                 <span class="model-badge" id="current-model-badge">SenseVoiceSmall</span>
             </div>
-        </div>
+        </footer>
     </div>
 
-    <div class="context-menu" id="context-menu" hidden=""></div>
+    <div class="context-menu" id="context-menu" hidden></div>
+    <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
 
     <!-- 音色库模态框（全局共享：语音合成页与视频配音节点均可打开） -->
     <div class="tts-voice-modal" id="tts-voice-modal" style="display:none">
@@ -1333,11 +1300,11 @@
             <div class="tts-voice-modal-header">
                 <h3>官方音色库</h3>
                 <button class="icon-btn" id="btn-tts-voice-close" title="关闭">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
                 </button>
             </div>
             <div class="tts-voice-search">
-                <input type="text" id="tts-voice-search-input" placeholder="搜索音色名称...">
+                <input type="text" id="tts-voice-search-input" class="text-input" placeholder="搜索音色名称…">
                 <select id="tts-voice-lang-filter" class="tts-select">
                     <option value="">全部语言</option>
                     <option value="zh">中文</option>
@@ -1353,12 +1320,12 @@
                 <label class="tts-self-toggle"><input type="checkbox" id="tts-voice-self"> 仅自建</label>
             </div>
             <div class="tts-voice-grid" id="tts-voice-grid">
-                <div class="tts-voice-loading">加载中...</div>
+                <div class="tts-voice-loading">加载中…</div>
             </div>
             <div class="tts-voice-pager">
-                <button class="ghost-btn" id="btn-tts-voice-prev" disabled>上一页</button>
+                <button class="secondary-btn btn-sm" id="btn-tts-voice-prev" disabled>上一页</button>
                 <span id="tts-voice-page-info">1 / 1</span>
-                <button class="ghost-btn" id="btn-tts-voice-next">下一页</button>
+                <button class="secondary-btn btn-sm" id="btn-tts-voice-next">下一页</button>
             </div>
         </div>
     </div>
@@ -1368,17 +1335,19 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2>本地模型使用教程</h2>
-                <button class="modal-close-btn" id="btn-close-help" title="关闭">×</button>
+                <button class="modal-close-btn" id="btn-close-help" title="关闭">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                </button>
             </div>
             <div class="modal-body">
                 <div class="help-section">
-                    <h3>1. 下载转写引擎</h3>
+                    <h3><span class="help-step">1</span>下载转写引擎</h3>
                     <p>点击设置页「转写引擎」区块的「下载引擎」按钮，应用会自动下载 whisper.cpp v1.9.2 纯 CPU 版（whisper-bin-x64.zip，约 8MB）并解压到模型目录下的 <code>whisper-bin</code> 子文件夹。</p>
                     <p>也可手动下载：点击 <a href="#" class="help-link" data-url="https://github.com/ggml-org/whisper.cpp/releases">whisper.cpp Releases</a>，下载 <code>whisper-bin-x64.zip</code>，解压所有文件到 <code>模型目录/whisper-bin/</code>。</p>
                     <p class="help-tip">提示：请使用纯 CPU 版（whisper-bin-x64.zip），不要用 BLAS 版（whisper-blas-bin-x64.zip），BLAS 版启动有额外线程池开销。</p>
                 </div>
                 <div class="help-section">
-                    <h3>2. 下载模型文件</h3>
+                    <h3><span class="help-step">2</span>下载模型文件</h3>
                     <p>在「Whisper 模型」区块点击对应模型的「下载」按钮，应用内下载（支持断点续传）。CPU 推理速度差异极大，按需选择：</p>
                     <ul>
                         <li><strong>tiny</strong> — 极快，2秒音频约1秒。日常听写首选 (~75MB)</li>
@@ -1386,13 +1355,13 @@
                         <li><strong>small</strong> — 慢，2秒音频约9秒。需高精度且硬件强 (~466MB)</li>
                         <li><strong>medium</strong> — 很慢，2秒音频约20秒+。仅高配机 (~1.5GB)</li>
                     </ul>
-                    <p class="help-tip">下载后点击「已下载模型」列表中的「使用」按钮设为当前。</p>
+                    <p class="help-tip">下载后点击模型卡片上的「使用」按钮设为当前。</p>
                 </div>
                 <div class="help-section">
-                    <h3>3. 选择并使用</h3>
+                    <h3><span class="help-step">3</span>选择并使用</h3>
                     <ol>
-                        <li>回到设置，在「批量识别模型」中选择「本地 Whisper」</li>
-                        <li>在「已下载模型」中确认文件已被识别，并点「使用」设为当前</li>
+                        <li>回到设置，在「语音识别模型 → 整段识别」中选择「本地 Whisper」</li>
+                        <li>确认模型卡片显示「使用中」</li>
                         <li>使用语音输入快捷键录音，松开后将自动调用本地引擎转写</li>
                     </ol>
                     <p class="help-tip">启动后引擎和模型会预热到系统文件缓存，首次转写稍慢，后续更快。本地模型不消耗 API 额度，完全离线运行。</p>
@@ -1401,6 +1370,5 @@
         </div>
     </div>
     <script src="app.js"></script>
-
-
-</body></html>
+</body>
+</html>
