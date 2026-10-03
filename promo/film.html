@@ -30,7 +30,7 @@
     #stage { position: relative; overflow: hidden; background: #000; }
     .abs { position: absolute; }
     .scene { position: absolute; inset: 0; visibility: hidden; }
-    .glow { position: absolute; border-radius: 50%; filter: blur(80px); will-change: transform, opacity; }
+    .glow { position: absolute; border-radius: 50%; will-change: transform, opacity; }
 
     /* 标题排版 */
     .line { position: relative; display: inline-block; white-space: nowrap; }
@@ -94,7 +94,6 @@
         border-radius: 28px;
         background: rgba(28, 28, 33, 0.92);
         box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.08), 0 40px 100px -30px rgba(0, 0, 0, 0.95);
-        backdrop-filter: blur(24px);
     }
     .pill {
         position: absolute;
@@ -163,7 +162,6 @@
     .player { position: absolute; }
     .wave-bar { position: absolute; border-radius: 6px; }
 
-    #grain { position: absolute; inset: 0; pointer-events: none; opacity: 0.07; mix-blend-mode: overlay; z-index: 100; }
     #fade { position: absolute; inset: 0; background: #000; pointer-events: none; z-index: 99; }
 </style>
 </head>
@@ -177,7 +175,6 @@
     <div id="scenes"></div>
     <svg id="pointer" viewBox="0 0 22 29"><path d="M1.5 1.5 L1.5 22.5 L6.8 17.4 L10.4 26.2 L14 24.7 L10.4 16 L17.8 16 Z" fill="#fff" stroke="#111" stroke-width="1.6" stroke-linejoin="round"/></svg>
     <div id="click-ring"></div>
-    <canvas id="grain"></canvas>
     <div id="fade"></div>
 </div>
 
@@ -337,27 +334,13 @@ function renderGlows(t, extra) {
         const y = (lerp(a[1], b[1], p) + Math.cos(t * 0.3 + j) * 0.015) * H - size / 2;
         let op = lerp(a[4], b[4], p);
         if (extra && extra[j] != null) op += extra[j];
-        setStyle(g, { width: px(size), height: px(size), left: px(x), top: px(y), opacity: op, background: `rgb(${col.join(',')})` });
+        // 径向渐变代替大半径 blur 滤镜：观感一致，软件合成下快一个数量级
+        const c0 = `rgba(${col.join(',')},1)`, c1 = `rgba(${col.join(',')},0.45)`, c2 = `rgba(${col.join(',')},0)`;
+        setStyle(g, { width: px(size), height: px(size), left: px(x), top: px(y), opacity: op, background: `radial-gradient(closest-side, ${c0} 0%, ${c1} 45%, ${c2} 100%)` });
     });
 }
 
-// ====================== 胶片颗粒（静态，抑制渐变色带） ======================
-(function makeGrain() {
-    const c = document.getElementById('grain');
-    c.width = W; c.height = H;
-    const ctx = c.getContext('2d');
-    const img = ctx.createImageData(W, H);
-    let seed = 1337;
-    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-    for (let i = 0; i < img.data.length; i += 4) {
-        const v = 128 + (rnd() - 0.5) * 255;
-        img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
-        img.data[i + 3] = 255;
-    }
-    ctx.putImageData(img, 0, 0);
-    c.style.width = W + 'px';
-    c.style.height = H + 'px';
-})();
+// 胶片颗粒由 render.mjs 在 ffmpeg 阶段加入（时域噪点，兼顾去色带与编码效率）
 
 // ====================== 内嵌应用（真实前端） ======================
 const APP_W = 880, APP_H = 720;
@@ -595,7 +578,7 @@ function setLogoBars(bars, t, energy) {
 }
 scene(6.0, 10.85, (node) => {
     const size = u(260, 220);
-    const bloom = el('div', 'abs', node, { borderRadius: '50%', background: AURORA, filter: 'blur(90px)' });
+    const bloom = el('div', 'abs', node, { borderRadius: '50%', background: 'radial-gradient(closest-side, rgba(140,130,255,0.95), rgba(110,150,255,0.45) 45%, rgba(79,227,209,0) 100%)' });
     const logo = buildLogo(node, size);
     const word = el('div', 'abs center-x wordmark', node, { fontSize: px(u(150, 140)) });
     word.textContent = 'Voice2Type';
@@ -1239,7 +1222,7 @@ const S7 = scene(56.8, 62.25, (node) => {
 // ---------- S8 结尾 ----------
 const S8 = scene(62.0, 68.0, (node) => {
     const size = u(230, 190);
-    const bloom = el('div', 'abs', node, { borderRadius: '50%', background: AURORA, filter: 'blur(100px)' });
+    const bloom = el('div', 'abs', node, { borderRadius: '50%', background: 'radial-gradient(closest-side, rgba(140,130,255,0.95), rgba(110,150,255,0.45) 45%, rgba(79,227,209,0) 100%)' });
     const logo = buildLogo(node, size);
     const word = el('div', 'abs center-x wordmark', node, { fontSize: px(u(140, 120)) });
     word.textContent = 'Voice2Type';

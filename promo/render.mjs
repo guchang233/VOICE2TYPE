@@ -89,9 +89,10 @@ const events = await page.evaluate(() => window.__events);
 const eventsFile = path.join(outDir, `events-${tag}.json`);
 fs.writeFileSync(eventsFile, JSON.stringify({ duration, events }, null, 1));
 
-async function frameAt(t) {
+// JPEG q95 截帧：比 PNG 快约 6 倍；最终视频本就是 4:2:0，画质差异不可见
+async function frameAt(t, png) {
     await page.evaluate(tt => window.__render(tt), t);
-    return page.screenshot({ type: 'png' });
+    return png ? page.screenshot({ type: 'png' }) : page.screenshot({ type: 'jpeg', quality: 95 });
 }
 
 const stills = opt('stills');
@@ -104,7 +105,7 @@ if (stills) {
     for (const target of targets) {
         if (t > target) t = Math.max(0, target - 2.5);
         while (t < target - 1e-6) { await page.evaluate(tt => window.__render(tt), t); t += 1 / 30; }
-        const png = await frameAt(target);
+        const png = await frameAt(target, true);
         fs.writeFileSync(path.join(dir, `t${target.toFixed(2).padStart(6, '0')}.png`), png);
         t = target;
     }
@@ -121,8 +122,10 @@ const to = +opt('to', duration);
 const silent = path.join(outDir, `video-${tag}.mp4`);
 const ff = spawn('ffmpeg', [
     '-y', '-loglevel', 'error',
-    '-f', 'image2pipe', '-framerate', String(fps), '-c:v', 'png', '-i', '-',
-    '-c:v', 'libx264', '-preset', 'slow', '-crf', '15', '-tune', 'film',
+    '-f', 'image2pipe', '-framerate', String(fps), '-c:v', 'mjpeg', '-i', '-',
+    // 轻微时域颗粒：胶片质感 + 抑制暗部渐变色带
+    '-vf', 'noise=c0s=4:c0f=t+u',
+    '-c:v', 'libx264', '-preset', 'slow', '-crf', '16', '-tune', 'film',
     '-pix_fmt', 'yuv420p', '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709',
     '-movflags', '+faststart', silent,
 ], { stdio: ['pipe', 'inherit', 'inherit'] });
