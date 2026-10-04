@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Voice2Type — Cover</title>
+<!--
+  短视频封面。与宣传片同一套视觉（纯黑底 + 极光渐变）。
+  URL 参数：?w=1080&h=1920（抖音/视频号）、?w=1080&h=1440（小红书）、?w=1920&h=1080（B 站）
+  渲染：node cover.mjs
+-->
+<style>
+    :root {
+        --aurora: linear-gradient(120deg, #B3A4FF 0%, #7C9BFF 45%, #4FE3D1 100%);
+        --ink: #F5F5F7;
+        --mute: #9A9AA3;
+        --cjk: "Noto Sans CJK SC", "Microsoft YaHei UI", sans-serif;
+        --latin: "Inter Display", "Inter", "Noto Sans CJK SC", sans-serif;
+        --mono: "JetBrains Mono", "Cascadia Code", monospace;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { background: #000; overflow: hidden; }
+    body { font-family: var(--cjk); color: var(--ink); -webkit-font-smoothing: antialiased; }
+    #c { position: relative; overflow: hidden; background: #000; }
+    .abs { position: absolute; }
+    .glow { position: absolute; border-radius: 50%; }
+    .grad { background: var(--aurora); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+    .brand { display: flex; align-items: center; font-family: var(--latin); font-weight: 750; letter-spacing: -0.03em; }
+    .brand-icon { display: grid; place-items: center; border-radius: 26%; background: var(--aurora); color: #fff; box-shadow: 0 10px 40px -8px rgba(124, 155, 255, 0.7); }
+    .head { font-weight: 900; letter-spacing: -0.035em; line-height: 1.08; white-space: nowrap; }
+    .sub { font-weight: 500; color: var(--mute); letter-spacing: 0.02em; white-space: nowrap; }
+    .chips { display: flex; flex-wrap: wrap; }
+    .chip { display: inline-flex; align-items: center; border-radius: 999px; background: rgba(255,255,255,0.07); box-shadow: inset 0 0 0 1.5px rgba(255,255,255,0.1); color: #E4E4EA; font-weight: 600; white-space: nowrap; }
+    .chip i { display: inline-block; border-radius: 50%; background: var(--aurora); }
+
+    .shot { border-radius: 2.2%/2.7%; overflow: hidden; background: #0a0a0c;
+            box-shadow: 0 0 0 1.5px rgba(255,255,255,0.1), 0 60px 140px -30px rgba(0,0,0,0.9), 0 0 120px -20px rgba(124,155,255,0.45); }
+    .shot img { display: block; width: 100%; }
+    .shot-fade { position: absolute; left: 0; right: 0; bottom: 0; background: linear-gradient(to bottom, rgba(0,0,0,0), #000 92%); }
+
+    .caption { border-radius: 14px; background: rgba(8, 8, 12, 0.82); text-align: center;
+               box-shadow: 0 0 0 1.5px rgba(255,255,255,0.12), 0 30px 80px -20px rgba(0,0,0,0.9); backdrop-filter: blur(12px); }
+    .caption .zh { font-weight: 700; color: #fff; white-space: nowrap; }
+    .caption .en { font-family: var(--latin); font-weight: 500; color: #FCD774; white-space: nowrap; }
+    .live { display: flex; align-items: center; font-family: var(--latin); font-weight: 700; letter-spacing: 0.1em; color: #FF6B7A; }
+    .live i { display: inline-block; border-radius: 50%; background: #FF5C6C; box-shadow: 0 0 14px #FF5C6C; }
+
+    .key { display: grid; place-items: center; font-family: var(--latin); font-weight: 700; color: #fff; border-radius: 22%;
+           background: linear-gradient(180deg, #2A2A33, #16161B); box-shadow: inset 0 1.5px 0 rgba(255,255,255,0.18), 0 0 0 1.5px rgba(255,255,255,0.12), 0 10px 0 #0b0b0e, 0 26px 50px -10px rgba(0,0,0,0.9); }
+    .foot { color: #6E6E78; font-weight: 500; letter-spacing: 0.06em; white-space: nowrap; }
+</style>
+</head>
+<body>
+<div id="c"></div>
+<script>
+const q = new URLSearchParams(location.search);
+const W = +q.get('w') || 1080, H = +q.get('h') || 1920;
+const c = document.getElementById('c');
+c.style.width = W + 'px'; c.style.height = H + 'px';
+const AR = W / H;
+const MODE = AR > 1.2 ? 'land' : AR > 0.66 ? 'xhs' : 'tall';
+const px = v => Math.round(v) + 'px';
+function el(tag, cls, parent, style, html) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    Object.assign(e.style, style || {});
+    if (html != null) e.innerHTML = html;
+    (parent || c).appendChild(e);
+    return e;
+}
+
+// ===== 背景光晕 =====
+const G = (x, y, r, color, a) => el('div', 'glow', c, {
+    left: px(x - r), top: px(y - r), width: px(r * 2), height: px(r * 2),
+    background: `radial-gradient(circle, ${color} 0%, rgba(0,0,0,0) 68%)`, opacity: a,
+});
+const ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" width="58%" height="58%"><path d="M4 10.5v3"/><path d="M7.5 8v8"/><path d="M11 5v14"/><path d="M16.5 6.5v11"/><path d="M14.5 6.5h4"/><path d="M14.5 17.5h4"/></svg>';
+
+function brand(x, y, size) {
+    const b = el('div', 'brand abs', c, { left: px(x), top: px(y), fontSize: px(size), gap: px(size * 0.45) });
+    el('div', 'brand-icon', b, { width: px(size * 1.5), height: px(size * 1.5) }, ICON);
+    el('span', '', b, {}, 'Voice2Type');
+    return b;
+}
+function headline(x, y, size, lines, align) {
+    const h = el('div', 'head abs', c, { left: px(x), top: px(y), fontSize: px(size), textAlign: align || 'left' });
+    h.innerHTML = lines.join('<br>');
+    return h;
+}
+function chips(x, y, size, gap, maxW, align) {
+    const box = el('div', 'chips abs', c, { left: px(x), top: px(y), gap: px(gap), width: maxW ? px(maxW) : 'auto', justifyContent: align || 'flex-start' });
+    ['语音输入', '实时字幕', '同声传译', '语音合成', '视频配音'].forEach(t => {
+        const ch = el('span', 'chip', box, { fontSize: px(size), padding: `${px(size * 0.5)} ${px(size * 0.95)}`, gap: px(size * 0.5) });
+        el('i', '', ch, { width: px(size * 0.42), height: px(size * 0.42) });
+        ch.appendChild(document.createTextNode(t));
+    });
+    return box;
+}
+function shot(x, y, w, rot) {
+    const s = el('div', 'shot abs', c, { left: px(x), top: px(y), width: px(w), transform: rot ? `perspective(${px(w * 3)}) rotateX(${rot[0]}deg) rotateY(${rot[1]}deg)` : '' });
+    el('img', '', s).src = 'out/assets/app-dark.png';
+    return s;
+}
+function caption(x, y, scale, withLive) {
+    const cap = el('div', 'caption abs', c, { left: px(x), top: px(y), padding: `${px(16 * scale)} ${px(30 * scale)} ${px(18 * scale)}` });
+    if (withLive) {
+        const live = el('div', 'live', cap, { fontSize: px(15 * scale), gap: px(8 * scale), marginBottom: px(10 * scale), justifyContent: 'center' });
+        el('i', '', live, { width: px(9 * scale), height: px(9 * scale) });
+        live.appendChild(document.createTextNode('LIVE · 同声传译'));
+    }
+    el('div', 'zh', cap, { fontSize: px(34 * scale), lineHeight: 1.35 }, '欢迎来到今天的发布会');
+    el('div', 'en', cap, { fontSize: px(26 * scale), lineHeight: 1.4, marginTop: px(4 * scale) }, 'Welcome to today’s keynote');
+    return cap;
+}
+function key(x, y, size, label) {
+    return el('div', 'key abs', c, { left: px(x), top: px(y), width: px(size), height: px(size), fontSize: px(size * 0.36) }, label);
+}
+function foot(x, y, size, align) {
+    return el('div', 'foot abs', c, { left: px(x), top: px(y), fontSize: px(size), textAlign: align || 'left' }, 'Windows 桌面端  ·  开源免费');
+}
+const HEAD = ['说出来，', '就<span class="grad">写好了</span>。'];
+
+if (MODE === 'tall') {
+    // 1080×1920：上文下图，标题落在平台安全区内（避开顶部状态栏与底部文案/按钮）
+    G(200, 380, 700, 'rgba(145,130,255,0.55)', 1);
+    G(960, 1250, 760, 'rgba(79,227,209,0.30)', 1);
+    G(540, 1900, 800, 'rgba(94,139,255,0.35)', 1);
+    brand(90, 210, 44);
+    headline(84, 330, 176, HEAD);
+    el('div', 'sub abs', c, { left: px(90), top: px(740), fontSize: px(44) }, '按住 F2 说话，松开即上屏');
+    chips(90, 836, 30, 14, 720);
+    shot(150, 1080, 860, [10, -12]);
+    el('div', 'shot-fade', c, { top: px(1500), height: px(420) });
+    key(70, 1010, 150, 'F2');
+    caption(300, 1560, 1.05, true);
+    foot(90, 1800, 30);
+} else if (MODE === 'xhs') {
+    // 1080×1440：小红书 3:4
+    G(220, 300, 620, 'rgba(145,130,255,0.55)', 1);
+    G(940, 1000, 620, 'rgba(79,227,209,0.30)', 1);
+    G(540, 1440, 700, 'rgba(94,139,255,0.35)', 1);
+    brand(80, 90, 38);
+    headline(74, 190, 150, HEAD);
+    el('div', 'sub abs', c, { left: px(80), top: px(540), fontSize: px(38) }, '按住 F2 说话，松开即上屏');
+    chips(80, 620, 27, 12, 640);
+    shot(170, 850, 820, [10, -12]);
+    el('div', 'shot-fade', c, { top: px(1080), height: px(360) });
+    key(70, 800, 128, 'F2');
+    caption(330, 1180, 0.95, true);
+    foot(80, 1375, 26);
+} else {
+    // 1920×1080：B 站 16:9，左文右图
+    G(380, 300, 640, 'rgba(145,130,255,0.55)', 1);
+    G(1500, 520, 720, 'rgba(79,227,209,0.28)', 1);
+    G(1100, 1100, 700, 'rgba(94,139,255,0.35)', 1);
+    brand(120, 120, 40);
+    headline(112, 250, 156, HEAD);
+    el('div', 'sub abs', c, { left: px(120), top: px(630), fontSize: px(40) }, '按住 F2 说话，松开即上屏');
+    chips(120, 712, 27, 12, 760);
+    shot(1000, 150, 860, [6, -16]);
+    key(905, 120, 132, 'F2');
+    caption(1080, 830, 0.95, true);
+    foot(120, 960, 26);
+}
+document.fonts.ready.then(() => { document.body.dataset.ready = '1'; });
+</script>
+</body>
+</html>
