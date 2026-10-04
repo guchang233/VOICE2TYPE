@@ -1,0 +1,1306 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Voice2Type — Launch Film</title>
+<!--
+  发布会风格宣传片（确定性时间轴）：
+  - 每一帧都是 render(t) 的纯函数，由 render.mjs 逐帧截图后交给 ffmpeg 编码
+  - 演示镜头内嵌真实前端（/src/index.html，浏览器模式），由本页直接驱动其 DOM
+  - URL 参数：?w=1080&h=1920（竖屏，默认）或 ?w=1920&h=1080（横屏）；?t=12.5 预览单帧
+-->
+<style>
+    :root {
+        --aurora: linear-gradient(120deg, #B3A4FF 0%, #7C9BFF 45%, #4FE3D1 100%);
+        --ink: #F5F5F7;
+        --mute: #8E8E96;
+        --dim: #5E5E66;
+        --cjk: "Noto Sans CJK SC", "Microsoft YaHei UI", sans-serif;
+        --latin: "Inter Display", "Inter", "Noto Sans CJK SC", sans-serif;
+        --mono: "JetBrains Mono", "Cascadia Code", monospace;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { background: #000; overflow: hidden; }
+    body {
+        font-family: var(--cjk);
+        color: var(--ink);
+        -webkit-font-smoothing: antialiased;
+        text-rendering: geometricPrecision;
+    }
+    #stage { position: relative; overflow: hidden; background: #000; }
+    .abs { position: absolute; }
+    .scene { position: absolute; inset: 0; visibility: hidden; }
+    .glow { position: absolute; border-radius: 50%; will-change: transform, opacity; }
+
+    /* 标题排版 */
+    .line { position: relative; display: inline-block; white-space: nowrap; }
+    .head { font-family: var(--cjk); font-weight: 900; letter-spacing: -0.03em; line-height: 1.12; }
+    .sub { font-family: var(--cjk); font-weight: 400; color: var(--mute); letter-spacing: 0.01em; white-space: nowrap; }
+    .ch { display: inline-block; will-change: transform, opacity, filter; }
+    .grad-ch { -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .center-x { left: 0; right: 0; text-align: center; }
+
+    /* 光标 */
+    .caret { position: absolute; width: 8px; border-radius: 4px; background: var(--aurora); box-shadow: 0 0 24px rgba(140, 150, 255, 0.8); }
+
+    /* Logo */
+    .logo-tile {
+        position: absolute;
+        border-radius: 23%;
+        background: linear-gradient(135deg, #9F8CFF 0%, #6690FF 50%, #3FD6C6 100%);
+        box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.22), inset 0 -20px 40px rgba(0, 0, 0, 0.12), 0 30px 80px -20px rgba(110, 120, 255, 0.7);
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+    }
+    .logo-tile::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(160deg, rgba(255,255,255,0.35) 0%, rgba(255,255,255,0) 45%);
+    }
+    .wordmark { font-family: var(--latin); font-weight: 800; letter-spacing: -0.045em; white-space: nowrap; }
+
+    /* 应用窗口框（内嵌真实前端） */
+    .app-frame {
+        position: absolute;
+        overflow: hidden;
+        border-radius: 22px;
+        background: #09090B;
+        box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.1), 0 50px 120px -30px rgba(0, 0, 0, 0.9), 0 30px 80px -40px rgba(124, 108, 255, 0.55);
+        transform-origin: 50% 50%;
+    }
+    .app-cam { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+    .app-frame iframe { border: 0; display: block; background: #09090B; }
+    .app-shot { display: block; }
+
+    /* 键帽 */
+    .keycap {
+        position: absolute;
+        border-radius: 30px;
+        background: linear-gradient(180deg, #3A3A42 0%, #232329 100%);
+        box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.14), inset 0 -6px 0 rgba(0, 0, 0, 0.35), 0 18px 40px -10px rgba(0, 0, 0, 0.8), 0 0 0 1.5px rgba(255, 255, 255, 0.08);
+        display: grid;
+        place-items: center;
+        font-family: var(--latin);
+        font-weight: 700;
+        color: #EDEDF2;
+    }
+    .keycap .key-glow { position: absolute; inset: -30px; border-radius: 50px; background: radial-gradient(closest-side, rgba(255, 92, 108, 0.55), transparent); opacity: 0; }
+
+    /* 卡片通用 */
+    .card {
+        position: absolute;
+        border-radius: 28px;
+        background: rgba(28, 28, 33, 0.92);
+        box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.08), 0 40px 100px -30px rgba(0, 0, 0, 0.95);
+    }
+    .pill {
+        position: absolute;
+        display: inline-flex;
+        align-items: center;
+        gap: 14px;
+        white-space: nowrap;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.06);
+        box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.1);
+        color: #E6E6EC;
+        font-weight: 500;
+    }
+    .pill .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--aurora); }
+
+    /* 指针 */
+    #pointer { position: absolute; left: 0; top: 0; width: 44px; height: 58px; z-index: 50; pointer-events: none; filter: drop-shadow(0 6px 10px rgba(0,0,0,0.5)); }
+    #click-ring { position: absolute; border-radius: 50%; border: 3px solid rgba(255, 255, 255, 0.9); z-index: 49; pointer-events: none; }
+
+    /* 实时字幕场景 */
+    .video {
+        position: absolute;
+        overflow: hidden;
+        border-radius: 26px;
+        background: linear-gradient(160deg, #1B1E3A 0%, #0B0C18 60%, #120A1E 100%);
+        box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.08), 0 50px 120px -30px rgba(0, 0, 0, 0.95);
+    }
+    .bokeh { position: absolute; border-radius: 50%; filter: blur(6px); }
+    .live-badge { position: absolute; display: flex; align-items: center; gap: 10px; font-family: var(--latin); font-weight: 700; letter-spacing: 0.08em; color: #fff; }
+    .live-badge i { width: 14px; height: 14px; border-radius: 50%; background: #FF4D5E; box-shadow: 0 0 16px #FF4D5E; }
+    .timecode { position: absolute; font-family: var(--mono); color: rgba(255, 255, 255, 0.6); }
+    .sub-box { position: absolute; left: 50%; text-align: center; background: rgba(0, 0, 0, 0.55); border-radius: 8px; white-space: nowrap; }
+    .sub-zh { font-family: var(--cjk); font-weight: 500; color: #fff; text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6); }
+    .sub-en { font-family: var(--latin); font-weight: 500; color: rgba(255, 255, 255, 0.8); }
+
+    /* 节点流水线 */
+    .node {
+        position: absolute;
+        border-radius: 26px;
+        background: rgba(24, 24, 30, 0.95);
+        box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.08), 0 30px 70px -30px rgba(0, 0, 0, 0.9);
+    }
+    .node .n-dot { position: absolute; border-radius: 50%; background: #5E5E66; }
+    .node .n-title { position: absolute; font-weight: 700; color: #F5F5F7; white-space: nowrap; }
+    .node .n-tag { position: absolute; font-family: var(--mono); font-weight: 600; letter-spacing: 0.08em; color: #7C7C86; background: rgba(255,255,255,0.06); border-radius: 8px; }
+    .node .n-hint { position: absolute; color: #8E8E96; white-space: nowrap; }
+    .node .n-bar { position: absolute; border-radius: 6px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+    .node .n-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: inherit; background: var(--aurora); }
+    .node .n-pct { position: absolute; font-family: var(--mono); font-weight: 600; text-align: right; color: #A9A9B2; }
+    .node .n-port { position: absolute; border-radius: 50%; background: #0A0A0C; border: 4px solid #3A3A44; }
+
+    /* 音色卡 */
+    .voice {
+        position: absolute;
+        display: flex;
+        align-items: center;
+        border-radius: 26px;
+        background: rgba(30, 30, 36, 0.96);
+        box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.1), 0 30px 70px -20px rgba(0, 0, 0, 0.9);
+    }
+    .voice .v-ava { border-radius: 22px; flex-shrink: 0; }
+    .voice .v-name { font-weight: 700; color: #fff; white-space: nowrap; }
+    .voice .v-desc { color: #8E8E96; white-space: nowrap; }
+
+    /* 播放器 */
+    .player { position: absolute; }
+    .wave-bar { position: absolute; border-radius: 6px; }
+
+    #fade { position: absolute; inset: 0; background: #000; pointer-events: none; z-index: 99; }
+</style>
+</head>
+<body>
+<div id="stage">
+    <div id="bg" class="abs" style="inset:0">
+        <div class="glow" id="g1"></div>
+        <div class="glow" id="g2"></div>
+        <div class="glow" id="g3"></div>
+    </div>
+    <div id="scenes"></div>
+    <svg id="pointer" viewBox="0 0 22 29"><path d="M1.5 1.5 L1.5 22.5 L6.8 17.4 L10.4 26.2 L14 24.7 L10.4 16 L17.8 16 Z" fill="#fff" stroke="#111" stroke-width="1.6" stroke-linejoin="round"/></svg>
+    <div id="click-ring"></div>
+    <div id="fade"></div>
+</div>
+
+<script>
+(function () {
+'use strict';
+
+// ====================== 基础 ======================
+const params = new URLSearchParams(location.search);
+const W = +(params.get('w') || 1080);
+const H = +(params.get('h') || 1920);
+const PORTRAIT = H > W;
+const DURATION = 68;
+const stage = document.getElementById('stage');
+stage.style.width = W + 'px';
+stage.style.height = H + 'px';
+document.body.style.width = W + 'px';
+document.body.style.height = H + 'px';
+
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, p) => a + (b - a) * p;
+const P = (t, a, b) => clamp((t - a) / (b - a));
+const E = {
+    linear: p => p,
+    outCubic: p => 1 - Math.pow(1 - p, 3),
+    outQuint: p => 1 - Math.pow(1 - p, 5),
+    outExpo: p => (p >= 1 ? 1 : 1 - Math.pow(2, -10 * p)),
+    inCubic: p => p * p * p,
+    inOutCubic: p => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2),
+    inOutSine: p => -(Math.cos(Math.PI * p) - 1) / 2,
+    outBack: p => { const c1 = 1.5, c3 = c1 + 1; return 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2); },
+    spring: p => (p >= 1 ? 1 : 1 - Math.exp(-6.5 * p) * Math.cos(9 * p)),
+};
+const AURORA = 'linear-gradient(120deg, #B3A4FF 0%, #7C9BFF 45%, #4FE3D1 100%)';
+const REC = 'linear-gradient(120deg, #FF9A8B 0%, #FF5C6C 50%, #FF4FA0 100%)';
+// 竖屏 / 横屏尺寸换算：u(竖屏值, 横屏值)
+const u = (p, l) => (PORTRAIT ? p : (l === undefined ? p : l));
+
+function el(tag, cls, parent, style) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (style) Object.assign(e.style, style);
+    (parent || stage).appendChild(e);
+    return e;
+}
+function setStyle(e, s) { for (const k in s) e.style[k] = s[k]; }
+function px(v) { return v + 'px'; }
+
+// 音效事件（render.mjs 导出给 soundtrack.py 合成配乐与音效）
+const EVENTS = [];
+function ev(t, type, gain) { EVENTS.push({ t: +t.toFixed(3), type, gain: gain == null ? 1 : gain }); }
+
+// ====================== 文字逐字显现 ======================
+/** 创建一行逐字元素；segments: [{text, grad}] */
+function makeLine(parent, segments, fontSize, cls) {
+    const line = el('div', 'line ' + (cls || 'head'), parent, { fontSize: px(fontSize) });
+    const chars = [];
+    segments.forEach(seg => {
+        for (const c of seg.text) {
+            const s = el('span', 'ch' + (seg.grad ? ' grad-ch' : ''), line);
+            s.textContent = c;
+            s.dataset.grad = seg.grad || '';
+            chars.push(s);
+        }
+    });
+    line._chars = chars;
+    return line;
+}
+/** 渐变字：每个字符共享整行渐变（按字符偏移设置背景位置） */
+function applyGradients(line) {
+    const width = line.offsetWidth;
+    line._chars.forEach(s => {
+        if (!s.dataset.grad) return;
+        s.style.backgroundImage = s.dataset.grad === 'rec' ? REC : AURORA;
+        s.style.backgroundSize = width + 'px 100%';
+        s.style.backgroundPosition = (-s.offsetLeft) + 'px 0';
+    });
+}
+/** 逐字显现：t0 起每 stagger 秒一个字，单字 dur 秒 */
+function revealChars(chars, t, t0, stagger, dur, opt) {
+    const o = opt || {};
+    const rise = o.rise == null ? 0.22 : o.rise;
+    const blur = o.blur == null ? 14 : o.blur;
+    chars.forEach((s, i) => {
+        const p = E.outExpo(P(t, t0 + i * stagger, t0 + i * stagger + dur));
+        s.style.opacity = p;
+        s.style.transform = `translateY(${(1 - p) * rise * 100}%)`;
+        s.style.filter = p < 1 ? `blur(${(1 - p) * blur}px)` : 'none';
+    });
+}
+function charsEndTime(chars, t0, stagger, dur) { return t0 + (chars.length - 1) * stagger + dur; }
+
+/** 多行标题：lines = [[segments...], ...]；竖屏可拆成两行 */
+function makeHead(parent, lines, fs) {
+    const box = el('div', 'abs', parent, { left: 0, top: 0 });
+    const rows = lines.map(segs => makeLine(el('div', 'abs', box), segs, fs));
+    return { box, rows, fs, chars: rows.flatMap(r => r._chars), height: lines.length * fs * 1.16 };
+}
+/** 摆放标题：x 为 null 时每行水平居中；返回标题底部 y */
+function placeHead(h, y, x) {
+    h.rows.forEach((r, i) => {
+        applyGradients(r);
+        const row = r.parentNode;
+        row.style.top = px(y + i * h.fs * 1.16);
+        row.style.left = px(x == null ? (W - r.offsetWidth) / 2 : x);
+    });
+    return y + h.height;
+}
+
+/** 场景整体进出：进入淡入，退出放大淡出+模糊 */
+function sceneFade(node, t, a, b, opt) {
+    const o = opt || {};
+    const inDur = o.in == null ? 0.5 : o.in;
+    const outDur = o.out == null ? 0.55 : o.out;
+    const pin = E.outCubic(P(t, a, a + inDur));
+    const pout = E.inCubic(P(t, b - outDur, b));
+    node.style.opacity = Math.min(pin, 1 - pout);
+    const sc = 1 + pout * (o.outScale == null ? 0.05 : o.outScale);
+    node.style.transform = `scale(${sc})`;
+    node.style.filter = pout > 0 ? `blur(${pout * 14}px)` : 'none';
+}
+
+// ====================== 背景光晕 ======================
+const glows = ['g1', 'g2', 'g3'].map(id => document.getElementById(id));
+// 每个场景的光晕参数：[x, y, size, color, opacity]（坐标为相对舞台比例）
+const GLOW_SETS = {
+    black: [[0.5, 0.5, 0.5, '#6B5BFF', 0], [0.5, 0.5, 0.5, '#3FD6C6', 0], [0.5, 0.5, 0.5, '#FF7AA2', 0]],
+    s1: [[0.5, 0.48, 0.55, '#6B5BFF', 0.18], [0.62, 0.52, 0.4, '#3FD6C6', 0.1], [0.4, 0.5, 0.35, '#B38BFF', 0.08]],
+    logo: [[0.5, 0.42, 0.7, '#7B6BFF', 0.32], [0.66, 0.5, 0.5, '#3FD6C6', 0.2], [0.36, 0.38, 0.45, '#C08BFF', 0.16]],
+    dict: [[0.15, 0.2, 0.7, '#6B5BFF', 0.3], [0.88, 0.75, 0.6, '#3FD6C6', 0.16], [0.6, 0.55, 0.4, '#FF5C6C', 0.0]],
+    sub: [[0.2, 0.3, 0.7, '#3E6BFF', 0.3], [0.85, 0.7, 0.6, '#7B6BFF', 0.22], [0.5, 0.95, 0.5, '#3FD6C6', 0.1]],
+    tts: [[0.8, 0.2, 0.7, '#B36BFF', 0.28], [0.15, 0.75, 0.6, '#FF7AA2', 0.14], [0.5, 0.5, 0.4, '#6B5BFF', 0.12]],
+    dub: [[0.2, 0.25, 0.7, '#2FBF9F', 0.24], [0.85, 0.8, 0.6, '#5B8CFF', 0.22], [0.6, 0.5, 0.4, '#7B6BFF', 0.1]],
+    themes: [[0.5, 0.45, 0.8, '#6B5BFF', 0.2], [0.2, 0.8, 0.5, '#E3C48A', 0.1], [0.85, 0.3, 0.5, '#3FD6C6', 0.12]],
+    end: [[0.5, 0.4, 0.8, '#7B6BFF', 0.38], [0.68, 0.5, 0.55, '#3FD6C6', 0.2], [0.34, 0.36, 0.5, '#C08BFF', 0.18]],
+};
+const GLOW_KEYS = [
+    [0, 'black'], [1.0, 's1'], [5.6, 's1'], [6.4, 'logo'], [10.2, 'logo'], [11.2, 'dict'], [22.4, 'dict'],
+    [23.4, 'sub'], [34.2, 'sub'], [35.2, 'tts'], [45.0, 'tts'], [46.0, 'dub'], [56.4, 'dub'], [57.4, 'themes'],
+    [61.6, 'themes'], [62.6, 'end'], [67.0, 'end'], [68, 'black'],
+];
+function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+function renderGlows(t, extra) {
+    let i = 0;
+    while (i < GLOW_KEYS.length - 2 && t >= GLOW_KEYS[i + 1][0]) i++;
+    const [ta, ka] = GLOW_KEYS[i];
+    const [tb, kb] = GLOW_KEYS[i + 1];
+    const p = E.inOutSine(P(t, ta, tb));
+    const A = GLOW_SETS[ka], B = GLOW_SETS[kb];
+    glows.forEach((g, j) => {
+        const a = A[j], b = B[j];
+        const ca = hexToRgb(a[3]), cb = hexToRgb(b[3]);
+        const col = ca.map((c, k) => Math.round(lerp(c, cb[k], p)));
+        const size = lerp(a[2], b[2], p) * Math.max(W, H);
+        const drift = Math.sin(t * 0.35 + j * 2.1) * 0.02;
+        const x = (lerp(a[0], b[0], p) + drift) * W - size / 2;
+        const y = (lerp(a[1], b[1], p) + Math.cos(t * 0.3 + j) * 0.015) * H - size / 2;
+        let op = lerp(a[4], b[4], p);
+        if (extra && extra[j] != null) op += extra[j];
+        // 径向渐变代替大半径 blur 滤镜：观感一致，软件合成下快一个数量级
+        const c0 = `rgba(${col.join(',')},1)`, c1 = `rgba(${col.join(',')},0.45)`, c2 = `rgba(${col.join(',')},0)`;
+        setStyle(g, { width: px(size), height: px(size), left: px(x), top: px(y), opacity: op, background: `radial-gradient(closest-side, ${c0} 0%, ${c1} 45%, ${c2} 100%)` });
+    });
+}
+
+// 胶片颗粒由 render.mjs 在 ffmpeg 阶段加入（时域噪点，兼顾去色带与编码效率）
+
+// ====================== 内嵌应用（真实前端） ======================
+const APP_W = 880, APP_H = 720;
+function createAppFrame(parent, view, theme) {
+    const frame = el('div', 'app-frame', parent);
+    const cam = el('div', 'app-cam', frame);
+    const iframe = el('iframe', '', cam);
+    iframe.width = APP_W;
+    iframe.height = APP_H;
+    iframe.src = '../src/index.html';
+    const api = { frame, cam, iframe, doc: null, seen: new WeakMap(), view, theme };
+    api.ready = new Promise(resolve => {
+        iframe.addEventListener('load', async () => {
+            const d = iframe.contentDocument;
+            api.doc = d;
+            d.documentElement.setAttribute('data-theme', theme || 'dark');
+            const st = d.createElement('style');
+            st.textContent = `*,*::before,*::after{transition:none!important;caret-color:transparent!important}
+                ::-webkit-scrollbar{display:none}
+                .toast-stack{display:none!important}`;
+            d.head.appendChild(st);
+            const sb = d.getElementById('sidebar');
+            sb.classList.remove('expanded');
+            sb.classList.add('collapsed');
+            const nav = d.querySelector(`.nav-item[data-view="${view}"]`);
+            if (nav) nav.click();
+            await new Promise(r => setTimeout(r, 400));
+            // 收起后重新对齐导航指示器
+            const ind = d.getElementById('nav-indicator');
+            const act = d.querySelector('.nav-item.active');
+            if (ind && act) { ind.style.transform = `translateY(${act.offsetTop}px)`; ind.style.height = act.offsetHeight + 'px'; ind.classList.add('visible'); }
+            const badge = d.getElementById('current-model-badge');
+            if (badge) badge.textContent = 'SenseVoiceSmall';
+            resolve();
+        });
+    });
+    return api;
+}
+/** 让内嵌页里的 CSS 动画跟随影片时间（确定性） */
+function driveAppAnimations(app, t) {
+    if (!app.doc) return;
+    app.doc.getAnimations().forEach(a => {
+        if (!app.seen.has(a)) app.seen.set(a, t);
+        a.pause();
+        a.currentTime = Math.max(0, (t - app.seen.get(a)) * 1000);
+    });
+}
+/** 摄像机：在窗口框内放大并对准应用内某点（应用坐标） */
+function setAppCamera(app, frameW, frameH, scale, fx, fy) {
+    const base = frameW / APP_W;
+    const s = base * scale;
+    // 焦点 (fx, fy) 放在框中心；边缘不留黑
+    let tx = frameW / 2 - fx * s;
+    let ty = frameH / 2 - fy * s;
+    tx = clamp(tx, frameW - APP_W * s, 0);
+    ty = clamp(ty, frameH - APP_H * s, 0);
+    app.cam.style.transform = `translate(${tx}px, ${ty}px) scale(${s})`;
+}
+/** 应用内元素中心 → 舞台坐标（窗口框无旋转时成立） */
+function appPoint(app, selector) {
+    const node = app.doc && app.doc.querySelector(selector);
+    if (!node) return null;
+    const r = node.getBoundingClientRect();
+    const fr = app.iframe.getBoundingClientRect();
+    const k = fr.width / APP_W;
+    const sr = stage.getBoundingClientRect();
+    return { x: fr.left - sr.left + (r.left + r.width / 2) * k, y: fr.top - sr.top + (r.top + r.height / 2) * k, w: r.width * k, h: r.height * k };
+}
+function appCenterOf(app, selector) {
+    const node = app.doc && app.doc.querySelector(selector);
+    if (!node) return [APP_W / 2, APP_H / 2];
+    const r = node.getBoundingClientRect();
+    return [r.left + r.width / 2, r.top + r.height / 2];
+}
+
+// ====================== 指针 ======================
+const pointer = document.getElementById('pointer');
+const clickRing = document.getElementById('click-ring');
+function renderPointer(state) {
+    if (!state) { pointer.style.opacity = 0; clickRing.style.opacity = 0; return; }
+    const sz = u(1.6, 1.4);
+    setStyle(pointer, { opacity: state.opacity, transform: `translate(${state.x - 3}px, ${state.y - 3}px) scale(${sz * (state.press ? 0.86 : 1)})`, transformOrigin: '0 0' });
+    if (state.ring > 0 && state.ring < 1) {
+        const r = lerp(10, 70, E.outCubic(state.ring));
+        setStyle(clickRing, { opacity: 1 - state.ring, left: px(state.x - r), top: px(state.y - r), width: px(r * 2), height: px(r * 2) });
+    } else clickRing.style.opacity = 0;
+}
+/** 指针沿缓动曲线移动：path = [{t, x, y}]，clicks = [t] */
+function pointerAt(t, path, clicks, show) {
+    if (t < show[0] || t > show[1]) return null;
+    let x = path[0].x, y = path[0].y;
+    for (let i = 0; i < path.length - 1; i++) {
+        const a = path[i], b = path[i + 1];
+        if (t >= a.t && t <= b.t) {
+            const p = E.inOutCubic(P(t, a.t, b.t));
+            // 轻微弧线
+            const arc = Math.sin(p * Math.PI) * 40;
+            x = lerp(a.x, b.x, p);
+            y = lerp(a.y, b.y, p) - arc;
+            break;
+        }
+        if (t > b.t) { x = b.x; y = b.y; }
+    }
+    let press = false, ring = 0;
+    clicks.forEach(c => {
+        if (t >= c && t < c + 0.12) press = true;
+        if (t >= c && t < c + 0.6) ring = P(t, c, c + 0.6);
+    });
+    const op = Math.min(E.outCubic(P(t, show[0], show[0] + 0.3)), 1 - P(t, show[1] - 0.3, show[1]));
+    return { x, y, press, ring, opacity: op };
+}
+
+// =====================================================================
+//  场景
+// =====================================================================
+const scenes = [];
+function scene(a, b, build, render) {
+    const node = el('div', 'scene', document.getElementById('scenes'));
+    const s = { a, b, node, render };
+    s.ctx = build(node) || {};
+    scenes.push(s);
+    return s;
+}
+
+// ---------- S1 冷开场：声波 → 光标 → 「说出来，就写好了。」 ----------
+const S1_TEXT = PORTRAIT ? [[{ text: '说出来，' }], [{ text: '就' }, { text: '写好了', grad: 'aurora' }, { text: '。' }]]
+                         : [[{ text: '说出来，就' }, { text: '写好了', grad: 'aurora' }, { text: '。' }]];
+scene(0, 6.25, (node) => {
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('width', W); svg.setAttribute('height', H);
+    svg.style.position = 'absolute'; svg.style.left = 0; svg.style.top = 0;
+    svg.innerHTML = `
+        <defs>
+            <linearGradient id="wg" x1="0" x2="1"><stop offset="0" stop-color="#B3A4FF"/><stop offset="0.5" stop-color="#7C9BFF"/><stop offset="1" stop-color="#4FE3D1"/></linearGradient>
+            <filter id="wblur" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="14"/></filter>
+        </defs>
+        <path id="wglow" fill="none" stroke="url(#wg)" stroke-width="16" stroke-linecap="round" filter="url(#wblur)" opacity="0.55"/>
+        <path id="wline" fill="none" stroke="url(#wg)" stroke-width="4.5" stroke-linecap="round"/>`;
+    node.appendChild(svg);
+    const fs = u(150, 140);
+    const block = el('div', 'abs center-x', node, { top: px(u(H * 0.5 - fs * 1.15, H * 0.5 - fs * 0.62)) });
+    const lines = S1_TEXT.map(segs => {
+        const row = el('div', '', block, { textAlign: 'center', height: px(fs * 1.15) });
+        return makeLine(row, segs, fs);
+    });
+    const caret = el('div', 'caret', node, { height: px(fs * 0.92) });
+    return { svg, wline: svg.querySelector('#wline'), wglow: svg.querySelector('#wglow'), block, lines, caret, fs };
+}, function (t, c) {
+    const cy = H * 0.5;
+    // 声波
+    const amp = E.outCubic(P(t, 0.5, 1.5)) * (1 - E.inOutCubic(P(t, 2.0, 2.7))) * u(120, 110);
+    const span = 1 - E.inOutCubic(P(t, 2.1, 2.75));
+    const x0 = W * 0.5 - W * 0.42 * span, x1 = W * 0.5 + W * 0.42 * span;
+    const lineOp = E.outCubic(P(t, 0.4, 1.0)) * (1 - P(t, 2.65, 2.85));
+    if (lineOp > 0.001) {
+        const N = 260;
+        let d = '';
+        for (let i = 0; i <= N; i++) {
+            const uu = i / N;
+            const x = lerp(x0, x1, uu);
+            const env = Math.pow(Math.sin(Math.PI * uu), 1.6);
+            const speech = 0.55 + 0.45 * Math.abs(Math.sin(t * 4.1 + Math.sin(t * 1.7) * 2));
+            const y = cy + amp * env * speech * (
+                Math.sin(uu * 26 + t * 7.5) * 0.55 + Math.sin(uu * 61 - t * 11) * 0.28 + Math.sin(uu * 13 + t * 3.1) * 0.3);
+            d += (i ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1);
+        }
+        c.wline.setAttribute('d', d); c.wglow.setAttribute('d', d);
+    }
+    c.svg.style.opacity = lineOp;
+
+    c.lines.forEach(applyGradients);
+    // 打字时间表
+    const starts = [];
+    let tt = 3.05;
+    c.lines.forEach((line, li) => {
+        line._chars.forEach((ch, ci) => { starts.push({ ch, t: tt, li }); tt += 0.155; });
+        tt += PORTRAIT ? 0.3 : 0;
+    });
+    starts.forEach(s => {
+        const p = E.outExpo(P(t, s.t, s.t + 0.5));
+        s.ch.style.opacity = p;
+        s.ch.style.transform = `translateY(${(1 - p) * 20}%)`;
+        s.ch.style.filter = p < 1 ? `blur(${(1 - p) * 12}px)` : 'none';
+    });
+    // 光标：声波收拢为一点后升起，随打字前进，停顿处闪烁
+    const caretH = c.fs * 0.92;
+    const grow = E.outBack(P(t, 2.6, 2.95));
+    let cx = W / 2, cyc = cy - caretH / 2;
+    const br = stage.getBoundingClientRect();
+    if (t >= 2.95) {
+        const first = starts[0].ch.getBoundingClientRect();
+        const slide = E.inOutCubic(P(t, 2.75, 3.05));
+        cx = lerp(W / 2, first.left - br.left - 12, slide);
+        cyc = lerp(cy - caretH / 2, first.top - br.top + c.fs * 0.17, slide);
+        const typed = starts.filter(s => t >= s.t);
+        if (typed.length) {
+            const last = typed[typed.length - 1].ch.getBoundingClientRect();
+            cx = last.right - br.left + 10;
+            cyc = last.top - br.top + c.fs * 0.17;
+        }
+    }
+    const typingEnd = starts[starts.length - 1].t + 0.2;
+    const blink = t > typingEnd ? (Math.floor((t - typingEnd) / 0.5) % 2 === 0 ? 1 : 0.15) : 1;
+    setStyle(c.caret, {
+        left: px(cx - 4), top: px(cyc + caretH * (1 - grow) / 2), height: px(caretH * grow),
+        opacity: t < 2.6 ? 0 : blink * (1 - P(t, 5.4, 5.7)),
+    });
+    sceneFade(c.block, t, 0, 6.25, { in: 0.01, out: 0.6, outScale: -0.05 });
+});
+
+// ---------- S2 Logo ----------
+function buildLogo(parent, size) {
+    const tile = el('div', 'logo-tile', parent, { width: px(size), height: px(size) });
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const g = document.createElementNS(svgNS, 'svg');
+    g.setAttribute('viewBox', '0 0 24 24');
+    g.style.width = px(size * 0.66); g.style.height = px(size * 0.66);
+    g.style.position = 'relative'; g.style.zIndex = 1;
+    g.innerHTML = `<g stroke="#fff" stroke-width="2.2" stroke-linecap="round" fill="none">
+        <path class="b1"/><path class="b2"/><path class="b3"/>
+        <path d="M16.5 6.5v11"/><path d="M14.5 6.5h4"/><path d="M14.5 17.5h4"/></g>`;
+    tile.appendChild(g);
+    const bars = [g.querySelector('.b1'), g.querySelector('.b2'), g.querySelector('.b3')];
+    return { tile, bars };
+}
+function setLogoBars(bars, t, energy) {
+    // 静止形态：半高 1.5 / 4 / 7（与应用图标一致），能量越高起伏越大
+    const base = [1.5, 4, 7], xs = [4, 7.5, 11];
+    bars.forEach((b, i) => {
+        const wob = Math.abs(Math.sin(t * (7 + i * 2.3) + i * 1.7));
+        const hh = clamp(base[i] * (1 - energy) + energy * (1.5 + wob * 6.5), 1, 8);
+        b.setAttribute('d', `M${xs[i]} ${12 - hh}v${hh * 2}`);
+    });
+}
+scene(6.0, 10.85, (node) => {
+    const size = u(260, 220);
+    const bloom = el('div', 'abs', node, { borderRadius: '50%', background: 'radial-gradient(closest-side, rgba(140,130,255,0.95), rgba(110,150,255,0.45) 45%, rgba(79,227,209,0) 100%)' });
+    const logo = buildLogo(node, size);
+    const word = el('div', 'abs center-x wordmark', node, { fontSize: px(u(150, 140)) });
+    word.textContent = 'Voice2Type';
+    const tagRow = el('div', 'abs center-x', node, { fontSize: px(u(42, 38)), color: '#A1A1A8', fontWeight: 500, letterSpacing: '0.02em' });
+    const tags = ['语音输入', '实时字幕', '语音合成', '视频配音'];
+    const tagSpans = [];
+    tags.forEach((x, i) => {
+        if (i) { const d = el('span', '', tagRow, { margin: '0 0.6em', color: '#4C4C55' }); d.textContent = '·'; tagSpans.push(d); }
+        const s = el('span', '', tagRow); s.textContent = x; tagSpans.push(s);
+    });
+    return { size, bloom, logo, word, tagRow, tagSpans };
+}, function (t, c) {
+    const cy = u(H * 0.4, H * 0.36);
+    const pin = E.outBack(P(t, 6.15, 7.05));
+    const op = E.outCubic(P(t, 6.15, 6.6));
+    const sc = lerp(0.45, 1, pin);
+    setStyle(c.logo.tile, { left: px(W / 2 - c.size / 2), top: px(cy - c.size / 2), opacity: op, transform: `scale(${sc}) rotate(${(1 - pin) * -12}deg)` });
+    setLogoBars(c.logo.bars, t, (1 - E.inOutCubic(P(t, 8.2, 9.0))) * E.outCubic(P(t, 6.2, 6.8)));
+    const bl = 1.6 + 0.4 * (1 - E.outCubic(P(t, 6.3, 7.6)));
+    const bsz = c.size * bl;
+    setStyle(c.bloom, { left: px(W / 2 - bsz / 2), top: px(cy - bsz / 2), width: px(bsz), height: px(bsz), opacity: E.outCubic(P(t, 6.2, 6.7)) * (0.55 - 0.25 * P(t, 6.7, 8)) });
+    const wp = E.outExpo(P(t, 7.0, 7.9));
+    setStyle(c.word, { top: px(cy + c.size * 0.62 + (1 - wp) * 40), opacity: wp, filter: wp < 1 ? `blur(${(1 - wp) * 16}px)` : 'none' });
+    setStyle(c.tagRow, { top: px(cy + c.size * 0.62 + u(210, 190)) });
+    c.tagSpans.forEach((s, i) => {
+        const p = E.outCubic(P(t, 7.9 + i * 0.12, 8.5 + i * 0.12));
+        s.style.opacity = p;
+        s.style.display = 'inline-block';
+        s.style.transform = `translateY(${(1 - p) * 16}px)`;
+    });
+    sceneFade(c.node || c.word.parentNode, t, 6.0, 10.85, { in: 0.01, out: 0.6, outScale: 0.08 });
+});
+
+// ---------- S3 语音输入演示 ----------
+const DICT_TEXT = '明天上午十点，和设计团队过一下新版首页的方案。';
+const S3 = scene(10.6, 23.05, (node) => {
+    const headFs = u(118, 104);
+    const headWrap = el('div', 'abs', node);
+    const headA = makeLine(el('div', 'abs', headWrap), [{ text: '按住，' }, { text: '说话', grad: 'rec' }, { text: '。' }], headFs);
+    const headB = makeLine(el('div', 'abs', headWrap), [{ text: '松开，' }, { text: '就写好了', grad: 'aurora' }, { text: '。' }], headFs);
+    const sub = el('div', 'abs sub', node, { fontSize: px(u(42, 38)) });
+    sub.textContent = '任意应用 · 任意输入框 · 光标处直接上字';
+    const frameW = u(980, 900), frameH = frameW * APP_H / APP_W;
+    const app = createAppFrame(node, 'dictation', 'dark');
+    setStyle(app.frame, { width: px(frameW), height: px(frameH) });
+    const key = el('div', 'keycap', node, { width: px(u(176, 150)), height: px(u(176, 150)), fontSize: px(u(58, 50)) });
+    const keyGlow = el('div', 'key-glow', key);
+    const keyLabel = el('span', '', key); keyLabel.textContent = 'F2';
+    // 目标应用（聊天输入框）
+    const chatW = u(860, 640), chatH = u(420, 360);
+    const chat = el('div', 'card', node, { width: px(chatW), height: px(chatH) });
+    const cs = u(1, 0.85);
+    chat.innerHTML = `
+        <div style="position:absolute;left:${36*cs}px;top:${30*cs}px;display:flex;align-items:center;gap:${18*cs}px">
+            <div style="width:${66*cs}px;height:${66*cs}px;border-radius:50%;background:linear-gradient(135deg,#FF9A8B,#FF5C9C)"></div>
+            <div><div style="font-size:${34*cs}px;font-weight:700">设计团队</div><div style="font-size:${24*cs}px;color:#8E8E96">3 人在线</div></div>
+        </div>
+        <div class="chat-msg" style="position:absolute;left:${36*cs}px;top:${128*cs}px;max-width:${chatW*0.72}px;padding:${16*cs}px ${22*cs}px;border-radius:${22*cs}px;background:rgba(255,255,255,0.07);font-size:${28*cs}px;color:#D8D8DE">新版首页的方案准备好了吗？</div>
+        <div class="chat-sent" style="position:absolute;right:${36*cs}px;top:${128*cs}px;max-width:${chatW*0.8}px;padding:${16*cs}px ${22*cs}px;border-radius:${22*cs}px;background:linear-gradient(135deg,#7C6CFF,#5E8BFF);font-size:${28*cs}px;line-height:1.5;color:#fff;opacity:0"></div>
+        <div class="chat-input" style="position:absolute;left:${28*cs}px;right:${28*cs}px;bottom:${28*cs}px;min-height:${110*cs}px;padding:${22*cs}px ${150*cs}px ${22*cs}px ${26*cs}px;border-radius:${24*cs}px;background:rgba(0,0,0,0.35);box-shadow:inset 0 0 0 1.5px rgba(255,255,255,0.08);font-size:${30*cs}px;line-height:1.55;color:#fff">
+            <span class="chat-text"></span><span class="chat-caret" style="display:inline-block;width:${3*cs}px;height:${36*cs}px;margin-left:2px;vertical-align:-${6*cs}px;background:#8E80FF"></span>
+            <div class="chat-send" style="position:absolute;right:${18*cs}px;bottom:${18*cs}px;padding:${14*cs}px ${26*cs}px;border-radius:${16*cs}px;background:#7C6CFF;font-size:${26*cs}px;font-weight:700">发送</div>
+        </div>`;
+    const pills = ['整段识别', '流式识别', '本地离线 Whisper', 'LLM 智能校对'].map(txt => {
+        const p = el('div', 'pill', node, { fontSize: px(u(32, 28)), padding: `${u(18, 14)}px ${u(30, 24)}px` });
+        el('span', 'dot', p);
+        el('span', '', p).textContent = txt;
+        return p;
+    });
+    return { headWrap, headA, headB, headFs, sub, app, frameW, frameH, key, keyGlow, chat, chatW, chatH, pills };
+}, function (t, c) {
+    const app = c.app;
+    // 布局
+    let headY, frameX, frameY, keyX, keyY, chatX, chatY, pillY;
+    if (PORTRAIT) {
+        headY = 170; frameX = (W - c.frameW) / 2; frameY = 470;
+        keyX = 110; keyY = frameY + c.frameH - 70;
+        chatX = (W - c.chatW) / 2; chatY = frameY + c.frameH - 110;
+        pillY = 1600;
+    } else {
+        headY = 250; frameX = W - c.frameW - 110; frameY = (H - c.frameH) / 2 + 10;
+        keyX = frameX - 90; keyY = frameY + c.frameH - 130;
+        chatX = frameX - 260; chatY = frameY + c.frameH - 300;
+        pillY = 640;
+    }
+    const headX = PORTRAIT ? null : 130;
+    // 标题 A → B
+    [c.headA, c.headB].forEach(h => applyGradients(h));
+    const aOut = E.inCubic(P(t, 16.55, 16.9));
+    revealChars(c.headA._chars, t, 10.85, 0.06, 0.6);
+    c.headA.parentNode.style.opacity = 1 - aOut;
+    revealChars(c.headB._chars, t, 16.85, 0.05, 0.6);
+    [c.headA, c.headB].forEach(h => {
+        const box = h.parentNode;
+        if (PORTRAIT) { box.style.left = px((W - h.offsetWidth) / 2); } else { box.style.left = px(headX); }
+        box.style.top = px(headY);
+    });
+    const sp = E.outCubic(P(t, 11.5, 12.2));
+    setStyle(c.sub, { top: px(headY + c.headFs * 1.35 + (1 - sp) * 20), opacity: sp });
+    if (PORTRAIT) { c.sub.style.left = px((W - c.sub.offsetWidth) / 2); } else { c.sub.style.left = px(headX); }
+
+    // 窗口进入
+    const fin = E.outQuint(P(t, 11.0, 12.1));
+    setStyle(app.frame, {
+        left: px(frameX), top: px(frameY + (1 - fin) * 140), opacity: fin,
+        transform: `perspective(2200px) rotateX(${(1 - fin) * 14}deg) scale(${lerp(0.92, 1, fin)})`,
+    });
+
+    // 应用状态
+    const d = app.doc;
+    if (d) {
+        const mic = d.getElementById('mic-btn');
+        const hint = d.querySelector('.mic-hint');
+        const dot = d.querySelector('#dictation-status .status-dot');
+        const stxt = d.querySelector('#dictation-status .status-text');
+        const out = d.getElementById('dictation-output');
+        const appDot = d.querySelector('#app-status-indicator .pulse-dot');
+        const appTxt = d.getElementById('app-status-text');
+        const rec = t >= 12.65 && t < 16.3;
+        const proc = t >= 16.3 && t < 17.05;
+        mic.classList.toggle('recording', rec);
+        mic.classList.toggle('processing', proc);
+        hint.textContent = rec ? '松开停止录音' : '按住开始录音';
+        const state = rec ? ['recording', '正在录音...', '#FF5C6C'] : proc ? ['processing', '正在识别...', '#F5B941'] : t >= 17.05 ? ['ready', '识别完成 · 已输入到光标处', '#3DD68C'] : ['idle', '就绪', ''];
+        dot.className = 'status-dot ' + state[0];
+        stxt.textContent = state[1];
+        appTxt.textContent = state[1];
+        appDot.style.background = state[2];
+        const n = Math.round(DICT_TEXT.length * E.outCubic(P(t, 17.05, 18.2)));
+        out.textContent = t >= 17.05 ? DICT_TEXT.slice(0, n) : '';
+        driveAppAnimations(app, t);
+    }
+    // 摄像机：全景 → 推近麦克风 → 移到识别结果 → 拉回
+    const [mx, my] = app.doc ? appCenterOf(app, '#mic-btn') : [APP_W / 2, 300];
+    const [ox, oy] = app.doc ? appCenterOf(app, '.output-area') : [APP_W / 2, 560];
+    const k1 = E.inOutCubic(P(t, 12.3, 13.3));
+    const k2 = E.inOutCubic(P(t, 16.55, 17.45));
+    const k3 = E.inOutCubic(P(t, 19.3, 20.3));
+    let sc = lerp(1, 1.55, k1), fx = lerp(APP_W / 2, mx, k1), fy = lerp(APP_H / 2, my + 30, k1);
+    sc = lerp(sc, 1.3, k2); fx = lerp(fx, ox, k2); fy = lerp(fy, oy - 40, k2);
+    sc = lerp(sc, 1, k3); fx = lerp(fx, APP_W / 2, k3); fy = lerp(fy, APP_H / 2, k3);
+    setAppCamera(app, c.frameW, c.frameH, sc, fx, fy);
+
+    // 键帽 F2：按下 12.65，松开 16.3
+    const kin = E.outBack(P(t, 11.95, 12.45));
+    const down = (t >= 12.6 && t < 16.3) ? E.outCubic(P(t, 12.6, 12.7)) : (t >= 16.3 ? 1 - E.outCubic(P(t, 16.3, 16.42)) : 0);
+    const kout = E.inCubic(P(t, 16.9, 17.3));
+    setStyle(c.key, {
+        left: px(keyX), top: px(keyY + down * 12), opacity: kin * (1 - kout),
+        transform: `scale(${lerp(0.6, 1, kin) * (1 - down * 0.05)})`,
+        boxShadow: down > 0.5 ? 'inset 0 2px 0 rgba(255,255,255,0.1), inset 0 -2px 0 rgba(0,0,0,0.35), 0 6px 14px -6px rgba(0,0,0,0.8), 0 0 0 1.5px rgba(255,92,108,0.6)' : '',
+    });
+    c.keyGlow.style.opacity = down * (0.7 + 0.3 * Math.sin(t * 6));
+
+    // 聊天卡片：文字在光标处出现 → 发送
+    const cin = E.outQuint(P(t, 17.15, 17.9));
+    const cout = E.inCubic(P(t, 22.0, 22.5));
+    setStyle(c.chat, { left: px(chatX), top: px(chatY + (1 - cin) * 160), opacity: cin * (1 - cout), transform: `scale(${lerp(0.94, 1, cin)})` });
+    const ctext = c.chat.querySelector('.chat-text');
+    const sent = t >= 20.15;
+    const n2 = sent ? 0 : Math.round(DICT_TEXT.length * P(t, 17.6, 19.3));
+    ctext.textContent = DICT_TEXT.slice(0, n2);
+    c.chat.querySelector('.chat-caret').style.opacity = (Math.floor(t / 0.5) % 2 === 0 || (t > 17.6 && t < 19.3)) ? 1 : 0;
+    const sendBtn = c.chat.querySelector('.chat-send');
+    const press = t >= 19.95 && t < 20.12;
+    sendBtn.style.transform = `scale(${press ? 0.9 : 1})`;
+    sendBtn.style.boxShadow = t > 19.4 && t < 20.15 ? `0 0 0 ${6 + 4 * Math.sin(t * 10)}px rgba(124,108,255,0.3)` : 'none';
+    const bubble = c.chat.querySelector('.chat-sent');
+    const bp = E.outBack(P(t, 20.15, 20.6));
+    bubble.textContent = DICT_TEXT;
+    setStyle(bubble, { opacity: bp, transform: `translateY(${(1 - bp) * 40}px) scale(${lerp(0.9, 1, bp)})`, transformOrigin: '100% 100%' });
+    c.chat.querySelector('.chat-msg').style.opacity = 1 - E.outCubic(P(t, 20.15, 20.45));
+
+    // 能力胶囊
+    let px0 = PORTRAIT ? null : 130;
+    const gap = u(22, 18);
+    let rowW = 0;
+    c.pills.forEach(p => { rowW += p.offsetWidth + gap; });
+    rowW -= gap;
+    if (PORTRAIT) {
+        // 两行排布
+        const r1 = c.pills.slice(0, 2), r2 = c.pills.slice(2);
+        [[r1, pillY], [r2, pillY + u(96, 0)]].forEach(([row, y]) => {
+            const w = row.reduce((s, p) => s + p.offsetWidth, 0) + gap * (row.length - 1);
+            let x = (W - w) / 2;
+            row.forEach(p => { p.style.left = px(x); p.style.top = px(y); x += p.offsetWidth + gap; });
+        });
+    } else {
+        c.pills.forEach((p, i) => { p.style.left = px(px0); p.style.top = px(pillY + i * 92); });
+    }
+    c.pills.forEach((p, i) => {
+        const pp = E.outBack(P(t, 20.55 + i * 0.13, 21.05 + i * 0.13));
+        p.style.opacity = pp;
+        p.style.transform = `translateY(${(1 - pp) * 30}px) scale(${lerp(0.8, 1, pp)})`;
+    });
+    sceneFade(c.headWrap.parentNode, t, 10.6, 23.05, { in: 0.01, out: 0.6 });
+});
+
+// ---------- S4 实时字幕 + 同声传译 ----------
+const SUBS = [
+    ['大家好，欢迎来到今天的发布会。', 'Hello everyone, welcome to today’s launch.'],
+    ['接下来，介绍一个全新的语音工具。', 'Next, let me introduce a brand-new voice tool.'],
+    ['它能把每一句话，实时变成字幕。', 'It turns every sentence into live captions.'],
+];
+const S4 = scene(22.8, 34.85, (node) => {
+    const headFs = u(124, 96);
+    const head = makeHead(node, PORTRAIT ? [[{ text: '实时字幕，' }], [{ text: '同声传译', grad: 'aurora' }, { text: '。' }]]
+                                         : [[{ text: '实时字幕，' }, { text: '同声传译', grad: 'aurora' }, { text: '。' }]], headFs);
+    const sub = el('div', 'abs sub', node, { fontSize: px(u(42, 36)) });
+    sub.textContent = '会议 · 直播 · 网课 —— 听见的，都能看见';
+    const vw = u(1000, 1060), vh = vw * 9 / 16;
+    const video = el('div', 'video', node, { width: px(vw), height: px(vh) });
+    const bokehs = [];
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let i = 0; i < 14; i++) {
+        const b = el('div', 'bokeh', video);
+        const s = 30 + rnd() * 120;
+        const hue = [250, 220, 280, 180][i % 4];
+        bokehs.push({ b, x: rnd(), y: rnd() * 0.7, s, sp: 0.2 + rnd() * 0.5, ph: rnd() * 6, col: `hsla(${hue}, 90%, 70%, ${0.12 + rnd() * 0.2})` });
+    }
+    // 讲者剪影
+    const sp = el('div', 'abs', video, { left: '50%', bottom: '0', width: px(vw * 0.36), height: px(vh * 0.78), transform: 'translateX(-50%)' });
+    sp.innerHTML = `<svg viewBox="0 0 200 220" width="100%" height="100%" preserveAspectRatio="xMidYMax meet">
+        <defs><linearGradient id="rim" x1="0" x2="1"><stop offset="0" stop-color="#8E80FF" stop-opacity="0.9"/><stop offset="0.5" stop-color="#14141E"/><stop offset="1" stop-color="#4FE3D1" stop-opacity="0.7"/></linearGradient></defs>
+        <circle cx="100" cy="70" r="40" fill="#101018" stroke="url(#rim)" stroke-width="2.5"/>
+        <path d="M20 220 C25 150 60 122 100 122 C140 122 175 150 180 220 Z" fill="#101018" stroke="url(#rim)" stroke-width="2.5"/></svg>`;
+    const spot = el('div', 'abs', video, { left: '50%', top: '-20%', width: px(vw * 0.7), height: px(vh * 0.9), transform: 'translateX(-50%)', background: 'radial-gradient(closest-side, rgba(170,160,255,0.22), transparent)' });
+    const live = el('div', 'live-badge', video, { left: px(u(30, 34)), top: px(u(26, 30)), fontSize: px(u(26, 28)) });
+    live.innerHTML = '<i></i>LIVE';
+    const tc = el('div', 'timecode', video, { right: px(u(30, 34)), top: px(u(28, 32)), fontSize: px(u(24, 26)) });
+    const box = el('div', 'sub-box', video, { padding: `${u(14, 16)}px ${u(28, 32)}px`, bottom: px(u(28, 34)) });
+    const zh = el('div', 'sub-zh', box, { fontSize: px(u(40, 46)), lineHeight: 1.35 });
+    const en = el('div', 'sub-en', box, { fontSize: px(u(27, 30)), lineHeight: 1.4, marginTop: '4px' });
+    // 实时转录卡片：定稿句段 + 导出
+    const tw = u(1000, 600), th = u(400, 596);
+    const tr = el('div', 'card', node, { width: px(tw), height: px(th) });
+    const trHead = el('div', 'abs', tr, { left: '34px', right: '30px', top: '26px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' });
+    el('div', '', trHead, { fontSize: px(u(32, 28)), fontWeight: 700 }).textContent = '实时转录';
+    const exp = el('div', '', trHead, { display: 'flex', gap: '10px' });
+    ['SRT', 'TXT', 'Markdown'].forEach(x => {
+        el('div', '', exp, { fontFamily: 'var(--latin)', fontSize: px(u(22, 19)), fontWeight: 600, padding: '6px 14px', borderRadius: '10px', background: 'rgba(255,255,255,0.07)', color: '#C9C9D1' }).textContent = '导出 ' + x;
+    });
+    const items = SUBS.map(([zh, en], i) => {
+        const it = el('div', 'abs', tr, { left: '34px', right: '30px', top: px(u(100, 104) + i * u(96, 150)) });
+        const l1 = el('div', '', it, { fontSize: px(u(28, 25)), color: '#EDEDF2', whiteSpace: PORTRAIT ? 'nowrap' : 'normal' });
+        l1.innerHTML = `<span style="font-family:var(--mono);color:#6E6E78;margin-right:14px">[00:12:${String(9 + i * 3).padStart(2, '0')}]</span>` + zh;
+        const l2 = el('div', '', it, { fontSize: px(u(23, 21)), color: '#8E8E96', marginTop: '4px', fontFamily: 'var(--latin)', whiteSpace: PORTRAIT ? 'nowrap' : 'normal' });
+        l2.textContent = '译：' + en;
+        return it;
+    });
+    return { head, headFs, sub, video, vw, vh, bokehs, sp, live, tc, box, zh, en, tr, tw, th, items };
+}, function (t, c) {
+    let headY, vx, vy;
+    if (PORTRAIT) { headY = 150; vx = (W - c.vw) / 2; vy = 590; } else { headY = 70; vx = 110; vy = 300; }
+    const headBottom = placeHead(c.head, headY, null);
+    revealChars(c.head.chars, t, 23.05, 0.055, 0.6);
+    const sp = E.outCubic(P(t, 23.7, 24.3));
+    setStyle(c.sub, { top: px(headBottom + 14 + (1 - sp) * 20), opacity: sp, left: px((W - c.sub.offsetWidth) / 2) });
+    const vin = E.outQuint(P(t, 23.4, 24.4));
+    setStyle(c.video, { left: px(vx), top: px(vy + (1 - vin) * 120), opacity: vin, transform: `scale(${lerp(0.92, 1, vin)})` });
+    c.bokehs.forEach(k => {
+        const x = ((k.x + t * 0.012 * k.sp) % 1.1) - 0.05;
+        setStyle(k.b, { left: px(x * c.vw), top: px((k.y + Math.sin(t * k.sp + k.ph) * 0.03) * c.vh), width: px(k.s), height: px(k.s), background: k.col });
+    });
+    c.sp.style.transform = `translateX(-50%) translateY(${Math.sin(t * 1.3) * 3}px)`;
+    c.live.querySelector('i').style.opacity = 0.55 + 0.45 * Math.abs(Math.cos(t * 2.4));
+    const secs = 12 * 60 + 8 + Math.max(0, t - 23.4);
+    const hh = Math.floor(secs / 3600), mm = Math.floor(secs / 60) % 60, ss = Math.floor(secs) % 60, ff = Math.floor((secs % 1) * 30);
+    c.tc.textContent = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}:${String(ff).padStart(2, '0')}`;
+
+    // 字幕流：原文逐字（末尾为临时态），译文稍后逐词
+    const starts = [24.55, 27.85, 31.15];
+    let idx = -1;
+    starts.forEach((s, i) => { if (t >= s) idx = i; });
+    if (idx < 0) { c.box.style.opacity = 0; }
+    else {
+        const s0 = starts[idx];
+        const [zh, en] = SUBS[idx];
+        const chars = [...zh];
+        const nz = Math.round(chars.length * P(t, s0, s0 + 1.7));
+        const final = t >= s0 + 1.95;
+        const interimN = final ? 0 : Math.min(3, nz);
+        c.zh.innerHTML = '';
+        const a = el('span', '', c.zh); a.textContent = chars.slice(0, nz - interimN).join('');
+        const b = el('span', '', c.zh, { opacity: 0.6 }); b.textContent = chars.slice(nz - interimN, nz).join('');
+        const words = en.split(' ');
+        const nw = Math.round(words.length * P(t, s0 + 0.9, s0 + 2.4));
+        c.en.textContent = words.slice(0, nw).join(' ');
+        c.en.style.opacity = nw ? 1 : 0;
+        // 句间切换：上一句淡出
+        const nextStart = starts[idx + 1] || 99;
+        const sw = E.inCubic(P(t, nextStart - 0.25, nextStart));
+        const fadeIn = E.outCubic(P(t, s0, s0 + 0.2));
+        setStyle(c.box, { opacity: Math.min(fadeIn, 1 - sw) * vin, transform: `translateX(-50%) translateY(${sw * -10}px)` });
+    }
+    // 实时转录卡片
+    const tin = E.outQuint(P(t, 24.0, 24.9));
+    const tx = PORTRAIT ? (W - c.tw) / 2 : vx + c.vw + 40;
+    const ty = PORTRAIT ? vy + c.vh + 40 : vy;
+    setStyle(c.tr, { left: px(tx), top: px(ty + (1 - tin) * 80), opacity: tin });
+    c.items.forEach((it, i) => {
+        const p = E.outCubic(P(t, starts[i] + 1.95, starts[i] + 2.45));
+        it.style.opacity = p;
+        it.style.transform = `translateY(${(1 - p) * 24}px)`;
+    });
+    sceneFade(c.head.box.parentNode, t, 22.8, 34.85, { in: 0.01, out: 0.6 });
+});
+
+// ---------- S5 语音合成 ----------
+const TTS_TEXT = '欢迎收听今天的科技早报，我是你的 AI 主播。';
+const VOICES = [
+    ['温柔女声', '治愈 · 自然', ['#FFB199', '#FF5C9C']],
+    ['新闻主播', '沉稳 · 播音腔', ['#8E80FF', '#5E8BFF']],
+    ['纪录片旁白', '磁性 · 叙事', ['#4FE3D1', '#2F9BFF']],
+    ['元气少女', '活泼 · 明亮', ['#FFD36E', '#FF8A5C']],
+    ['客服小美', '亲切 · 清晰', ['#9BE38B', '#3FC6A0']],
+    ['沉稳大叔', '低沉 · 可靠', ['#B9A6FF', '#7A5CFF']],
+];
+const S5 = scene(34.6, 45.65, (node) => {
+    const headFs = u(124, 104);
+    const head = makeHead(node, PORTRAIT ? [[{ text: '一段文字，' }], [{ text: '千种声音', grad: 'aurora' }, { text: '。' }]]
+                                         : [[{ text: '一段文字，' }], [{ text: '千种声音', grad: 'aurora' }, { text: '。' }]], headFs);
+    const sub = el('div', 'abs sub', node, { fontSize: px(u(42, 38)) });
+    sub.textContent = 'Fish Audio 驱动 · 海量音色 · 语速情感可调';
+    const frameW = u(980, 900), frameH = frameW * APP_H / APP_W;
+    const app = createAppFrame(node, 'tts', 'dark');
+    setStyle(app.frame, { width: px(frameW), height: px(frameH) });
+    const cw = u(400, 330), ch = u(130, 108);
+    const voices = VOICES.map(([name, desc, cols]) => {
+        const v = el('div', 'voice', node, { width: px(cw), height: px(ch), padding: `0 ${u(22, 18)}px`, gap: px(u(20, 16)) });
+        el('div', 'v-ava', v, { width: px(ch - 36), height: px(ch - 36), background: `linear-gradient(135deg, ${cols[0]}, ${cols[1]})` });
+        const tx = el('div', '', v);
+        el('div', 'v-name', tx, { fontSize: px(u(34, 28)) }).textContent = name;
+        el('div', 'v-desc', tx, { fontSize: px(u(24, 20)) }).textContent = desc;
+        return v;
+    });
+    // 播放器
+    const pw = u(980, 900), ph = u(190, 160);
+    const player = el('div', 'card', node, { width: px(pw), height: px(ph) });
+    const play = el('div', 'abs', player, { left: px(32), top: px(ph / 2 - 40), width: '80px', height: '80px', borderRadius: '50%', background: '#fff' });
+    play.innerHTML = '<svg viewBox="0 0 24 24" width="80" height="80"><rect x="8" y="7" width="3" height="10" rx="1" fill="#111"/><rect x="13" y="7" width="3" height="10" rx="1" fill="#111"/></svg>';
+    const bars = [];
+    const nb = u(64, 60);
+    const bx0 = 140, bw = pw - bx0 - 230;
+    let seed = 11;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let i = 0; i < nb; i++) {
+        const env = Math.pow(Math.sin(Math.PI * (i + 0.5) / nb), 0.6);
+        const h = (0.25 + 0.75 * rnd()) * env * (ph * 0.6) + 8;
+        const b = el('div', 'wave-bar', player, { left: px(bx0 + i * (bw / nb)), width: px(bw / nb * 0.55), height: px(h), top: px(ph / 2 - h / 2) });
+        bars.push(b);
+    }
+    const time = el('div', 'abs', player, { right: px(36), top: px(ph / 2 - 18), fontFamily: 'var(--mono)', fontSize: px(28), color: '#A9A9B2' });
+    return { head, headFs, sub, app, frameW, frameH, voices, cw, ch, player, pw, ph, bars, time };
+}, function (t, c) {
+    const app = c.app;
+    let headY, frameX, frameY, playerY;
+    if (PORTRAIT) { headY = 150; frameX = (W - c.frameW) / 2; frameY = 560; playerY = frameY + c.frameH + 40; }
+    else { headY = 250; frameX = W - c.frameW - 110; frameY = 120; playerY = frameY + c.frameH - c.ph + 40; }
+    const headBottom = placeHead(c.head, headY, PORTRAIT ? null : 130);
+    revealChars(c.head.chars, t, 34.85, 0.055, 0.6);
+    const sp = E.outCubic(P(t, 35.4, 36.0));
+    setStyle(c.sub, { top: px(headBottom + 14 + (1 - sp) * 20), opacity: sp, left: px(PORTRAIT ? (W - c.sub.offsetWidth) / 2 : 130) });
+    const fin = E.outQuint(P(t, 35.0, 36.0));
+    setStyle(app.frame, { left: px(frameX), top: px(frameY + (1 - fin) * 140), opacity: fin, transform: `perspective(2200px) rotateX(${(1 - fin) * 14}deg) scale(${lerp(0.92, 1, fin)})` });
+
+    const d = app.doc;
+    const selectAt = 40.75, clickGen = 41.5, doneAt = 42.45;
+    if (d) {
+        const ta = d.getElementById('tts-text');
+        const n = Math.round([...TTS_TEXT].length * P(t, 36.1, 38.0));
+        ta.value = [...TTS_TEXT].slice(0, n).join('');
+        d.getElementById('tts-char-count').textContent = n + ' 字';
+        const picked = t >= selectAt;
+        d.getElementById('tts-voice-title').textContent = picked ? '新闻主播' : '默认音色';
+        d.getElementById('tts-voice-sub').textContent = picked ? '沉稳 · 播音腔' : '使用模型默认音色';
+        d.getElementById('tts-voice-avatar').style.background = picked ? 'linear-gradient(135deg,#8E80FF,#5E8BFF)' : '';
+        const st = d.getElementById('tts-status');
+        const busy = t >= clickGen && t < doneAt;
+        st.className = 'tts-status' + (busy ? ' busy' : t >= doneAt ? ' ok' : '');
+        st.textContent = busy ? '生成中...' : t >= doneAt ? '生成成功' : '就绪';
+        d.getElementById('btn-tts-synthesize').disabled = busy;
+        d.getElementById('btn-tts-download').disabled = t < doneAt;
+        const genBtn = d.getElementById('btn-tts-synthesize');
+        genBtn.style.transform = (t >= clickGen && t < clickGen + 0.12) ? 'scale(0.95)' : '';
+        const libBtn = d.getElementById('btn-tts-voice-lib');
+        libBtn.style.transform = (t >= 38.55 && t < 38.67) ? 'scale(0.94)' : '';
+        driveAppAnimations(app, t);
+    }
+    // 摄像机：先对准文本框，再拉到右侧参数区，生成时回到全景
+    const [tx0, ty0] = d ? appCenterOf(app, '.tts-textarea-wrap') : [300, 300];
+    const [vx0, vy0] = d ? appCenterOf(app, '#tts-voice-card') : [700, 200];
+    const k1 = E.inOutCubic(P(t, 35.6, 36.4));
+    const k2 = E.inOutCubic(P(t, 37.9, 38.6));
+    const k3 = E.inOutCubic(P(t, 40.9, 41.5));
+    let sc = lerp(1, 1.3, k1), fx = lerp(APP_W / 2, tx0, k1), fy = lerp(APP_H / 2, ty0, k1);
+    sc = lerp(sc, 1.25, k2); fx = lerp(fx, vx0 - 60, k2); fy = lerp(fy, vy0 + 120, k2);
+    sc = lerp(sc, 1, k3); fx = lerp(fx, APP_W / 2, k3); fy = lerp(fy, APP_H / 2, k3);
+    setAppCamera(app, c.frameW, c.frameH, sc, fx, fy);
+
+    // 音色卡扇形展开 → 选中「新闻主播」飞入
+    const libPt = d ? appPoint(app, '#btn-tts-voice-lib') : { x: W / 2, y: H / 2 };
+    const voiceSlot = d ? appPoint(app, '#tts-voice-card') : { x: W / 2, y: H / 2 };
+    const fanC = PORTRAIT ? { x: W / 2, y: 1170 } : { x: 610, y: 780 };
+    c.voices.forEach((v, i) => {
+        const pOut = E.outQuint(P(t, 38.7 + i * 0.07, 39.4 + i * 0.07));
+        const pPop = E.outBack(P(t, 38.7 + i * 0.07, 39.4 + i * 0.07));
+        const col = PORTRAIT ? i % 2 : i % 3;
+        const row = PORTRAIT ? Math.floor(i / 2) : Math.floor(i / 3);
+        const gx = PORTRAIT ? (col - 0.5) * (c.cw + 30) : (col - 1) * (c.cw + 24);
+        const gy = PORTRAIT ? (row - 1) * (c.ch + 26) : (row - 0.5) * (c.ch + 24);
+        let x = lerp(libPt ? libPt.x : W / 2, fanC.x + gx, pOut);
+        let y = lerp(libPt ? libPt.y : H / 2, fanC.y + gy, pOut);
+        let sc2 = lerp(0.3, 1, pPop);
+        let op = P(t, 38.7 + i * 0.07, 38.9 + i * 0.07);
+        const isPick = i === 1;
+        const hl = isPick ? E.outCubic(P(t, 39.9, 40.2)) : 0;
+        if (isPick) {
+            const fly = E.inOutCubic(P(t, 40.25, 40.8));
+            if (voiceSlot) { x = lerp(x, voiceSlot.x, fly); y = lerp(y, voiceSlot.y, fly); }
+            sc2 = lerp(sc2 * (1 + hl * 0.06), 0.35, fly);
+            op *= 1 - P(t, 40.65, 40.8);
+        } else {
+            const away = E.inCubic(P(t, 40.2, 40.6));
+            op *= 1 - away;
+            sc2 *= 1 - away * 0.2;
+        }
+        setStyle(v, {
+            left: px(x - c.cw / 2), top: px(y - c.ch / 2), opacity: op, transform: `scale(${sc2})`,
+            boxShadow: hl > 0 ? `0 0 0 ${3 * hl}px #8E80FF, 0 30px 70px -20px rgba(124,108,255,${0.7 * hl})` : '',
+            zIndex: isPick ? 5 : 1,
+        });
+    });
+
+    // 指针：点「音色库」→ 点「生成」
+    const genPt = d ? appPoint(app, '#btn-tts-synthesize') : null;
+    const ptr = (libPt && genPt) ? pointerAt(t, [
+        { t: 37.7, x: libPt.x + 220, y: libPt.y + 260 },
+        { t: 38.45, x: libPt.x, y: libPt.y },
+        { t: 40.9, x: libPt.x, y: libPt.y },
+        { t: 41.4, x: genPt.x + 10, y: genPt.y + 6 },
+    ], [38.55, clickGen], [37.7, 42.3]) : null;
+    S5.ctx.pointer = ptr;
+
+    // 播放器：生成后出现，播放头扫过
+    const pin = E.outQuint(P(t, doneAt, doneAt + 0.6));
+    setStyle(c.player, { left: px(PORTRAIT ? (W - c.pw) / 2 : W - c.pw - 110), top: px(playerY + (1 - pin) * 80), opacity: pin, zIndex: 6 });
+    const prog = P(t, doneAt + 0.5, 45.3);
+    c.bars.forEach((b, i) => {
+        const played = i / c.bars.length < prog;
+        const near = Math.abs(i / c.bars.length - prog) < 0.04;
+        b.style.background = played ? AURORA : 'rgba(255,255,255,0.18)';
+        b.style.backgroundSize = `${c.pw}px 100%`;
+        b.style.transform = `scaleY(${near ? 1.12 + 0.1 * Math.sin(t * 30 + i) : 1})`;
+    });
+    const total = 6.4;
+    const cur = prog * total;
+    c.time.textContent = `0:0${Math.floor(cur)} / 0:06`;
+    sceneFade(c.head.box.parentNode, t, 34.6, 45.65, { in: 0.01, out: 0.6 });
+});
+
+// ---------- S6 视频配音流水线 ----------
+const NODES = [
+    ['视频输入', 'INPUT', '发布会.mp4 · 12:48'],
+    ['音频提取', 'FFMPEG', '按 10 分钟分块'],
+    ['字幕识别', 'ASR', 'Qwen ASR · 词级时间戳'],
+    ['字幕编辑 · 分段', 'SUBTITLES', '186 段 · 可合并 / 拆分'],
+    ['语音合成', 'FISH AUDIO', '新闻主播 · 语速自适应'],
+    ['混流输出', 'MUX', '音画同步 · 导出 SRT'],
+];
+const S6 = scene(45.4, 57.05, (node) => {
+    const headFs = u(118, 104);
+    const head = el('div', 'abs', node);
+    const h1 = makeLine(head, [{ text: '一键，' }, { text: '视频配音', grad: 'aurora' }, { text: '。' }], headFs);
+    const sub = el('div', 'abs sub', node, { fontSize: px(u(40, 38)) });
+    sub.textContent = '识别 · 编辑 · 合成 · 混流，音画同步一次直出';
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const wires = document.createElementNS(svgNS, 'svg');
+    wires.setAttribute('width', W); wires.setAttribute('height', H);
+    wires.style.position = 'absolute'; wires.style.left = 0; wires.style.top = 0;
+    node.appendChild(wires);
+    const nw = u(860, 262), nh = u(112, 170);
+    const nodes = NODES.map(([title, tag, hint]) => {
+        const n = el('div', 'node', node, { width: px(nw), height: px(nh) });
+        const s = u(1, 0.82);
+        const dot = el('div', 'n-dot', n, { width: px(16 * s), height: px(16 * s), left: px(30 * s), top: px(PORTRAIT ? 30 : 28) });
+        el('div', 'n-title', n, { left: px(60 * s), top: px(PORTRAIT ? 16 : 16), fontSize: px(PORTRAIT ? 36 : 27) }).textContent = title;
+        const tg = el('div', 'n-tag', n, { right: px(26), top: px(22), fontSize: px(20), padding: '4px 10px', display: PORTRAIT ? '' : 'none' });
+        tg.textContent = tag;
+        el('div', 'n-hint', n, { left: px(PORTRAIT ? 60 : 24), top: px(PORTRAIT ? 64 : 64), fontSize: px(PORTRAIT ? 26 : 19) }).textContent = hint;
+        const bar = el('div', 'n-bar', n, PORTRAIT ? { left: '520px', right: '120px', top: '76px', height: '10px' } : { left: '24px', right: '24px', bottom: '28px', height: '8px' });
+        const fill = el('div', 'n-fill', bar);
+        const pct = el('div', 'n-pct', n, PORTRAIT ? { right: '26px', top: '62px', width: '90px', fontSize: '26px' } : { right: '24px', top: '98px', width: '90px', fontSize: '18px', display: 'none' });
+        const pin = el('div', 'n-port', n, { width: '22px', height: '22px' });
+        const pout = el('div', 'n-port', n, { width: '22px', height: '22px' });
+        if (PORTRAIT) { setStyle(pin, { left: '50%', top: '-11px', marginLeft: '-11px' }); setStyle(pout, { left: '50%', bottom: '-11px', marginLeft: '-11px' }); }
+        else { setStyle(pin, { left: '-11px', top: '24px' }); setStyle(pout, { right: '-11px', top: '24px' }); }
+        return { n, dot, fill, pct, pin, pout };
+    });
+    // 成品卡
+    const ow = u(860, 760), oh = u(250, 210);
+    const out = el('div', 'card', node, { width: px(ow), height: px(oh) });
+    const thumbW = oh - 50;
+    const th = el('div', 'abs', out, { left: '26px', top: '25px', width: px(thumbW * 16 / 9 * 0.62), height: px(thumbW), borderRadius: '18px', background: 'linear-gradient(160deg,#2A2F5A,#0E0F1C)', overflow: 'hidden' });
+    th.innerHTML = `<div style="position:absolute;inset:0;background:radial-gradient(60% 80% at 30% 30%, rgba(142,128,255,0.6), transparent 60%),radial-gradient(50% 60% at 80% 80%, rgba(79,227,209,0.4), transparent 60%)"></div>
+        <div style="position:absolute;left:50%;top:50%;width:64px;height:64px;margin:-32px 0 0 -32px;border-radius:50%;background:rgba(255,255,255,0.92);display:grid;place-items:center"><svg width="26" height="26" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="#111"/></svg></div>`;
+    const info = el('div', 'abs', out, { left: px(26 + thumbW * 16 / 9 * 0.62 + 30), top: px(u(44, 34)) });
+    el('div', '', info, { fontSize: px(u(38, 32)), fontWeight: 700, fontFamily: 'var(--latin), var(--cjk)' }).textContent = '发布会_dubbed.mp4';
+    el('div', '', info, { fontSize: px(u(26, 22)), color: '#8E8E96', marginTop: '10px' }).textContent = '音画同步 · 186 段 · SRT 已导出';
+    const ok = el('div', 'abs', out, { right: '30px', top: '30px', width: '64px', height: '64px', borderRadius: '50%', background: '#2FBF77', display: 'grid', placeItems: 'center' });
+    ok.innerHTML = '<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>';
+    return { head, h1, headFs, sub, wires, nodes, nw, nh, out, ow, oh, ok };
+}, function (t, c) {
+    let headY;
+    if (PORTRAIT) headY = 150; else headY = 150;
+    applyGradients(c.h1);
+    revealChars(c.h1._chars, t, 45.65, 0.06, 0.6);
+    c.head.style.top = px(headY);
+    c.head.style.left = px((W - c.h1.offsetWidth) / 2);
+    const sp = E.outCubic(P(t, 46.2, 46.8));
+    setStyle(c.sub, { top: px(headY + c.headFs * 1.2 + (1 - sp) * 20), opacity: sp, left: px((W - c.sub.offsetWidth) / 2) });
+    // 节点位置
+    const pos = c.nodes.map((_, i) => PORTRAIT
+        ? { x: (W - c.nw) / 2, y: 460 + i * (c.nh + 36) }
+        : { x: (W - (6 * c.nw + 5 * 30)) / 2 + i * (c.nw + 30), y: 430 });
+    const runStart = 47.25, step = 1.2, runDur = 0.95;
+    let wd = '';
+    c.nodes.forEach((nd, i) => {
+        const pin = E.outBack(P(t, 46.05 + i * 0.1, 46.6 + i * 0.1));
+        const rs = runStart + i * step;
+        const prog = E.inOutSine(P(t, rs, rs + runDur));
+        const running = t >= rs && t < rs + runDur;
+        const done = t >= rs + runDur;
+        setStyle(nd.n, {
+            left: px(pos[i].x), top: px(pos[i].y + (1 - pin) * 50), opacity: P(t, 46.05 + i * 0.1, 46.3 + i * 0.1),
+            transform: `scale(${lerp(0.9, 1, pin)})`,
+            boxShadow: running ? `0 0 0 3px #8E80FF, 0 0 0 10px rgba(124,108,255,0.18), 0 30px 80px -20px rgba(124,108,255,0.7)`
+                : done ? '0 0 0 2px rgba(61,214,140,0.55), 0 30px 70px -30px rgba(0,0,0,0.9)' : '',
+        });
+        nd.dot.style.background = running ? '#8E80FF' : done ? '#3DD68C' : '#5E5E66';
+        nd.dot.style.boxShadow = running ? `0 0 ${10 + 6 * Math.sin(t * 12)}px #8E80FF` : 'none';
+        nd.fill.style.width = (prog * 100) + '%';
+        nd.fill.style.background = done ? '#3DD68C' : AURORA;
+        nd.pct.textContent = done ? '完成' : running ? Math.round(prog * 100) + '%' : '';
+        nd.pct.style.color = done ? '#3DD68C' : '#A9A9B2';
+        [nd.pin, nd.pout].forEach(p => { p.style.borderColor = done ? '#3DD68C' : running ? '#8E80FF' : '#3A3A44'; });
+        // 连线
+        if (i < c.nodes.length - 1) {
+            const nextRun = t >= runStart + (i + 1) * step && t < runStart + (i + 1) * step + runDur;
+            const nextDone = t >= runStart + (i + 1) * step + runDur;
+            const col = nextDone ? '#3DD68C' : (done || nextRun) ? '#8E80FF' : '#33333B';
+            const vis = P(t, 46.4 + i * 0.1, 46.8 + i * 0.1);
+            let d;
+            if (PORTRAIT) {
+                const x = W / 2, y1 = pos[i].y + c.nh, y2 = pos[i + 1].y;
+                d = `M${x} ${y1} C${x} ${y1 + 20}, ${x} ${y2 - 20}, ${x} ${y2}`;
+            } else {
+                const y = pos[i].y + 35, x1 = pos[i].x + c.nw, x2 = pos[i + 1].x;
+                d = `M${x1} ${y} C${x1 + 12} ${y}, ${x2 - 12} ${y}, ${x2} ${y}`;
+            }
+            const dash = (done && !nextDone) ? ` stroke-dasharray="10 10" stroke-dashoffset="${-t * 60}"` : '';
+            wd += `<path d="${d}" stroke="${col}" stroke-width="5" fill="none" stroke-linecap="round" opacity="${vis}"${dash}/>`;
+        }
+    });
+    c.wires.innerHTML = wd;
+    // 成品
+    const op = E.outBack(P(t, 54.65, 55.3));
+    const ox = (W - c.ow) / 2;
+    const oy = PORTRAIT ? 460 + 6 * (c.nh + 36) + 14 : 700;
+    setStyle(c.out, { left: px(ox), top: px(oy + (1 - op) * 60), opacity: P(t, 54.65, 54.9), transform: `scale(${lerp(0.85, 1, op)})` });
+    const okp = E.outBack(P(t, 55.1, 55.5));
+    c.ok.style.transform = `scale(${okp})`;
+    sceneFade(c.head.parentNode, t, 45.4, 57.05, { in: 0.01, out: 0.6 });
+});
+
+// ---------- S7 主题 + 引擎 ----------
+const ENGINES = ['SenseVoice', 'Whisper', '豆包流式', 'Qwen ASR', 'Groq', 'Fish Audio', '本地离线', 'LLM 智能校对', 'OBS 采集', 'SRT 导出'];
+const S7 = scene(56.8, 62.25, (node) => {
+    const headFs = u(118, 104);
+    const head = el('div', 'abs', node);
+    const h1 = makeLine(head, [{ text: '深色，' }, { text: '浅色', grad: 'aurora' }, { text: '，护眼。' }], u(108, 104));
+    const sub = el('div', 'abs sub', node, { fontSize: px(u(42, 38)) });
+    sub.textContent = '一处设计，三种心情';
+    const cardW = u(680, 660), cardH = cardW * APP_H / APP_W;
+    const shots = ['light', 'eye-care', 'dark'].map(th => {
+        const f = el('div', 'app-frame', node, { width: px(cardW), height: px(cardH) });
+        const img = el('img', 'app-shot', f, { width: px(cardW), height: px(cardH) });
+        img.src = `out/assets/app-${th}.png`;
+        return f;
+    });
+    const row = el('div', 'abs', node, { whiteSpace: 'nowrap' });
+    const pills = [];
+    for (let k = 0; k < 3; k++) {
+        ENGINES.forEach(e => {
+            const p = el('div', 'pill', row, { position: 'relative', display: 'inline-flex', marginRight: px(u(18, 16)), fontSize: px(u(32, 28)), padding: `${u(16, 12)}px ${u(28, 24)}px` });
+            el('span', 'dot', p);
+            el('span', '', p).textContent = e;
+            pills.push(p);
+        });
+    }
+    return { head, h1, headFs, sub, shots, cardW, cardH, row };
+}, function (t, c) {
+    const headY = PORTRAIT ? 200 : 110;
+    applyGradients(c.h1);
+    revealChars(c.h1._chars, t, 57.05, 0.05, 0.6);
+    c.head.style.top = px(headY);
+    c.head.style.left = px((W - c.h1.offsetWidth) / 2);
+    const sp = E.outCubic(P(t, 57.6, 58.2));
+    setStyle(c.sub, { top: px(headY + c.headFs * 1.25 + (1 - sp) * 20), opacity: sp, left: px((W - c.sub.offsetWidth) / 2) });
+    const cy = PORTRAIT ? 1020 : 640;
+    const fan = E.outQuint(P(t, 57.3, 58.6));
+    // 竖屏：左上 → 右下阶梯排布；横屏：左右展开
+    const cfg = PORTRAIT ? [
+        { dx: -165, dy: -250, rot: -4, z: 1, s: 0.92 },
+        { dx: 165, dy: 250, rot: 4, z: 3, s: 0.92 },
+        { dx: 0, dy: 0, rot: 0, z: 2, s: 1 },
+    ] : [
+        { dx: -440, dy: 30, rot: -9, z: 1, s: 0.88 },
+        { dx: 440, dy: 30, rot: 9, z: 2, s: 0.88 },
+        { dx: 0, dy: -10, rot: 0, z: 3, s: 1 },
+    ];
+    c.shots.forEach((f, i) => {
+        const k = cfg[i];
+        const x = W / 2 - c.cardW / 2 + k.dx * fan;
+        const y = cy - c.cardH / 2 + k.dy * fan + (1 - fan) * 120;
+        const s = k.s * lerp(0.9, 1, fan) * (1 + 0.012 * Math.sin(t * 0.8 + i));
+        setStyle(f, {
+            left: px(x), top: px(y), zIndex: k.z, opacity: P(t, 57.3 + i * 0.08, 57.7 + i * 0.08),
+            transform: PORTRAIT ? `rotateZ(${k.rot * fan}deg) scale(${s})`
+                : `perspective(2400px) rotateY(${k.rot * -0.6 * fan}deg) rotateZ(${k.rot * 0.35 * fan}deg) scale(${s})`,
+        });
+    });
+    // 引擎跑马灯
+    const rowY = PORTRAIT ? 1600 : 960;
+    const rp = E.outCubic(P(t, 58.4, 59.0));
+    setStyle(c.row, { top: px(rowY), left: px(-((t - 56.8) * 140) % (c.row.scrollWidth / 3)), opacity: rp });
+    sceneFade(c.head.parentNode, t, 56.8, 62.25, { in: 0.01, out: 0.6 });
+});
+
+// ---------- S8 结尾 ----------
+const S8 = scene(62.0, 68.0, (node) => {
+    const size = u(230, 190);
+    const bloom = el('div', 'abs', node, { borderRadius: '50%', background: 'radial-gradient(closest-side, rgba(140,130,255,0.95), rgba(110,150,255,0.45) 45%, rgba(79,227,209,0) 100%)' });
+    const logo = buildLogo(node, size);
+    const word = el('div', 'abs center-x wordmark', node, { fontSize: px(u(140, 120)) });
+    word.textContent = 'Voice2Type';
+    const sl = el('div', 'abs center-x', node);
+    const slogan = makeLine(sl, [{ text: '说出来，' }, { text: '就写好了', grad: 'aurora' }, { text: '。' }], u(76, 64));
+    const meta = el('div', 'abs center-x', node, { fontSize: px(u(34, 30)), color: '#A1A1A8', fontWeight: 500 });
+    meta.innerHTML = '开源免费 <span style="color:#4C4C55;margin:0 0.5em">·</span> Windows <span style="color:#4C4C55;margin:0 0.5em">·</span> MIT License';
+    const gh = el('div', 'abs center-x', node, { fontSize: px(u(30, 28)), color: '#6E6E78', fontFamily: 'var(--mono)' });
+    gh.textContent = 'github.com/guchang233/VOICE2TYPE';
+    return { size, bloom, logo, word, sl, slogan, meta, gh };
+}, function (t, c) {
+    const cy = u(H * 0.36, H * 0.3);
+    const pin = E.outBack(P(t, 62.2, 63.0));
+    setStyle(c.logo.tile, { left: px(W / 2 - c.size / 2), top: px(cy - c.size / 2), opacity: E.outCubic(P(t, 62.2, 62.6)), transform: `scale(${lerp(0.5, 1, pin)})` });
+    setLogoBars(c.logo.bars, t, (1 - E.inOutCubic(P(t, 63.6, 64.4))) * E.outCubic(P(t, 62.2, 62.7)));
+    const bsz = c.size * 1.9;
+    setStyle(c.bloom, { left: px(W / 2 - bsz / 2), top: px(cy - bsz / 2), width: px(bsz), height: px(bsz), opacity: 0.4 * E.outCubic(P(t, 62.2, 62.9)) });
+    const wp = E.outExpo(P(t, 62.75, 63.6));
+    setStyle(c.word, { top: px(cy + c.size * 0.62 + (1 - wp) * 40), opacity: wp, filter: wp < 1 ? `blur(${(1 - wp) * 16}px)` : 'none' });
+    applyGradients(c.slogan);
+    c.sl.style.top = px(cy + c.size * 0.62 + u(200, 170));
+    revealChars(c.slogan._chars, t, 63.5, 0.07, 0.6);
+    const mp = E.outCubic(P(t, 64.5, 65.1));
+    setStyle(c.meta, { top: px(cy + c.size * 0.62 + u(340, 290) + (1 - mp) * 16), opacity: mp });
+    const gp = E.outCubic(P(t, 64.8, 65.4));
+    setStyle(c.gh, { top: px(cy + c.size * 0.62 + u(410, 350) + (1 - gp) * 16), opacity: gp });
+});
+
+// ====================== 音效时间点 ======================
+// 转场呼啸 / 冲击 / 点击 / 打字 / 弹出 / 成功
+[[5.65, 'whoosh', 0.8], [10.35, 'whoosh', 0.9], [22.55, 'whoosh', 0.9], [34.4, 'whoosh', 0.9], [45.2, 'whoosh', 0.9], [56.6, 'whoosh', 0.9], [61.75, 'whoosh', 0.9]]
+    .forEach(([t, k, g]) => ev(t, k, g));
+ev(4.9, 'riser', 0.9); ev(60.4, 'riser', 0.8);
+ev(6.2, 'impact', 1); ev(62.2, 'impact', 1);
+(function typingTicks() {
+    let tt = 3.05;
+    S1_TEXT.forEach(segs => { segs.forEach(sg => { for (const _ of sg.text) { ev(tt, 'type', 0.8); tt += 0.155; } }); tt += PORTRAIT ? 0.3 : 0; });
+    const n = [...TTS_TEXT].length;
+    for (let i = 0; i < n; i += 1) ev(36.1 + (i / n) * 1.9, 'type', 0.45);
+    for (let i = 0; i < DICT_TEXT.length; i += 2) ev(17.6 + (i / DICT_TEXT.length) * 1.7, 'type', 0.35);
+})();
+ev(12.6, 'keydown', 1); ev(16.3, 'keyup', 0.9); ev(16.3, 'blip', 0.5); ev(17.05, 'success', 0.55);
+ev(19.97, 'click', 0.8); ev(20.15, 'send', 0.8);
+[0, 1, 2, 3].forEach(i => ev(20.55 + i * 0.13, 'pop', 0.45));
+[0, 1, 2, 3].forEach(i => ev(25.4 + i * 0.15, 'pop', 0.45));
+ev(38.55, 'click', 0.8); [0, 1, 2, 3, 4, 5].forEach(i => ev(38.72 + i * 0.07, 'pop', 0.35)); ev(40.75, 'blip', 0.6);
+ev(41.5, 'click', 0.8); ev(42.45, 'success', 0.6);
+[0, 1, 2, 3, 4, 5].forEach(i => ev(47.25 + i * 1.2 + 0.95, 'tick', 0.6));
+ev(54.7, 'success', 0.8);
+[0, 1, 2].forEach(i => ev(57.35 + i * 0.1, 'pop', 0.4));
+window.__events = EVENTS;
+window.__duration = DURATION;
+
+// ====================== 渲染入口 ======================
+function render(t) {
+    // 冷开场与结尾的黑场过渡
+    document.getElementById('fade').style.opacity = Math.max(1 - P(t, 0, 0.4), P(t, 67.2, 68.0));
+    renderGlows(t, [t > 12.6 && t < 16.3 ? 0.0 : null, null, (t > 12.6 && t < 16.3) ? 0.14 * E.outCubic(P(t, 12.6, 13)) * (1 - P(t, 16.1, 16.3)) : null]);
+    let ptr = null;
+    scenes.forEach(s => {
+        const on = t >= s.a && t <= s.b;
+        s.node.style.visibility = on ? 'visible' : 'hidden';
+        if (on) s.render(t, s.ctx);
+    });
+    if (t >= S5.a && t <= S5.b) ptr = S5.ctx.pointer;
+    renderPointer(ptr);
+}
+window.__render = render;
+window.__ready = (async () => {
+    await document.fonts.ready;
+    await Promise.all([S3.ctx.app.ready, S5.ctx.app.ready]);
+    // 预热：让所有场景完成一次布局（渐变字需测量宽度）
+    for (const s of scenes) { s.node.style.visibility = 'visible'; s.render(s.a + 0.01, s.ctx); s.node.style.visibility = 'hidden'; }
+    return true;
+})();
+const qt = params.get('t');
+if (qt != null) window.__ready.then(() => render(+qt));
+})();
+</script>
+</body>
+</html>

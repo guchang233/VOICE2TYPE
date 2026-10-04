@@ -1,9 +1,9 @@
 //! 逐段 TTS 合成与配音时间轴拼装。
 //!
 //! 每个字幕分段调用 Fish Audio 合成 WAV，解码为统一规格（24kHz 单声道 s16）；
-//! 去除首尾静音后，用 ffmpeg `atempo` 变时基（不变调）把每段**精确**拉伸/压缩到
-//! 原分段时长，保证每段都从原起始时间开口且时长完全贴合，一次直出；
-//! atempo 失败时才回退为尾部截断，避免级联后移。
+//! 去除首尾静音后，只有放不下（超出可用空间）的段才用 ffmpeg `atempo` 变时基
+//! （不变调）压缩到可用时长，放得下的保持自然语速——不再把短句拖慢去填满时长。
+//! atempo 失败时回退为尾部截断，避免级联后移。
 
 use std::io::BufWriter;
 use std::path::Path;
@@ -136,9 +136,9 @@ pub fn write_track_wav(path: &Path, audio: &SegmentAudio) -> Result<()> {
     Ok(())
 }
 
-/// 把单段音频**精确**贴合到槽位时长（音画同步核心）：
-/// ffmpeg `atempo` 变时基（不变调）拉伸/压缩到目标时长；
-/// 失败时回退为尾部截断，保证后续段不被级联后移。
+/// 把单段音频放进可用时长 `slot_ms`（音画同步核心）：
+/// 放得下就原样返回（自然语速，绝不拖慢）；放不下才用 ffmpeg `atempo`（不变调）
+/// 压缩到可用时长；压缩失败时回退为尾部截断，保证后续段不被级联后移。
 pub fn fit_to_slot(
     ff: &Path,
     temp_dir: &Path,
@@ -151,8 +151,8 @@ pub fn fit_to_slot(
         return (audio, stats);
     }
     let ratio = audio.duration_ms as f64 / slot_ms as f64;
-    if (1.0 - FIT_BAND..=1.0 + FIT_BAND).contains(&ratio) {
-        return (audio, stats); // 已在贴合带内，无需处理
+    if ratio <= 1.0 + FIT_BAND {
+        return (audio, stats); // 放得下（或只超出一点点），保持自然语速
     }
 
     let in_path = temp_dir.join(format!("seg_{:04}_in.wav", index));
@@ -581,6 +581,20 @@ mod tests {
             fit_to_slot(std::path::Path::new("__no_such_ffmpeg__"), &td, 0, audio, 1000);
         assert!(!stats.stretched && !stats.truncated);
         assert_eq!(out.duration_ms, 1010);
+    }
+
+    #[test]
+    fn fit_never_slows_down_short_speech() {
+        // 1 秒的话放进 3 秒空间：原样保留，不拉长（无需 ffmpeg）
+        let td = std::env::temp_dir();
+        let audio = SegmentAudio {
+            samples: vec![100i16; 24_000],
+            duration_ms: 1000,
+        };
+        let (out, stats) =
+            fit_to_slot(std::path::Path::new("__no_such_ffmpeg__"), &td, 0, audio, 3000);
+        assert!(!stats.stretched && !stats.truncated);
+        assert_eq!(out.duration_ms, 1000);
     }
 
     #[test]

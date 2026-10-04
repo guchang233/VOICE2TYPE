@@ -1,19 +1,20 @@
-//! 实时字幕子系统（v3：中央引擎 + 信号拉取）
+//! 实时字幕子系统（v4）
 //!
 //! 架构总览：
-//! - [`state`]：权威快照（RwLock）+ 版本号 + 变更通知器 —— 唯一真相源
-//! - [`session`]：会话编排（音源 → 豆包 ASR → 快照更新 → bump 触发信号）
-//! - [`translate`]：TranslationHub，逐窗口翻译槽，译文直接写入快照
 //! - [`audio`]：单路音源（采集线程 + 豆包 WS + 音频泵）
+//! - [`captions`]：唯一的断句处 —— definite/indefinite 流 → 定稿字幕行（带真实起止时间）
+//! - [`state`]：状态板 —— 字幕行（全局 ID）、当前行、按「语言 → ID」存放的译文
+//! - [`translate`]：按目标语言去重的同传调度（定稿按 ID 翻译 + 同声预览节流）
+//! - [`transcript`]：会话转录（译文按 ID 回填）与 TXT/SRT/MD 导出
+//! - [`session`]：会话编排
+//! - [`payload`]：拉取接口负载（快照里原文与译文按行成对）
 //! - [`windows`]：字幕窗口生命周期与几何持久化
-//! - [`payload`]：拉取接口负载（快照/主题/信号）
-//! - [`transcript`]：会话转录与 TXT/SRT/MD 序列化
-//! - [`migration`]：旧配置 JSON → v3 模型迁移
+//! - [`migration`]：旧配置迁移
 //!
-//! 数据流：ASR 帧 → 快照（bump 版本）→ 轻量信号 → 字幕窗口拉取快照 → 局部渲染。
-//! 不存在逐帧广播与合并发射器。
+//! 数据流：ASR 帧 → 切分 → 状态板（bump 版本）→ 轻量信号 → 字幕窗口拉取快照 → 渲染。
 
 pub mod audio;
+pub mod captions;
 pub mod migration;
 pub mod payload;
 mod session;
@@ -30,10 +31,10 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, Mutex};
 
 use crate::config::{ConfigManager, SubtitleWindow, PRIMARY_WINDOW_ID};
-use crate::subtitle::payload::{SignalPayload, SnapshotPayload, ThemePayload};
+use crate::subtitle::payload::{SnapshotPayload, ThemePayload};
+use crate::subtitle::session::SessionCtx;
 use crate::subtitle::state::SharedState;
 use crate::subtitle::transcript::Transcript;
-use crate::subtitle::translate::TranslationHub;
 
 /// 引擎弱引用（供窗口关闭回调使用，避免循环强引用）
 static SUBTITLE_ENGINE: OnceCell<Weak<SubtitleEngine>> = OnceCell::new();
@@ -58,7 +59,7 @@ impl SubtitleEngine {
         Self {
             app: Mutex::new(None),
             config,
-            state: Arc::new(SharedState::new(false)),
+            state: Arc::new(SharedState::new()),
             running: Arc::new(AtomicBool::new(false)),
             stop_tx: Arc::new(Mutex::new(None)),
             session_gen: Arc::new(AtomicU64::new(0)),
@@ -116,9 +117,20 @@ impl SubtitleEngine {
         }
     }
 
-    /// 拉取快照（字幕窗口渲染用）
+    /// 拉取快照（字幕窗口渲染用）：按窗口的目标语言取译文
     pub fn snapshot(&self, window_id: &str) -> SnapshotPayload {
-        SnapshotPayload::build(window_id, &self.state)
+        let cfg = self.config.get_config();
+        let tr = cfg
+            .subtitle
+            .window(window_id)
+            .filter(|w| translate::resolve_engine(&w.translation.engine).is_some())
+            .map(|w| (w.translation.target_lang.clone(), w.translation.interim));
+        let mut snap = SnapshotPayload::build(window_id, tr.as_ref().map(|(l, _)| l.as_str()), &self.state);
+        // 同语言的另一个窗口开了同声预览时，状态板里也会有当前句译文；本窗口没开就不显示
+        if matches!(tr, Some((_, false))) {
+            snap.a.live_translation.clear();
+        }
+        snap
     }
 
     /// 拉取窗口主题（字幕窗口配置用）
@@ -171,20 +183,8 @@ impl SubtitleEngine {
             emit_window_state(app, window_id, true);
             // 重新显示后补发信号：窗口拉取最新主题与快照
             let version = self.state.version();
-            let _ = window.emit(
-                "subtitle-signal",
-                SignalPayload {
-                    kind: "theme".to_string(),
-                    version,
-                },
-            );
-            let _ = window.emit(
-                "subtitle-signal",
-                SignalPayload {
-                    kind: "session".to_string(),
-                    version,
-                },
-            );
+            windows::signal(&window, window.label(), "theme", version);
+            windows::signal(&window, window.label(), "session", version);
         }
         Ok(())
     }
@@ -222,13 +222,7 @@ impl SubtitleEngine {
                 continue;
             };
             windows::apply_window_props(&window, win);
-            let _ = window.emit(
-                "subtitle-signal",
-                SignalPayload {
-                    kind: "theme".to_string(),
-                    version: self.state.version(),
-                },
-            );
+            windows::signal(&window, window.label(), "theme", self.state.version());
         }
     }
 
@@ -288,13 +282,7 @@ impl SubtitleEngine {
                 windows::apply_window_props(&window, win);
                 let _ = window.show();
                 emit_window_state(&app, &win.id, true);
-                let _ = window.emit(
-                    "subtitle-signal",
-                    SignalPayload {
-                        kind: "session".to_string(),
-                        version: self.state.version(),
-                    },
-                );
+                windows::signal(&window, window.label(), "session", self.state.version());
             }
         }
 
@@ -307,13 +295,6 @@ impl SubtitleEngine {
 
         // 3. 会话生命周期事件
         let _ = app.emit("subtitle-session-started", serde_json::json!({ "running": true }));
-
-        // 4. 构建翻译枢纽（只对配置了引擎的窗口建槽）
-        let hub = Arc::new(TranslationHub::build(
-            config.clone(),
-            self.state.clone(),
-            &enabled,
-        ));
 
         let (stop_tx, mut stop_rx) = mpsc::channel::<()>(1);
         {
@@ -329,25 +310,25 @@ impl SubtitleEngine {
         let app_for_signal = app.clone();
         let config_for_signal = config.clone();
 
+        let ctx = SessionCtx {
+            app: app_handle.clone(),
+            config: config_task.clone(),
+            state: state_task.clone(),
+            transcript,
+            running: running.clone(),
+            windows: enabled.clone(),
+        };
         tokio::spawn(async move {
-            if let Err(e) = session::run_session(
-                app_handle.clone(),
-                config_task.clone(),
-                state_task.clone(),
-                hub,
-                running.clone(),
-                &mut stop_rx,
-                transcript,
-            )
-            .await
-            {
+            if let Err(e) = session::run_session(ctx, &mut stop_rx).await {
                 log::error!("[字幕] 会话错误: {}", e);
                 {
-                    let mut snap = state_task.write();
-                    snap.status = format!("错误: {}", e);
-                    snap.running = false;
+                    let mut board = state_task.write();
+                    board.status = format!("错误: {}", e);
+                    board.running = false;
                 }
                 state_task.bump();
+                // 留出时间让窗口显示错误原因，再进入收尾
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
             }
 
             running.store(false, Ordering::SeqCst);
@@ -403,6 +384,8 @@ fn emit_window_state(app: &AppHandle, window_id: &str, visible: bool) {
     );
 }
 
+const MAIN_WINDOW_LABEL: &str = "main";
+
 /// 向所有可见字幕窗口发射轻量信号（kind: text/theme/session）
 fn emit_signal(app: &AppHandle, config: &Arc<ConfigManager>, kind: &str, version: u64) {
     for win in config.get_subtitle_windows() {
@@ -417,12 +400,8 @@ fn emit_signal(app: &AppHandle, config: &Arc<ConfigManager>, kind: &str, version
         if !window.is_visible().unwrap_or(false) {
             continue;
         }
-        let _ = window.emit(
-            "subtitle-signal",
-            SignalPayload {
-                kind: kind.to_string(),
-                version,
-            },
-        );
+        windows::signal(&window, window.label(), kind, version);
     }
+    // 主界面的实时预览也跟随变化拉取（页面只在字幕页可见时才真正拉取）
+    windows::signal(app, MAIN_WINDOW_LABEL, kind, version);
 }
