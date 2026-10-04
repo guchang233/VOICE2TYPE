@@ -4,6 +4,24 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.0] - 2026-10-04
+
+### 其他
+- Rewrite live subtitles and the video dubbing workflow
+
+### 性能
+- 渲染提速约 6 倍，补充分镜与发布文案
+- 全面性能与健壮性优化（音频/字幕/配音/指示器/前端）
+
+### 新增
+- 发布会风格宣传片源码（竖屏 9:16 / 横屏 16:9）
+
+### 重构
+- 全新设计系统重构前端，并修复一批交互问题
+- 修复互斥锁中毒问题并优化流式音频处理
+
+### 变更
+- update update.json and CHANGELOG for v0.2.1
 ## [未发布]
 
 ### 重构：实时字幕
