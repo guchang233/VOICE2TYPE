@@ -1,6 +1,6 @@
 [package]
 name = "voice2type"
-version = "0.2.1"
+version = "0.3.1"
 edition = "2021"
 authors = ["guchang233"]
 description = "Voice2Type - 语音输入、实时字幕与视频配音"
@@ -59,6 +59,7 @@ windows = { version = "0.54", features = [
     "Win32_System_Memory",
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Controls",
+    "Win32_UI_HiDpi",
     "Win32_System_Threading",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_System_Registry",

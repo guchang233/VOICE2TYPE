@@ -32,6 +32,9 @@ pub fn save_config(
     new_config: AppConfig,
 ) -> Result<(), String> {
     config.set_config(new_config);
+    if let Some(indicator) = crate::INDICATOR.get() {
+        indicator.configure(&config.get_config());
+    }
     config.save().map_err(|e| e.to_string())
 }
 

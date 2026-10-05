@@ -469,6 +469,7 @@ impl AppState {
         let (samples_i16, output_rate) = processor::resample_and_convert(&samples, input_rate);
 
         if samples_i16.is_empty() {
+            self.is_processing.store(false, Ordering::SeqCst);
             self.emit_status(AppStatus::Idle).await;
             Self::set_indicator_state(&self.app_handle, crate::indicator::IndicatorState::Cancelled).await;
             return Err("No audio data captured".to_string());
@@ -478,139 +479,140 @@ impl AppState {
         let lang = self.config.output_language();
         let lang_opt: Option<String> = if lang == "auto" { None } else { Some(lang.clone()) };
 
-        let recognition_result: Result<String, String> = if service == "local" {
-            // 本地 Whisper：在 spawn_blocking 中同步调用 whisper-cli，匹配原始快速实现。
-            // 使用 std::process::Command（同步）避免 tokio runtime 争用；
-            // 使用 -otxt 文件输出；语言为 auto 时首次检测并缓存，后续跳过检测。
-            let pipeline_start = std::time::Instant::now();
+        // Keep early model/engine/encoding failures in the result so the common error
+        // path always clears Processing and updates the overlay.
+        let recognition_result: Result<String, String> = async {
+            if service == "local" {
+                // 本地 Whisper：在 spawn_blocking 中同步调用 whisper-cli，匹配原始快速实现。
+                // 使用 std::process::Command（同步）避免 tokio runtime 争用；
+                // 使用 -otxt 文件输出；语言为 auto 时首次检测并缓存，后续跳过检测。
+                let pipeline_start = std::time::Instant::now();
 
-            let (model_path, binary_path, effective_lang) = {
-                let mut engine = self
-                    .whisper_engine
-                    .lock()
-                    .map_err(|e| format!("Lock error: {}", e))?;
-                let model_name = self.config.local_whisper_model();
-                let model_dir = self.config.whisper_models_dir();
-                engine.refresh_paths(model_dir.clone(), &model_name);
+                let (model_path, binary_path, effective_lang) = {
+                    let mut engine = self
+                        .whisper_engine
+                        .lock()
+                        .map_err(|e| format!("Lock error: {}", e))?;
+                    let model_name = self.config.local_whisper_model();
+                    let model_dir = self.config.whisper_models_dir();
+                    engine.refresh_paths(model_dir.clone(), &model_name);
 
-                if !engine.is_model_available() {
-                    if let Some(fallback) = find_available_model(&model_dir) {
-                        log::warn!(
-                            "配置的本地模型 {} 不存在，回退到 {}",
-                            model_name,
-                            fallback
+                    if !engine.is_model_available() {
+                        if let Some(fallback) = find_available_model(&model_dir) {
+                            log::warn!(
+                                "配置的本地模型 {} 不存在，回退到 {}",
+                                model_name,
+                                fallback
+                            );
+                            engine.refresh_paths(model_dir.clone(), &fallback);
+                            self.config.set_local_whisper_model(fallback);
+                        }
+                    }
+
+                    if !engine.is_model_available() {
+                        return Err(format!(
+                            "Local Whisper model not found: {}。请在设置中确认模型目录与已下载模型",
+                            engine.model_path().display()
+                        ));
+                    }
+                    if !engine.is_binary_available() {
+                        return Err(
+                            "whisper.cpp 引擎未下载，请在设置中下载引擎二进制".to_string(),
                         );
-                        engine.refresh_paths(model_dir.clone(), &fallback);
-                        self.config.set_local_whisper_model(fallback);
+                    }
+
+                    // 语言缓存：如果配置是 auto 且已缓存检测到的语言，用缓存值
+                    let effective_lang = {
+                        let config_lang = lang_opt.clone().unwrap_or_else(|| "auto".to_string());
+                        if config_lang == "auto" || config_lang.is_empty() {
+                            let cached = self.cached_language.lock().map_err(|e| format!("Lock error: {}", e))?;
+                            cached.clone().unwrap_or_else(|| "auto".to_string())
+                        } else {
+                            config_lang
+                        }
+                    };
+
+                    Ok::<(std::path::PathBuf, std::path::PathBuf, String), String>((
+                        engine.model_path().to_path_buf(),
+                        engine.binary_path_clone(),
+                        effective_lang,
+                    ))
+                }?;
+
+                let samples_clone = samples_i16.clone();
+                let lang_for_blocking = effective_lang.clone();
+                // 性能参数从配置读取（0=自动线程；贪婪/温度回退默认关）
+                let threads = self.config.local_whisper_threads();
+                let greedy = self.config.local_whisper_greedy();
+                let no_fallback = self.config.local_whisper_no_fallback();
+                let transcribe_start = std::time::Instant::now();
+
+                let result = tokio::task::spawn_blocking(move || {
+                    LocalWhisperEngine::transcribe_sync(
+                        &binary_path,
+                        &model_path,
+                        &samples_clone,
+                        Some(&lang_for_blocking),
+                        threads,
+                        greedy,
+                        no_fallback,
+                    )
+                })
+                .await
+                .map_err(|e| format!("Task join error: {}", e))?;
+
+                log::info!(
+                    "[whisper] spawn_blocking 转写: {}ms (含调度)",
+                    transcribe_start.elapsed().as_millis()
+                );
+
+                let (text, detected_lang) = match result {
+                    Ok(v) => v,
+                    Err(e) => {
+                        return Err(format!("Whisper error: {}", e));
+                    }
+                };
+                self.mark_whisper_used();
+
+                // 缓存检测到的语言（仅当本次用了 auto 且检测成功）
+                // 同时持久化到 config，跨重启复用，避免首调检测开销
+                if effective_lang == "auto" {
+                    if let Some(ref lang) = detected_lang {
+                        if let Ok(mut cache) = self.cached_language.lock() {
+                            *cache = Some(lang.clone());
+                            log::info!("[whisper] 缓存检测语言: {}", lang);
+                        }
+                        self.config.set_local_whisper_detected_language(lang.clone());
+                        if let Err(e) = self.config.save() {
+                            log::warn!("[whisper] 持久化检测语言失败: {}", e);
+                        }
                     }
                 }
 
-                if !engine.is_model_available() {
-                    return Err(format!(
-                        "Local Whisper model not found: {}。请在设置中确认模型目录与已下载模型",
-                        engine.model_path().display()
-                    ));
-                }
-                if !engine.is_binary_available() {
-                    return Err(
-                        "whisper.cpp 引擎未下载，请在设置中下载引擎二进制".to_string(),
-                    );
-                }
+                log::info!(
+                    "[whisper] 本地转写管线总耗时: {}ms",
+                    pipeline_start.elapsed().as_millis()
+                );
 
-                // 语言缓存：如果配置是 auto 且已缓存检测到的语言，用缓存值
-                let effective_lang = {
-                    let config_lang = lang_opt.clone().unwrap_or_else(|| "auto".to_string());
-                    if config_lang == "auto" || config_lang.is_empty() {
-                        let cached = self.cached_language.lock().map_err(|e| format!("Lock error: {}", e))?;
-                        cached.clone().unwrap_or_else(|| "auto".to_string())
-                    } else {
-                        config_lang
+                Ok(text)
+            } else {
+                let wav_result = processor::encode_wav_memory(&samples_i16, output_rate)
+                    .map_err(|e| format!("Failed to encode WAV: {}", e));
+
+                let wav_data = match wav_result {
+                    Ok(v) => v,
+                    Err(e) => {
+                        return Err(e);
                     }
                 };
 
-                Ok::<(std::path::PathBuf, std::path::PathBuf, String), String>((
-                    engine.model_path().to_path_buf(),
-                    engine.binary_path_clone(),
-                    effective_lang,
-                ))
-            }?;
-
-            let samples_clone = samples_i16.clone();
-            let lang_for_blocking = effective_lang.clone();
-            // 性能参数从配置读取（0=自动线程；贪婪/温度回退默认关）
-            let threads = self.config.local_whisper_threads();
-            let greedy = self.config.local_whisper_greedy();
-            let no_fallback = self.config.local_whisper_no_fallback();
-            let transcribe_start = std::time::Instant::now();
-
-            let result = tokio::task::spawn_blocking(move || {
-                LocalWhisperEngine::transcribe_sync(
-                    &binary_path,
-                    &model_path,
-                    &samples_clone,
-                    Some(&lang_for_blocking),
-                    threads,
-                    greedy,
-                    no_fallback,
-                )
-            })
-            .await
-            .map_err(|e| format!("Task join error: {}", e))?;
-
-            log::info!(
-                "[whisper] spawn_blocking 转写: {}ms (含调度)",
-                transcribe_start.elapsed().as_millis()
-            );
-
-            let (text, detected_lang) = match result {
-                Ok(v) => v,
-                Err(e) => {
-                    self.emit_status(AppStatus::Error(e.to_string())).await;
-                    Self::set_indicator_state(&self.app_handle, crate::indicator::IndicatorState::Error).await;
-                    return Err(format!("Whisper error: {}", e));
-                }
-            };
-            self.mark_whisper_used();
-
-            // 缓存检测到的语言（仅当本次用了 auto 且检测成功）
-            // 同时持久化到 config，跨重启复用，避免首调检测开销
-            if effective_lang == "auto" {
-                if let Some(ref lang) = detected_lang {
-                    if let Ok(mut cache) = self.cached_language.lock() {
-                        *cache = Some(lang.clone());
-                        log::info!("[whisper] 缓存检测语言: {}", lang);
-                    }
-                    self.config.set_local_whisper_detected_language(lang.clone());
-                    if let Err(e) = self.config.save() {
-                        log::warn!("[whisper] 持久化检测语言失败: {}", e);
-                    }
-                }
+                self.api_client
+                    .process_audio(wav_data, &self.config)
+                    .await
+                    .map_err(|e| format!("API error: {}", e))
             }
-
-            log::info!(
-                "[whisper] 本地转写管线总耗时: {}ms",
-                pipeline_start.elapsed().as_millis()
-            );
-
-            Ok(text)
-        } else {
-            let wav_result = processor::encode_wav_memory(&samples_i16, output_rate)
-                .map_err(|e| format!("Failed to encode WAV: {}", e));
-
-            let wav_data = match wav_result {
-                Ok(v) => v,
-                Err(e) => {
-                    self.emit_status(AppStatus::Error(e.clone())).await;
-                    Self::set_indicator_state(&self.app_handle, crate::indicator::IndicatorState::Error).await;
-                    return Err(e);
-                }
-            };
-
-            self.api_client
-                .process_audio(wav_data, &self.config)
-                .await
-                .map_err(|e| format!("API error: {}", e))
-        };
+        }
+        .await;
 
         let recognition_result = match recognition_result {
             Ok(v) => v,
@@ -698,6 +700,7 @@ impl AppState {
         }
         self.emit_status(AppStatus::Idle).await;
         log::info!("Recording cancelled");
+        Self::set_indicator_state(&self.app_handle, crate::indicator::IndicatorState::Cancelled).await;
         Ok(())
     }
 

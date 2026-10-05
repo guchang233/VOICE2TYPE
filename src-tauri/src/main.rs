@@ -194,11 +194,7 @@ fn main() {
                 log::error!("启动时保存配置失败: {}", e);
             }
 
-            let indicator = StatusIndicator::new(
-                config_manager.indicator_fade_duration(),
-                config_manager.indicator_error_duration(),
-                config_manager.indicator_success_duration(),
-            );
+            let indicator = StatusIndicator::new(&config_manager.get_config());
             let _ = INDICATOR.set(indicator);
 
             if let Some(window) = app.get_webview_window("main") {

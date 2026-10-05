@@ -10,7 +10,6 @@ use tokio::task::JoinHandle;
 
 use crate::audio::processor::resample_and_convert;
 use crate::config::ConfigManager;
-use crate::indicator::IndicatorState;
 use crate::streaming::client::StreamingAsrClient;
 use crate::streaming::output::StreamingOutput;
 use crate::utils::logger::{write_log, write_log_line, LogLevel};
@@ -126,13 +125,6 @@ impl StreamingSession {
 
         IS_STREAMING.store(true, Ordering::SeqCst);
         write_log_line("--> [流式] 开始实时识别… (ESC 取消)");
-
-        #[cfg(target_os = "windows")]
-        if config.streaming_enable_indicator() {
-            if let Some(ind) = crate::INDICATOR.get() {
-                ind.set_state(IndicatorState::Recording);
-            }
-        }
 
         let client_pump = self.client.as_ref().unwrap().clone();
         let pcm_buf = self.pcm_buffer.clone();
@@ -263,20 +255,8 @@ impl StreamingSession {
 
         if cancelled {
             write_log_line("--> [流式] 已取消");
-            #[cfg(target_os = "windows")]
-            if config.streaming_enable_indicator() {
-                if let Some(ind) = crate::INDICATOR.get() {
-                    ind.set_state(IndicatorState::Cancelled);
-                }
-            }
         } else {
             write_log_line("--> [流式] 识别结束");
-            #[cfg(target_os = "windows")]
-            if config.streaming_enable_indicator() {
-                if let Some(ind) = crate::INDICATOR.get() {
-                    ind.set_state(IndicatorState::Success);
-                }
-            }
         }
     }
 }
